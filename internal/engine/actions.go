@@ -180,6 +180,9 @@ func (e *Executor) applyAbort(p *core.Pipeline, action core.PipelineAction, stag
 }
 
 func (e *Executor) applyPause(p *core.Pipeline, action core.PipelineAction, stage core.StageID) error {
+	if err := e.killActiveSession(p.ID); err != nil {
+		return err
+	}
 	p.Status = core.StatusPaused
 	p.ErrorMessage = action.Message
 	p.UpdatedAt = time.Now()

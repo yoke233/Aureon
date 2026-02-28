@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/user/ai-workflow/internal/core"
@@ -21,6 +22,9 @@ type Executor struct {
 	agents  map[string]core.AgentPlugin
 	runtime core.RuntimePlugin
 	logger  *slog.Logger
+
+	sessionMu     sync.Mutex
+	activeSession map[string]string
 }
 
 func NewExecutor(
@@ -36,6 +40,8 @@ func NewExecutor(
 		agents:  agents,
 		runtime: runtime,
 		logger:  logger,
+
+		activeSession: make(map[string]string),
 	}
 }
 
@@ -158,6 +164,15 @@ func (e *Executor) run(ctx context.Context, pipelineID string, allowAlreadyRunni
 				})
 				stageSucceeded = true
 				break
+			}
+
+			paused, stateErr := e.isPipelinePaused(p.ID)
+			if stateErr != nil {
+				return stateErr
+			}
+			if paused {
+				// Pause keeps current stage in-progress for a later explicit resume.
+				return nil
 			}
 
 			cp.Status = core.CheckpointFailed
@@ -307,6 +322,41 @@ func latestCheckpointForStage(checkpoints []core.Checkpoint, stage core.StageID)
 	return nil
 }
 
+func (e *Executor) registerSession(pipelineID, sessionID string) {
+	e.sessionMu.Lock()
+	defer e.sessionMu.Unlock()
+	e.activeSession[pipelineID] = sessionID
+}
+
+func (e *Executor) unregisterSession(pipelineID, sessionID string) {
+	e.sessionMu.Lock()
+	defer e.sessionMu.Unlock()
+
+	existing := e.activeSession[pipelineID]
+	if existing == sessionID {
+		delete(e.activeSession, pipelineID)
+	}
+}
+
+func (e *Executor) killActiveSession(pipelineID string) error {
+	e.sessionMu.Lock()
+	sessionID := e.activeSession[pipelineID]
+	e.sessionMu.Unlock()
+
+	if sessionID == "" {
+		return nil
+	}
+	return e.runtime.Kill(sessionID)
+}
+
+func (e *Executor) isPipelinePaused(pipelineID string) (bool, error) {
+	p, err := e.store.GetPipeline(pipelineID)
+	if err != nil {
+		return false, err
+	}
+	return p.Status == core.StatusPaused, nil
+}
+
 func (e *Executor) failPipeline(p *core.Pipeline, message string, cause error) error {
 	p.Status = core.StatusFailed
 	p.ErrorMessage = message
@@ -387,6 +437,8 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
+	e.registerSession(p.ID, sess.ID)
+	defer e.unregisterSession(p.ID, sess.ID)
 
 	parser := agent.NewStreamParser(sess.Stdout)
 	for {

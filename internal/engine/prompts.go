@@ -1,12 +1,14 @@
 package engine
 
 import (
+	"embed"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"text/template"
 )
+
+//go:embed prompt_templates/*.tmpl
+var promptFS embed.FS
 
 type PromptVars struct {
 	ProjectName    string
@@ -23,8 +25,7 @@ type PromptVars struct {
 }
 
 func RenderPrompt(stage string, vars PromptVars) (string, error) {
-	path := filepath.Join("configs", "prompts", stage+".tmpl")
-	data, err := os.ReadFile(path)
+	data, err := promptFS.ReadFile("prompt_templates/" + stage + ".tmpl")
 	if err != nil {
 		return fmt.Sprintf("Execute stage: %s\nRequirements: %s", stage, vars.Requirements), nil
 	}

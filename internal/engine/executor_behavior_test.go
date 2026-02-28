@@ -1,0 +1,434 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/user/ai-workflow/internal/core"
+	"github.com/user/ai-workflow/internal/eventbus"
+	runtimeprocess "github.com/user/ai-workflow/internal/plugins/runtime-process"
+	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+)
+
+type fakeAgent struct {
+	name     string
+	buildFn  func(core.ExecOpts) ([]string, error)
+	parserFn func(io.Reader) core.StreamParser
+
+	mu      sync.Mutex
+	options []core.ExecOpts
+}
+
+func (a *fakeAgent) Name() string { return a.name }
+func (a *fakeAgent) Init(context.Context) error {
+	return nil
+}
+func (a *fakeAgent) Close() error { return nil }
+func (a *fakeAgent) BuildCommand(opts core.ExecOpts) ([]string, error) {
+	a.mu.Lock()
+	a.options = append(a.options, opts)
+	a.mu.Unlock()
+	if a.buildFn != nil {
+		return a.buildFn(opts)
+	}
+	return []string{"noop"}, nil
+}
+func (a *fakeAgent) NewStreamParser(r io.Reader) core.StreamParser {
+	if a.parserFn != nil {
+		return a.parserFn(r)
+	}
+	return &eofParser{}
+}
+
+func (a *fakeAgent) lastPrompt() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.options) == 0 {
+		return ""
+	}
+	return a.options[len(a.options)-1].Prompt
+}
+
+type fakeRuntime struct {
+	waitResults []error
+	calls       int
+	workDirs    []string
+}
+
+func (r *fakeRuntime) Name() string { return "fake-runtime" }
+func (r *fakeRuntime) Init(context.Context) error {
+	return nil
+}
+func (r *fakeRuntime) Close() error { return nil }
+func (r *fakeRuntime) Kill(string) error {
+	return nil
+}
+func (r *fakeRuntime) Create(_ context.Context, opts core.RuntimeOpts) (*core.Session, error) {
+	r.calls++
+	r.workDirs = append(r.workDirs, opts.WorkDir)
+	idx := r.calls - 1
+	waitErr := error(nil)
+	if idx < len(r.waitResults) {
+		waitErr = r.waitResults[idx]
+	}
+	return &core.Session{
+		ID:     "s",
+		Stdin:  nopWriteCloser{},
+		Stdout: strings.NewReader(""),
+		Stderr: strings.NewReader(""),
+		Wait: func() error {
+			return waitErr
+		},
+	}, nil
+}
+
+type nopWriteCloser struct{}
+
+func (nopWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (nopWriteCloser) Close() error                { return nil }
+
+type eofParser struct{}
+
+func (*eofParser) Next() (*core.StreamEvent, error) { return nil, io.EOF }
+
+type failOnceParser struct {
+	err  error
+	done bool
+}
+
+func (p *failOnceParser) Next() (*core.StreamEvent, error) {
+	if p.done {
+		return nil, io.EOF
+	}
+	p.done = true
+	return nil, p.err
+}
+
+func newTestStore(t *testing.T) *storesqlite.SQLiteStore {
+	t.Helper()
+	s, err := storesqlite.New(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func newExecutor(store core.Store, agents map[string]core.AgentPlugin, runtime core.RuntimePlugin) *Executor {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return NewExecutor(store, eventbus.New(), agents, runtime, logger)
+}
+
+func setupProjectAndPipeline(t *testing.T, store core.Store, repoPath string, stages []core.StageConfig) *core.Pipeline {
+	t.Helper()
+
+	project := &core.Project{
+		ID:       "proj-1",
+		Name:     "proj",
+		RepoPath: repoPath,
+	}
+	if err := store.CreateProject(project); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &core.Pipeline{
+		ID:              "20260228-pipe",
+		ProjectID:       project.ID,
+		Name:            "pipe",
+		Description:     "需求A",
+		Template:        "quick",
+		Status:          core.StatusCreated,
+		Stages:          stages,
+		Artifacts:       map[string]string{},
+		Config:          map[string]any{},
+		MaxTotalRetries: 20,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	if err := store.SavePipeline(p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func setupGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmds := [][]string{
+		{"git", "init", dir},
+		{"git", "-C", dir, "config", "user.email", "test@example.com"},
+		{"git", "-C", dir, "config", "user.name", "test-user"},
+		{"git", "-C", dir, "commit", "--allow-empty", "-m", "init"},
+	}
+	for _, cmd := range cmds {
+		out, err := exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("cmd %v failed: %s (%v)", cmd, string(out), err)
+		}
+	}
+	return dir
+}
+
+func TestExecutor_Run_WorktreeMergeCleanupAndWorkDir(t *testing.T) {
+	repo := setupGitRepo(t)
+	store := newTestStore(t)
+	defer store.Close()
+
+	agent := &fakeAgent{
+		name: "codex",
+		buildFn: func(core.ExecOpts) ([]string, error) {
+			return []string{"git", "commit", "--allow-empty", "-m", "feat-from-agent"}, nil
+		},
+		parserFn: func(io.Reader) core.StreamParser { return &eofParser{} },
+	}
+
+	p := setupProjectAndPipeline(t, store, repo, []core.StageConfig{
+		{Name: core.StageWorktreeSetup, OnFailure: core.OnFailureAbort},
+		{Name: core.StageImplement, Agent: "codex", PromptTemplate: "implement", OnFailure: core.OnFailureAbort},
+		{Name: core.StageMerge, OnFailure: core.OnFailureAbort},
+		{Name: core.StageCleanup, OnFailure: core.OnFailureAbort},
+	})
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{"codex": agent}, runtimeprocess.New())
+	if err := execEngine.Run(context.Background(), p.ID); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got, err := store.GetPipeline(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BranchName == "" || got.WorktreePath == "" {
+		t.Fatalf("worktree_setup must persist branch/worktree, got branch=%q worktree=%q", got.BranchName, got.WorktreePath)
+	}
+	if _, err := os.Stat(got.WorktreePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cleanup stage must remove worktree path, stat err=%v", err)
+	}
+
+	logOut, err := exec.Command("git", "-C", repo, "log", "--oneline", "-n", "20").CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logOut), "feat-from-agent") {
+		t.Fatalf("merge stage did not bring feature commit into base branch: %s", string(logOut))
+	}
+}
+
+func TestExecutor_Run_OnFailureRetryAndMaxRetries(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	workDir := t.TempDir()
+	runtime := &fakeRuntime{waitResults: []error{
+		errors.New("boom-1"),
+		errors.New("boom-2"),
+		nil,
+	}}
+	agent := &fakeAgent{name: "codex"}
+
+	p := setupProjectAndPipeline(t, store, workDir, []core.StageConfig{
+		{
+			Name:         core.StageImplement,
+			Agent:        "codex",
+			OnFailure:    core.OnFailureRetry,
+			MaxRetries:   2,
+			Timeout:      0,
+			RequireHuman: false,
+		},
+	})
+	p.WorktreePath = workDir
+	if err := store.SavePipeline(p); err != nil {
+		t.Fatal(err)
+	}
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{"codex": agent}, runtime)
+	if err := execEngine.Run(context.Background(), p.ID); err != nil {
+		t.Fatalf("expected retry to eventually succeed, got err: %v", err)
+	}
+
+	got, err := store.GetPipeline(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != core.StatusDone {
+		t.Fatalf("expected done, got %s", got.Status)
+	}
+	if runtime.calls != 3 {
+		t.Fatalf("expected 3 attempts, got %d", runtime.calls)
+	}
+}
+
+func TestExecutor_Run_OnFailureSkip(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	workDir := t.TempDir()
+	runtime := &fakeRuntime{waitResults: []error{
+		errors.New("first-stage-fail"),
+		nil,
+	}}
+	agent := &fakeAgent{name: "codex"}
+
+	p := setupProjectAndPipeline(t, store, workDir, []core.StageConfig{
+		{Name: core.StageImplement, Agent: "codex", OnFailure: core.OnFailureSkip, MaxRetries: 0},
+		{Name: core.StageFixup, Agent: "codex", OnFailure: core.OnFailureAbort, MaxRetries: 0},
+	})
+	p.WorktreePath = workDir
+	if err := store.SavePipeline(p); err != nil {
+		t.Fatal(err)
+	}
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{"codex": agent}, runtime)
+	if err := execEngine.Run(context.Background(), p.ID); err != nil {
+		t.Fatalf("skip should continue to next stage, got err: %v", err)
+	}
+
+	got, err := store.GetPipeline(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != core.StatusDone {
+		t.Fatalf("expected done, got %s", got.Status)
+	}
+	if runtime.calls != 2 {
+		t.Fatalf("expected two stage executions, got %d", runtime.calls)
+	}
+}
+
+func TestExecutor_Run_OnFailureHuman(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	workDir := t.TempDir()
+	runtime := &fakeRuntime{waitResults: []error{errors.New("need-human")}}
+	agent := &fakeAgent{name: "codex"}
+
+	p := setupProjectAndPipeline(t, store, workDir, []core.StageConfig{
+		{Name: core.StageImplement, Agent: "codex", OnFailure: core.OnFailureHuman, MaxRetries: 0},
+	})
+	p.WorktreePath = workDir
+	if err := store.SavePipeline(p); err != nil {
+		t.Fatal(err)
+	}
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{"codex": agent}, runtime)
+	if err := execEngine.Run(context.Background(), p.ID); err != nil {
+		t.Fatalf("human gate should pause pipeline, got err: %v", err)
+	}
+
+	got, err := store.GetPipeline(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != core.StatusWaitingHuman {
+		t.Fatalf("expected waiting_human, got %s", got.Status)
+	}
+}
+
+func TestExecutor_Run_OnFailureAbort(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	workDir := t.TempDir()
+	runtime := &fakeRuntime{waitResults: []error{errors.New("fatal")}}
+	agent := &fakeAgent{name: "codex"}
+
+	p := setupProjectAndPipeline(t, store, workDir, []core.StageConfig{
+		{Name: core.StageImplement, Agent: "codex", OnFailure: core.OnFailureAbort, MaxRetries: 0},
+	})
+	p.WorktreePath = workDir
+	if err := store.SavePipeline(p); err != nil {
+		t.Fatal(err)
+	}
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{"codex": agent}, runtime)
+	if err := execEngine.Run(context.Background(), p.ID); err == nil {
+		t.Fatal("abort should return error")
+	}
+
+	got, err := store.GetPipeline(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != core.StatusFailed {
+		t.Fatalf("expected failed, got %s", got.Status)
+	}
+}
+
+func TestExecutor_Run_ParserErrorShouldFailStage(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	workDir := t.TempDir()
+	runtime := &fakeRuntime{waitResults: []error{nil}}
+	agent := &fakeAgent{
+		name: "codex",
+		parserFn: func(io.Reader) core.StreamParser {
+			return &failOnceParser{err: errors.New("bad-stream")}
+		},
+	}
+
+	p := setupProjectAndPipeline(t, store, workDir, []core.StageConfig{
+		{Name: core.StageImplement, Agent: "codex", OnFailure: core.OnFailureAbort, MaxRetries: 0},
+	})
+	p.WorktreePath = workDir
+	if err := store.SavePipeline(p); err != nil {
+		t.Fatal(err)
+	}
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{"codex": agent}, runtime)
+	err := execEngine.Run(context.Background(), p.ID)
+	if err == nil {
+		t.Fatal("expected parser error to fail stage")
+	}
+	if !strings.Contains(err.Error(), "bad-stream") {
+		t.Fatalf("expected parser error in run error, got: %v", err)
+	}
+}
+
+func TestExecutor_Run_AgentPromptFromTemplate(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	workDir := t.TempDir()
+	runtime := &fakeRuntime{waitResults: []error{nil}}
+	agent := &fakeAgent{name: "codex"}
+
+	p := setupProjectAndPipeline(t, store, workDir, []core.StageConfig{
+		{
+			Name:           core.StageImplement,
+			Agent:          "codex",
+			PromptTemplate: "implement",
+			OnFailure:      core.OnFailureAbort,
+			MaxRetries:     0,
+		},
+	})
+	p.WorktreePath = workDir
+	p.Description = "这里是需求文本XYZ"
+	if err := store.SavePipeline(p); err != nil {
+		t.Fatal(err)
+	}
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{"codex": agent}, runtime)
+	if err := execEngine.Run(context.Background(), p.ID); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	prompt := agent.lastPrompt()
+	if !strings.Contains(prompt, "这里是需求文本XYZ") {
+		t.Fatalf("prompt should contain requirements from pipeline description, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "请根据以下需求实现代码") {
+		t.Fatalf("prompt should come from implement template, got: %s", prompt)
+	}
+	if len(runtime.workDirs) == 0 || runtime.workDirs[0] != workDir {
+		t.Fatalf("runtime should execute in worktree dir %q, got %v", workDir, runtime.workDirs)
+	}
+}

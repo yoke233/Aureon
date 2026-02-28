@@ -21,7 +21,12 @@ func New(path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if path == ":memory:" {
+		// SQLite in-memory DB is connection-scoped; keep a single connection for tests.
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+	}
+	if err := applyMigrations(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
@@ -114,8 +119,9 @@ func (s *SQLiteStore) SavePipeline(p *core.Pipeline) error {
 INSERT INTO pipelines (
 	id, project_id, name, description, template, status, current_stage,
 	stages_json, artifacts_json, config_json, branch_name, worktree_path,
-	error_message, max_total_retries, total_retries, started_at, finished_at
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	error_message, max_total_retries, total_retries, run_count, last_error_type,
+	queued_at, last_heartbeat_at, started_at, finished_at
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id,
 	name=excluded.name,
@@ -131,12 +137,17 @@ ON CONFLICT(id) DO UPDATE SET
 	error_message=excluded.error_message,
 	max_total_retries=excluded.max_total_retries,
 	total_retries=excluded.total_retries,
+	run_count=excluded.run_count,
+	last_error_type=excluded.last_error_type,
+	queued_at=excluded.queued_at,
+	last_heartbeat_at=excluded.last_heartbeat_at,
 	started_at=excluded.started_at,
 	finished_at=excluded.finished_at,
 	updated_at=CURRENT_TIMESTAMP`,
 		p.ID, p.ProjectID, p.Name, p.Description, p.Template, p.Status, p.CurrentStage,
 		string(stagesJSON), string(artifactsJSON), string(configJSON), p.BranchName, p.WorktreePath,
-		p.ErrorMessage, p.MaxTotalRetries, p.TotalRetries, nullableTime(p.StartedAt), nullableTime(p.FinishedAt),
+		p.ErrorMessage, p.MaxTotalRetries, p.TotalRetries, p.RunCount, p.LastErrorType,
+		nullableTime(p.QueuedAt), nullableTime(p.LastHeartbeatAt), nullableTime(p.StartedAt), nullableTime(p.FinishedAt),
 	)
 	return err
 }
@@ -147,6 +158,8 @@ func (s *SQLiteStore) GetPipeline(id string) (*core.Pipeline, error) {
 		stagesJSON    string
 		artifactsJSON string
 		configJSON    string
+		queuedAt      sql.NullTime
+		lastHeartbeat sql.NullTime
 		startedAt     sql.NullTime
 		finishedAt    sql.NullTime
 	)
@@ -154,13 +167,15 @@ func (s *SQLiteStore) GetPipeline(id string) (*core.Pipeline, error) {
 	err := s.db.QueryRow(`
 SELECT id, project_id, name, description, template, status, current_stage,
        stages_json, artifacts_json, config_json, branch_name, worktree_path, error_message,
-       max_total_retries, total_retries, started_at, finished_at, created_at, updated_at
+       max_total_retries, total_retries, run_count, last_error_type, queued_at, last_heartbeat_at,
+	   started_at, finished_at, created_at, updated_at
 FROM pipelines WHERE id=?`,
 		id,
 	).Scan(
 		&p.ID, &p.ProjectID, &p.Name, &p.Description, &p.Template, &p.Status, &p.CurrentStage,
 		&stagesJSON, &artifactsJSON, &configJSON, &p.BranchName, &p.WorktreePath, &p.ErrorMessage,
-		&p.MaxTotalRetries, &p.TotalRetries, &startedAt, &finishedAt, &p.CreatedAt, &p.UpdatedAt,
+		&p.MaxTotalRetries, &p.TotalRetries, &p.RunCount, &p.LastErrorType, &queuedAt, &lastHeartbeat,
+		&startedAt, &finishedAt, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("pipeline %s not found", id)
@@ -180,6 +195,12 @@ FROM pipelines WHERE id=?`,
 	}
 	if startedAt.Valid {
 		p.StartedAt = startedAt.Time
+	}
+	if queuedAt.Valid {
+		p.QueuedAt = queuedAt.Time
+	}
+	if lastHeartbeat.Valid {
+		p.LastHeartbeatAt = lastHeartbeat.Time
 	}
 	if finishedAt.Valid {
 		p.FinishedAt = finishedAt.Time
@@ -241,6 +262,85 @@ func (s *SQLiteStore) GetActivePipelines() ([]core.Pipeline, error) {
 		out = append(out, *p)
 	}
 	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ListRunnablePipelines(limit int) ([]core.Pipeline, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.Query(`
+SELECT id
+FROM pipelines
+WHERE status = ?
+ORDER BY COALESCE(queued_at, created_at) ASC, created_at ASC
+LIMIT ?`,
+		core.StatusCreated, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]core.Pipeline, 0, len(ids))
+	for _, id := range ids {
+		p, err := s.GetPipeline(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) CountRunningPipelinesByProject(projectID string) (int, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM pipelines WHERE project_id=? AND status=?`,
+		projectID, core.StatusRunning,
+	).Scan(&count)
+	return count, err
+}
+
+func (s *SQLiteStore) TryMarkPipelineRunning(id string, from ...core.PipelineStatus) (bool, error) {
+	if len(from) == 0 {
+		from = []core.PipelineStatus{core.StatusCreated}
+	}
+
+	placeholders := make([]string, len(from))
+	args := make([]any, 0, len(from)+2)
+	args = append(args, core.StatusRunning, id)
+	for i, status := range from {
+		placeholders[i] = "?"
+		args = append(args, status)
+	}
+
+	query := fmt.Sprintf(`
+UPDATE pipelines
+SET status=?, run_count=run_count+1, started_at=COALESCE(started_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP
+WHERE id=? AND status IN (%s)`, strings.Join(placeholders, ","))
+
+	result, err := s.db.Exec(query, args...)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
 }
 
 func (s *SQLiteStore) SaveCheckpoint(cp *core.Checkpoint) error {
@@ -313,6 +413,18 @@ func (s *SQLiteStore) GetLastSuccessCheckpoint(pipelineID string) (*core.Checkpo
 		cp.FinishedAt = finishedAt.Time
 	}
 	return &cp, nil
+}
+
+func (s *SQLiteStore) InvalidateCheckpointsFromStage(pipelineID string, stage core.StageID) error {
+	_, err := s.db.Exec(`
+UPDATE checkpoints
+SET status=?
+WHERE pipeline_id=? AND id >= (
+	SELECT MIN(id)
+	FROM checkpoints
+	WHERE pipeline_id=? AND stage=?
+)`, core.CheckpointInvalidated, pipelineID, pipelineID, stage)
+	return err
 }
 
 func (s *SQLiteStore) AppendLog(entry core.LogEntry) error {

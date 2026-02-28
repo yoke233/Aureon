@@ -42,10 +42,14 @@ type Store interface {
 	GetPipeline(id string) (*Pipeline, error)
 	SavePipeline(p *Pipeline) error
 	GetActivePipelines() ([]Pipeline, error)
+	ListRunnablePipelines(limit int) ([]Pipeline, error)
+	CountRunningPipelinesByProject(projectID string) (int, error)
+	TryMarkPipelineRunning(id string, from ...PipelineStatus) (bool, error)
 
 	SaveCheckpoint(cp *Checkpoint) error
 	GetCheckpoints(pipelineID string) ([]Checkpoint, error)
 	GetLastSuccessCheckpoint(pipelineID string) (*Checkpoint, error)
+	InvalidateCheckpointsFromStage(pipelineID string, stage StageID) error
 
 	AppendLog(entry LogEntry) error
 	GetLogs(pipelineID string, stage string, limit int, offset int) ([]LogEntry, int, error)

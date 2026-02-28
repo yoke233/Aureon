@@ -1,0 +1,135 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"text/tabwriter"
+
+	"github.com/user/ai-workflow/internal/core"
+	"github.com/user/ai-workflow/internal/engine"
+	"github.com/user/ai-workflow/internal/eventbus"
+	agentclaude "github.com/user/ai-workflow/internal/plugins/agent-claude"
+	agentcodex "github.com/user/ai-workflow/internal/plugins/agent-codex"
+	runtimeprocess "github.com/user/ai-workflow/internal/plugins/runtime-process"
+	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+)
+
+func bootstrap() (*engine.Executor, core.Store, error) {
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".ai-workflow")
+	dbPath := filepath.Join(dataDir, "data.db")
+	_ = os.MkdirAll(dataDir, 0o755)
+
+	store, err := storesqlite.New(dbPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bus := eventbus.New()
+	logger := slog.Default()
+
+	agents := map[string]core.AgentPlugin{
+		"claude": agentclaude.New("claude"),
+		"codex":  agentcodex.New("codex", "gpt-5.3-codex", "high"),
+	}
+	runtime := runtimeprocess.New()
+	exec := engine.NewExecutor(store, bus, agents, runtime, logger)
+	return exec, store, nil
+}
+
+func cmdProjectAdd(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: ai-flow project add <id> <repo-path>")
+	}
+	_, store, err := bootstrap()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	p := &core.Project{ID: args[0], Name: args[0], RepoPath: args[1]}
+	return store.CreateProject(p)
+}
+
+func cmdProjectList() error {
+	_, store, err := bootstrap()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	projects, err := store.ListProjects(core.ProjectFilter{})
+	if err != nil {
+		return err
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "ID\tNAME\tPATH")
+	for _, p := range projects {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", p.ID, p.Name, p.RepoPath)
+	}
+	return w.Flush()
+}
+
+func cmdPipelineCreate(args []string) error {
+	if len(args) < 3 {
+		return fmt.Errorf("usage: ai-flow pipeline create <project-id> <name> <description> [template]")
+	}
+
+	exec, store, err := bootstrap()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	template := "standard"
+	if len(args) > 3 {
+		template = args[3]
+	}
+
+	p, err := exec.CreatePipeline(args[0], args[1], args[2], template)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Pipeline created: %s (template: %s, stages: %d)\n", p.ID, p.Template, len(p.Stages))
+	return nil
+}
+
+func cmdPipelineStart(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: ai-flow pipeline start <pipeline-id>")
+	}
+
+	exec, store, err := bootstrap()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	return exec.Run(context.Background(), args[0])
+}
+
+func cmdPipelineStatus(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: ai-flow pipeline status <pipeline-id>")
+	}
+
+	_, store, err := bootstrap()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	p, err := store.GetPipeline(args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Pipeline: %s\n", p.ID)
+	fmt.Printf("Status:   %s\n", p.Status)
+	fmt.Printf("Stage:    %s\n", p.CurrentStage)
+	fmt.Printf("Template: %s\n", p.Template)
+	return nil
+}

@@ -2,42 +2,59 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"text/tabwriter"
 
+	"github.com/user/ai-workflow/internal/config"
 	"github.com/user/ai-workflow/internal/core"
 	"github.com/user/ai-workflow/internal/engine"
 	"github.com/user/ai-workflow/internal/eventbus"
-	agentclaude "github.com/user/ai-workflow/internal/plugins/agent-claude"
-	agentcodex "github.com/user/ai-workflow/internal/plugins/agent-codex"
-	runtimeprocess "github.com/user/ai-workflow/internal/plugins/runtime-process"
-	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+	pluginfactory "github.com/user/ai-workflow/internal/plugins/factory"
 )
 
 func bootstrap() (*engine.Executor, core.Store, error) {
-	home, _ := os.UserHomeDir()
-	dataDir := filepath.Join(home, ".ai-workflow")
-	dbPath := filepath.Join(dataDir, "data.db")
-	_ = os.MkdirAll(dataDir, 0o755)
+	cfg, err := loadBootstrapConfig()
+	if err != nil {
+		return nil, nil, err
+	}
 
-	store, err := storesqlite.New(dbPath)
+	bootstrapSet, err := pluginfactory.BuildFromConfig(*cfg)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	bus := eventbus.New()
 	logger := slog.Default()
+	exec := engine.NewExecutor(bootstrapSet.Store, bus, bootstrapSet.Agents, bootstrapSet.Runtime, logger)
+	return exec, bootstrapSet.Store, nil
+}
 
-	agents := map[string]core.AgentPlugin{
-		"claude": agentclaude.New("claude"),
-		"codex":  agentcodex.New("codex", "gpt-5.3-codex", "high"),
+func loadBootstrapConfig() (*config.Config, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
 	}
-	runtime := runtimeprocess.New()
-	exec := engine.NewExecutor(store, bus, agents, runtime, logger)
-	return exec, store, nil
+	dataDir := filepath.Join(home, ".ai-workflow")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, err
+	}
+	cfgPath := filepath.Join(dataDir, "config.yaml")
+	if _, err := os.Stat(cfgPath); err == nil {
+		return config.LoadGlobal(cfgPath)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	cfg := config.Defaults()
+	if err := config.ApplyEnvOverrides(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
 
 func cmdProjectAdd(args []string) error {

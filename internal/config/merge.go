@@ -233,6 +233,9 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 		if github.AutoTrigger != nil {
 			cfg.GitHub.AutoTrigger = *github.AutoTrigger
 		}
+		if github.AllowPATFallback != nil {
+			cfg.GitHub.AllowPATFallback = *github.AllowPATFallback
+		}
 		if pr := github.PR; pr != nil {
 			if pr.AutoCreate != nil {
 				cfg.GitHub.PR.AutoCreate = *pr.AutoCreate

@@ -94,6 +94,7 @@ type GitHubConfig struct {
 	LabelMapping        map[string]string `yaml:"label_mapping"`
 	AuthorizedUsernames []string          `yaml:"authorized_usernames"`
 	AutoTrigger         bool              `yaml:"auto_trigger"`
+	AllowPATFallback    bool              `yaml:"allow_pat_fallback"`
 	PR                  GitHubPRConfig    `yaml:"pr"`
 }
 
@@ -200,6 +201,7 @@ type GitHubLayer struct {
 	LabelMapping        *map[string]string `yaml:"label_mapping"`
 	AuthorizedUsernames *[]string          `yaml:"authorized_usernames"`
 	AutoTrigger         *bool              `yaml:"auto_trigger"`
+	AllowPATFallback    *bool              `yaml:"allow_pat_fallback"`
 	PR                  *GitHubPRLayer     `yaml:"pr"`
 }
 

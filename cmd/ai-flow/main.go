@@ -75,11 +75,13 @@ func runWithArgs(args []string) error {
 		}
 	case "github":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: ai-flow github <replay>")
+			return fmt.Errorf("usage: ai-flow github <replay|validate>")
 		}
 		switch args[1] {
 		case "replay":
 			return cmdGitHubReplay(args[2:])
+		case "validate":
+			return cmdGitHubValidate(args[2:])
 		default:
 			return fmt.Errorf("unknown github command: %s", args[1])
 		}
@@ -116,6 +118,7 @@ Usage:
   ai-flow scheduler run
   ai-flow scheduler once
   ai-flow github replay --delivery-id <id>
+  ai-flow github validate
   ai-flow server [--port <port>]
   ai-flow tui`)
 }

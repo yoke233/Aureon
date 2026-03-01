@@ -26,6 +26,12 @@ type StatusSyncer struct {
 }
 
 func NewPipelineStatusSyncer(issues pipelineIssueSyncClient) *StatusSyncer {
+	if issues == nil {
+		return &StatusSyncer{}
+	}
+	if _, ok := issues.(*ResilientClient); !ok {
+		issues = NewResilientClient(issues)
+	}
 	return &StatusSyncer{issues: issues}
 }
 

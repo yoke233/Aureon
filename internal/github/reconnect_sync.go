@@ -1,0 +1,128 @@
+package github
+
+import (
+	"context"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/user/ai-workflow/internal/core"
+)
+
+type reconnectEventPublisher interface {
+	Publish(evt core.Event)
+}
+
+type pipelineEventSyncer interface {
+	SyncPipelineEvent(ctx context.Context, evt core.Event) error
+}
+
+// ReconnectSync handles recovery from degraded GitHub connectivity.
+type ReconnectSync struct {
+	publisher reconnectEventPublisher
+	syncer    pipelineEventSyncer
+	now       func() time.Time
+
+	mu       sync.RWMutex
+	degraded bool
+}
+
+func NewReconnectSync(publisher reconnectEventPublisher, syncer pipelineEventSyncer) *ReconnectSync {
+	return &ReconnectSync{
+		publisher: publisher,
+		syncer:    syncer,
+		now:       time.Now,
+	}
+}
+
+func (r *ReconnectSync) MarkDegraded(err error) {
+	if r == nil {
+		return
+	}
+	if !isNetworkError(err) {
+		return
+	}
+	r.mu.Lock()
+	r.degraded = true
+	r.mu.Unlock()
+}
+
+func (r *ReconnectSync) IsDegraded() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.degraded
+}
+
+func (r *ReconnectSync) OnRecovered(ctx context.Context, events []core.Event) error {
+	if r == nil {
+		return nil
+	}
+
+	if !r.IsDegraded() {
+		return nil
+	}
+
+	r.mu.Lock()
+	r.degraded = false
+	r.mu.Unlock()
+
+	if r.publisher != nil {
+		r.publisher.Publish(core.Event{
+			Type:      core.EventGitHubReconnected,
+			Timestamp: r.now(),
+		})
+	}
+
+	return r.ReplayLatestPipelineStateOnly(ctx, events)
+}
+
+func (r *ReconnectSync) ReplayLatestPipelineStateOnly(ctx context.Context, events []core.Event) error {
+	if r == nil || r.syncer == nil || len(events) == 0 {
+		return nil
+	}
+
+	latestByIssue := make(map[int]core.Event)
+	for _, evt := range events {
+		if !isReplayablePipelineStateEvent(evt.Type) {
+			continue
+		}
+		issueNumber := parseIssueNumberFromEventData(evt.Data)
+		if issueNumber <= 0 {
+			continue
+		}
+
+		existing, ok := latestByIssue[issueNumber]
+		if !ok || evt.Timestamp.After(existing.Timestamp) {
+			latestByIssue[issueNumber] = evt
+		}
+	}
+
+	issues := make([]int, 0, len(latestByIssue))
+	for issueNumber := range latestByIssue {
+		issues = append(issues, issueNumber)
+	}
+	sort.Ints(issues)
+
+	for _, issueNumber := range issues {
+		if err := r.syncer.SyncPipelineEvent(ctx, latestByIssue[issueNumber]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isReplayablePipelineStateEvent(eventType core.EventType) bool {
+	switch eventType {
+	case core.EventStageStart,
+		core.EventStageComplete,
+		core.EventHumanRequired,
+		core.EventPipelineDone,
+		core.EventPipelineFailed:
+		return true
+	default:
+		return false
+	}
+}

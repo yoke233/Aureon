@@ -88,7 +88,7 @@ func TestAgentDecomposeBuildsPromptAndParsesTaskPlan(t *testing.T) {
 		},
 	}
 
-	output := "```json\n{\n  \"name\": \"oauth-rollout\",\n  \"tasks\": [\n    {\n      \"id\": \"task-1\",\n      \"title\": \"后端接入 OAuth\",\n      \"description\": \"完成 OAuth 登录接口并补充单测。\",\n      \"labels\": [\"backend\", \"auth\"],\n      \"depends_on\": [],\n      \"template\": \"standard\"\n    },\n    {\n      \"id\": \"task-2\",\n      \"title\": \"审计日志落库\",\n      \"description\": \"记录登录审计日志并提供查询接口。\",\n      \"labels\": [\"backend\", \"database\"],\n      \"depends_on\": [\"task-1\"],\n      \"template\": \"full\"\n    }\n  ]\n}\n```"
+	output := "```json\n{\n  \"name\": \"oauth-rollout\",\n  \"tasks\": [\n    {\n      \"id\": \"task-1\",\n      \"title\": \"后端接入 OAuth\",\n      \"description\": \"完成 OAuth 登录接口并补充单测。\",\n      \"labels\": [\"backend\", \"auth\"],\n      \"depends_on\": [],\n      \"inputs\": [\"oauth_app_id\", \"oauth_secret\"],\n      \"outputs\": [\"oauth_login_api\"],\n      \"acceptance\": [\"valid callback returns 200\"],\n      \"constraints\": [\"保持现有用户表结构\"],\n      \"template\": \"standard\"\n    },\n    {\n      \"id\": \"task-2\",\n      \"title\": \"审计日志落库\",\n      \"description\": \"记录登录审计日志并提供查询接口。\",\n      \"labels\": [\"backend\", \"database\"],\n      \"depends_on\": [\"task-1\"],\n      \"inputs\": [\"oauth_user_id\"],\n      \"outputs\": [\"audit_log_query_api\"],\n      \"acceptance\": [\"audit log query works\"],\n      \"constraints\": [\"最小化写放大\"],\n      \"template\": \"full\"\n    }\n  ]\n}\n```"
 	agent := &mockAgent{
 		cmd: []string{"mock-secretary"},
 		parser: &sliceParser{
@@ -206,5 +206,76 @@ func TestParseTaskPlanRejectsInvalidTemplate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid template") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseTaskPlan_IncludesInputsOutputsAcceptance(t *testing.T) {
+	plan, err := ParseTaskPlan(`{
+  "name": "structured-plan",
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "design contract",
+      "description": "define io contract",
+      "labels": ["backend"],
+      "depends_on": [],
+      "inputs": ["oauth_app_id"],
+      "outputs": ["oauth_token"],
+      "acceptance": ["callback endpoint returns 200"],
+      "constraints": ["keep api backward compatible"],
+      "template": "standard"
+    }
+  ]
+}`)
+	if err != nil {
+		t.Fatalf("parse task plan: %v", err)
+	}
+
+	if len(plan.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(plan.Tasks))
+	}
+	task := plan.Tasks[0]
+	if len(task.Inputs) != 1 || task.Inputs[0] != "oauth_app_id" {
+		t.Fatalf("unexpected inputs: %#v", task.Inputs)
+	}
+	if len(task.Outputs) != 1 || task.Outputs[0] != "oauth_token" {
+		t.Fatalf("unexpected outputs: %#v", task.Outputs)
+	}
+	if len(task.Acceptance) != 1 || task.Acceptance[0] != "callback endpoint returns 200" {
+		t.Fatalf("unexpected acceptance: %#v", task.Acceptance)
+	}
+	if len(task.Constraints) != 1 || task.Constraints[0] != "keep api backward compatible" {
+		t.Fatalf("unexpected constraints: %#v", task.Constraints)
+	}
+}
+
+func TestToTaskItem_MapsStructuredFields(t *testing.T) {
+	item, err := toTaskItem(taskItemOutput{
+		ID:          "task-2",
+		Title:       "implement oauth",
+		Description: "implement oauth endpoint",
+		Labels:      []string{"backend"},
+		DependsOn:   []string{"task-1"},
+		Inputs:      []string{"oauth_app_id"},
+		Outputs:     []string{"oauth_token"},
+		Acceptance:  []string{"endpoint returns 200"},
+		Constraints: []string{"no breaking changes"},
+		Template:    "standard",
+	})
+	if err != nil {
+		t.Fatalf("toTaskItem: %v", err)
+	}
+
+	if len(item.Inputs) != 1 || item.Inputs[0] != "oauth_app_id" {
+		t.Fatalf("inputs mapping failed: %#v", item.Inputs)
+	}
+	if len(item.Outputs) != 1 || item.Outputs[0] != "oauth_token" {
+		t.Fatalf("outputs mapping failed: %#v", item.Outputs)
+	}
+	if len(item.Acceptance) != 1 || item.Acceptance[0] != "endpoint returns 200" {
+		t.Fatalf("acceptance mapping failed: %#v", item.Acceptance)
+	}
+	if len(item.Constraints) != 1 || item.Constraints[0] != "no breaking changes" {
+		t.Fatalf("constraints mapping failed: %#v", item.Constraints)
 	}
 }

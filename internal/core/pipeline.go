@@ -71,6 +71,7 @@ type Pipeline struct {
 	Config       map[string]any    `json:"config"`
 	BranchName   string            `json:"branch_name"`
 	WorktreePath string            `json:"worktree_path"`
+	TaskItemID   string            `json:"task_item_id"`
 	ErrorMessage string            `json:"error_message,omitempty"`
 
 	MaxTotalRetries int    `json:"max_total_retries"`

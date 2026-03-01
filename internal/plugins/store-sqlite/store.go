@@ -119,9 +119,9 @@ func (s *SQLiteStore) SavePipeline(p *core.Pipeline) error {
 INSERT INTO pipelines (
 	id, project_id, name, description, template, status, current_stage,
 	stages_json, artifacts_json, config_json, branch_name, worktree_path,
-	error_message, max_total_retries, total_retries, run_count, last_error_type,
+	error_message, max_total_retries, total_retries, run_count, last_error_type, task_item_id,
 	queued_at, last_heartbeat_at, started_at, finished_at
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id,
 	name=excluded.name,
@@ -139,6 +139,7 @@ ON CONFLICT(id) DO UPDATE SET
 	total_retries=excluded.total_retries,
 	run_count=excluded.run_count,
 	last_error_type=excluded.last_error_type,
+	task_item_id=excluded.task_item_id,
 	queued_at=excluded.queued_at,
 	last_heartbeat_at=excluded.last_heartbeat_at,
 	started_at=excluded.started_at,
@@ -146,7 +147,7 @@ ON CONFLICT(id) DO UPDATE SET
 	updated_at=CURRENT_TIMESTAMP`,
 		p.ID, p.ProjectID, p.Name, p.Description, p.Template, p.Status, p.CurrentStage,
 		string(stagesJSON), string(artifactsJSON), string(configJSON), p.BranchName, p.WorktreePath,
-		p.ErrorMessage, p.MaxTotalRetries, p.TotalRetries, p.RunCount, p.LastErrorType,
+		p.ErrorMessage, p.MaxTotalRetries, p.TotalRetries, p.RunCount, p.LastErrorType, nullableString(p.TaskItemID),
 		nullableTime(p.QueuedAt), nullableTime(p.LastHeartbeatAt), nullableTime(p.StartedAt), nullableTime(p.FinishedAt),
 	)
 	return err
@@ -167,14 +168,14 @@ func (s *SQLiteStore) GetPipeline(id string) (*core.Pipeline, error) {
 	err := s.db.QueryRow(`
 SELECT id, project_id, name, description, template, status, current_stage,
        stages_json, artifacts_json, config_json, branch_name, worktree_path, error_message,
-       max_total_retries, total_retries, run_count, last_error_type, queued_at, last_heartbeat_at,
+       max_total_retries, total_retries, run_count, last_error_type, COALESCE(task_item_id, ''), queued_at, last_heartbeat_at,
 	   started_at, finished_at, created_at, updated_at
 FROM pipelines WHERE id=?`,
 		id,
 	).Scan(
 		&p.ID, &p.ProjectID, &p.Name, &p.Description, &p.Template, &p.Status, &p.CurrentStage,
 		&stagesJSON, &artifactsJSON, &configJSON, &p.BranchName, &p.WorktreePath, &p.ErrorMessage,
-		&p.MaxTotalRetries, &p.TotalRetries, &p.RunCount, &p.LastErrorType, &queuedAt, &lastHeartbeat,
+		&p.MaxTotalRetries, &p.TotalRetries, &p.RunCount, &p.LastErrorType, &p.TaskItemID, &queuedAt, &lastHeartbeat,
 		&startedAt, &finishedAt, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -209,7 +210,7 @@ FROM pipelines WHERE id=?`,
 }
 
 func (s *SQLiteStore) ListPipelines(projectID string, filter core.PipelineFilter) ([]core.Pipeline, error) {
-	query := `SELECT id, project_id, name, template, status, current_stage, created_at FROM pipelines WHERE project_id=?`
+	query := `SELECT id, project_id, name, template, status, current_stage, COALESCE(task_item_id, ''), created_at FROM pipelines WHERE project_id=?`
 	args := []any{projectID}
 	if filter.Status != "" {
 		query += ` AND status=?`
@@ -234,7 +235,7 @@ func (s *SQLiteStore) ListPipelines(projectID string, filter core.PipelineFilter
 	var out []core.Pipeline
 	for rows.Next() {
 		var p core.Pipeline
-		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Name, &p.Template, &p.Status, &p.CurrentStage, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Name, &p.Template, &p.Status, &p.CurrentStage, &p.TaskItemID, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -607,9 +608,12 @@ func (s *SQLiteStore) DeleteChatSession(id string) error {
 
 func (s *SQLiteStore) CreateTaskPlan(plan *core.TaskPlan) error {
 	_, err := s.db.Exec(
-		`INSERT INTO task_plans (id, project_id, session_id, name, status, wait_reason, fail_policy, review_round)
-		 VALUES (?,?,?,?,?,?,?,?)`,
+		`INSERT INTO task_plans (
+			id, project_id, session_id, name, status, wait_reason, fail_policy, review_round,
+			spec_profile, contract_version, contract_checksum
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
+		plan.SpecProfile, plan.ContractVersion, plan.ContractChecksum,
 	)
 	return err
 }
@@ -617,12 +621,13 @@ func (s *SQLiteStore) CreateTaskPlan(plan *core.TaskPlan) error {
 func (s *SQLiteStore) GetTaskPlan(id string) (*core.TaskPlan, error) {
 	plan := &core.TaskPlan{}
 	err := s.db.QueryRow(
-		`SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round, created_at, updated_at
+		`SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round,
+		        COALESCE(spec_profile, ''), COALESCE(contract_version, ''), COALESCE(contract_checksum, ''), created_at, updated_at
 		 FROM task_plans WHERE id=?`,
 		id,
 	).Scan(
 		&plan.ID, &plan.ProjectID, &plan.SessionID, &plan.Name, &plan.Status, &plan.WaitReason, &plan.FailPolicy,
-		&plan.ReviewRound, &plan.CreatedAt, &plan.UpdatedAt,
+		&plan.ReviewRound, &plan.SpecProfile, &plan.ContractVersion, &plan.ContractChecksum, &plan.CreatedAt, &plan.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("task plan %s not found", id)
@@ -641,8 +646,9 @@ func (s *SQLiteStore) GetTaskPlan(id string) (*core.TaskPlan, error) {
 func (s *SQLiteStore) SaveTaskPlan(plan *core.TaskPlan) error {
 	_, err := s.db.Exec(`
 INSERT INTO task_plans (
-	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round
-) VALUES (?,?,?,?,?,?,?,?)
+	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round,
+	spec_profile, contract_version, contract_checksum
+) VALUES (?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id,
 	session_id=excluded.session_id,
@@ -651,8 +657,12 @@ ON CONFLICT(id) DO UPDATE SET
 	wait_reason=excluded.wait_reason,
 	fail_policy=excluded.fail_policy,
 	review_round=excluded.review_round,
+	spec_profile=excluded.spec_profile,
+	contract_version=excluded.contract_version,
+	contract_checksum=excluded.contract_checksum,
 	updated_at=CURRENT_TIMESTAMP`,
 		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
+		plan.SpecProfile, plan.ContractVersion, plan.ContractChecksum,
 	)
 	return err
 }
@@ -673,8 +683,9 @@ func (s *SQLiteStore) ReplaceTaskPlanAndItems(plan *core.TaskPlan, items []core.
 
 	if _, err := tx.Exec(`
 INSERT INTO task_plans (
-	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round
-) VALUES (?,?,?,?,?,?,?,?)
+	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round,
+	spec_profile, contract_version, contract_checksum
+) VALUES (?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id,
 	session_id=excluded.session_id,
@@ -683,8 +694,12 @@ ON CONFLICT(id) DO UPDATE SET
 	wait_reason=excluded.wait_reason,
 	fail_policy=excluded.fail_policy,
 	review_round=excluded.review_round,
+	spec_profile=excluded.spec_profile,
+	contract_version=excluded.contract_version,
+	contract_checksum=excluded.contract_checksum,
 	updated_at=CURRENT_TIMESTAMP`,
 		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
+		plan.SpecProfile, plan.ContractVersion, plan.ContractChecksum,
 	); err != nil {
 		return err
 	}
@@ -707,15 +722,34 @@ ON CONFLICT(id) DO UPDATE SET
 		if err != nil {
 			return err
 		}
+		inputsJSON, err := marshalJSON(item.Inputs)
+		if err != nil {
+			return err
+		}
+		outputsJSON, err := marshalJSON(item.Outputs)
+		if err != nil {
+			return err
+		}
+		acceptanceJSON, err := marshalJSON(item.Acceptance)
+		if err != nil {
+			return err
+		}
+		constraintsJSON, err := marshalJSON(item.Constraints)
+		if err != nil {
+			return err
+		}
 		template := item.Template
 		if strings.TrimSpace(template) == "" {
 			template = "standard"
 		}
 
 		if _, err := tx.Exec(
-			`INSERT INTO task_items (id, plan_id, title, description, labels, depends_on, template, pipeline_id, external_id, status)
-			 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-			item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON, template,
+			`INSERT INTO task_items (
+				id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints,
+				template, pipeline_id, external_id, status
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON,
+			inputsJSON, outputsJSON, acceptanceJSON, constraintsJSON, template,
 			nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
 		); err != nil {
 			return err
@@ -730,7 +764,8 @@ ON CONFLICT(id) DO UPDATE SET
 }
 
 func (s *SQLiteStore) ListTaskPlans(projectID string, filter core.TaskPlanFilter) ([]core.TaskPlan, error) {
-	query := `SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round, created_at, updated_at
+	query := `SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round,
+	                 COALESCE(spec_profile, ''), COALESCE(contract_version, ''), COALESCE(contract_checksum, ''), created_at, updated_at
 	          FROM task_plans WHERE project_id=?`
 	args := []any{projectID}
 	if filter.Status != "" {
@@ -758,7 +793,7 @@ func (s *SQLiteStore) ListTaskPlans(projectID string, filter core.TaskPlanFilter
 		var plan core.TaskPlan
 		if err := rows.Scan(
 			&plan.ID, &plan.ProjectID, &plan.SessionID, &plan.Name, &plan.Status, &plan.WaitReason, &plan.FailPolicy,
-			&plan.ReviewRound, &plan.CreatedAt, &plan.UpdatedAt,
+			&plan.ReviewRound, &plan.SpecProfile, &plan.ContractVersion, &plan.ContractChecksum, &plan.CreatedAt, &plan.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -829,17 +864,39 @@ func (s *SQLiteStore) CreateTaskItem(item *core.TaskItem) error {
 	if err != nil {
 		return err
 	}
+	inputsJSON, err := marshalJSON(item.Inputs)
+	if err != nil {
+		return err
+	}
+	outputsJSON, err := marshalJSON(item.Outputs)
+	if err != nil {
+		return err
+	}
+	acceptanceJSON, err := marshalJSON(item.Acceptance)
+	if err != nil {
+		return err
+	}
+	constraintsJSON, err := marshalJSON(item.Constraints)
+	if err != nil {
+		return err
+	}
 	template := item.Template
 	if strings.TrimSpace(template) == "" {
 		template = "standard"
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO task_items (id, plan_id, title, description, labels, depends_on, template, pipeline_id, external_id, status)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON, template,
+		`INSERT INTO task_items (
+			id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints,
+			template, pipeline_id, external_id, status
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON,
+		inputsJSON, outputsJSON, acceptanceJSON, constraintsJSON, template,
 		nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.bindPipelineTaskItemLink(item.PipelineID, item.ID)
 }
 
 func (s *SQLiteStore) GetTaskItem(id string) (*core.TaskItem, error) {
@@ -847,13 +904,19 @@ func (s *SQLiteStore) GetTaskItem(id string) (*core.TaskItem, error) {
 	var (
 		labelsJSON    string
 		dependsOnJSON string
+		inputsJSON    string
+		outputsJSON   string
+		acceptanceJSON string
+		constraintsJSON string
 	)
 	err := s.db.QueryRow(
-		`SELECT id, plan_id, title, description, labels, depends_on, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
+		`SELECT id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
 		 FROM task_items WHERE id=?`,
 		id,
 	).Scan(
-		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON, &item.Template, &item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON,
+		&inputsJSON, &outputsJSON, &acceptanceJSON, &constraintsJSON, &item.Template,
+		&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("task item %s not found", id)
@@ -865,6 +928,18 @@ func (s *SQLiteStore) GetTaskItem(id string) (*core.TaskItem, error) {
 		return nil, err
 	}
 	if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(inputsJSON, &item.Inputs); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(outputsJSON, &item.Outputs); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(acceptanceJSON, &item.Acceptance); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(constraintsJSON, &item.Constraints); err != nil {
 		return nil, err
 	}
 	return item, nil
@@ -882,34 +957,58 @@ func (s *SQLiteStore) SaveTaskItem(item *core.TaskItem) error {
 	if err != nil {
 		return err
 	}
+	inputsJSON, err := marshalJSON(item.Inputs)
+	if err != nil {
+		return err
+	}
+	outputsJSON, err := marshalJSON(item.Outputs)
+	if err != nil {
+		return err
+	}
+	acceptanceJSON, err := marshalJSON(item.Acceptance)
+	if err != nil {
+		return err
+	}
+	constraintsJSON, err := marshalJSON(item.Constraints)
+	if err != nil {
+		return err
+	}
 	template := item.Template
 	if strings.TrimSpace(template) == "" {
 		template = "standard"
 	}
 	_, err = s.db.Exec(`
 INSERT INTO task_items (
-	id, plan_id, title, description, labels, depends_on, template, pipeline_id, external_id, status
-) VALUES (?,?,?,?,?,?,?,?,?,?)
+	id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, pipeline_id, external_id, status
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 	plan_id=excluded.plan_id,
 	title=excluded.title,
 	description=excluded.description,
 	labels=excluded.labels,
 	depends_on=excluded.depends_on,
+	inputs=excluded.inputs,
+	outputs=excluded.outputs,
+	acceptance=excluded.acceptance,
+	constraints=excluded.constraints,
 	template=excluded.template,
 	pipeline_id=excluded.pipeline_id,
 	external_id=excluded.external_id,
 	status=excluded.status,
 	updated_at=CURRENT_TIMESTAMP`,
-		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON, template,
+		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON,
+		inputsJSON, outputsJSON, acceptanceJSON, constraintsJSON, template,
 		nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.bindPipelineTaskItemLink(item.PipelineID, item.ID)
 }
 
 func (s *SQLiteStore) GetTaskItemsByPlan(planID string) ([]core.TaskItem, error) {
 	rows, err := s.db.Query(
-		`SELECT id, plan_id, title, description, labels, depends_on, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
+		`SELECT id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
 		 FROM task_items WHERE plan_id=?
 		 ORDER BY created_at, id`,
 		planID,
@@ -925,9 +1024,14 @@ func (s *SQLiteStore) GetTaskItemsByPlan(planID string) ([]core.TaskItem, error)
 			item          core.TaskItem
 			labelsJSON    string
 			dependsOnJSON string
+			inputsJSON    string
+			outputsJSON   string
+			acceptanceJSON string
+			constraintsJSON string
 		)
 		if err := rows.Scan(
-			&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON, &item.Template,
+			&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON,
+			&inputsJSON, &outputsJSON, &acceptanceJSON, &constraintsJSON, &item.Template,
 			&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -938,23 +1042,55 @@ func (s *SQLiteStore) GetTaskItemsByPlan(planID string) ([]core.TaskItem, error)
 		if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
 			return nil, err
 		}
+		if err := unmarshalJSON(inputsJSON, &item.Inputs); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(outputsJSON, &item.Outputs); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(acceptanceJSON, &item.Acceptance); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(constraintsJSON, &item.Constraints); err != nil {
+			return nil, err
+		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
 }
 
 func (s *SQLiteStore) GetTaskItemByPipeline(pipelineID string) (*core.TaskItem, error) {
+	var mappedTaskID string
+	err := s.db.QueryRow(`SELECT COALESCE(task_item_id, '') FROM pipelines WHERE id=?`, pipelineID).Scan(&mappedTaskID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if strings.TrimSpace(mappedTaskID) != "" {
+		item, getErr := s.GetTaskItem(mappedTaskID)
+		if getErr == nil {
+			return item, nil
+		}
+		if !strings.Contains(getErr.Error(), "not found") {
+			return nil, getErr
+		}
+	}
+
 	item := &core.TaskItem{}
 	var (
 		labelsJSON    string
 		dependsOnJSON string
+		inputsJSON    string
+		outputsJSON   string
+		acceptanceJSON string
+		constraintsJSON string
 	)
-	err := s.db.QueryRow(
-		`SELECT id, plan_id, title, description, labels, depends_on, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
+	err = s.db.QueryRow(
+		`SELECT id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
 		 FROM task_items WHERE pipeline_id=? LIMIT 1`,
 		pipelineID,
 	).Scan(
-		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON, &item.Template,
+		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON,
+		&inputsJSON, &outputsJSON, &acceptanceJSON, &constraintsJSON, &item.Template,
 		&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -967,6 +1103,18 @@ func (s *SQLiteStore) GetTaskItemByPipeline(pipelineID string) (*core.TaskItem, 
 		return nil, err
 	}
 	if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(inputsJSON, &item.Inputs); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(outputsJSON, &item.Outputs); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(acceptanceJSON, &item.Acceptance); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(constraintsJSON, &item.Constraints); err != nil {
 		return nil, err
 	}
 	return item, nil
@@ -1041,6 +1189,24 @@ func (s *SQLiteStore) GetReviewRecords(planID string) ([]core.ReviewRecord, erro
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func (s *SQLiteStore) bindPipelineTaskItemLink(pipelineID, taskItemID string) error {
+	pipelineID = strings.TrimSpace(pipelineID)
+	taskItemID = strings.TrimSpace(taskItemID)
+	if pipelineID == "" || taskItemID == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`
+UPDATE pipelines
+SET task_item_id = CASE
+	WHEN COALESCE(task_item_id, '') = '' THEN ?
+	ELSE task_item_id
+END
+WHERE id=?`,
+		taskItemID, pipelineID,
+	)
+	return err
 }
 
 func marshalJSON(v any) (string, error) {

@@ -53,8 +53,11 @@ type promptVars struct {
 }
 
 type taskPlanOutput struct {
-	Name  string           `json:"name"`
-	Tasks []taskItemOutput `json:"tasks"`
+	Name             string           `json:"name"`
+	SpecProfile      string           `json:"spec_profile"`
+	ContractVersion  string           `json:"contract_version"`
+	ContractChecksum string           `json:"contract_checksum"`
+	Tasks            []taskItemOutput `json:"tasks"`
 }
 
 type taskItemOutput struct {
@@ -63,6 +66,10 @@ type taskItemOutput struct {
 	Description string   `json:"description"`
 	Labels      []string `json:"labels"`
 	DependsOn   []string `json:"depends_on"`
+	Inputs      []string `json:"inputs"`
+	Outputs     []string `json:"outputs"`
+	Acceptance  []string `json:"acceptance"`
+	Constraints []string `json:"constraints"`
 	Template    string   `json:"template"`
 }
 
@@ -241,11 +248,20 @@ func ParseTaskPlan(rawOutput string) (*core.TaskPlan, error) {
 	}
 
 	plan := &core.TaskPlan{
-		Name:       name,
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-		Tasks:      make([]core.TaskItem, 0, len(out.Tasks)),
+		Name:             name,
+		Status:           core.PlanDraft,
+		WaitReason:       core.WaitNone,
+		FailPolicy:       core.FailBlock,
+		SpecProfile:      strings.TrimSpace(out.SpecProfile),
+		ContractVersion:  strings.TrimSpace(out.ContractVersion),
+		ContractChecksum: strings.TrimSpace(out.ContractChecksum),
+		Tasks:            make([]core.TaskItem, 0, len(out.Tasks)),
+	}
+	if plan.SpecProfile == "" {
+		plan.SpecProfile = "default"
+	}
+	if plan.ContractVersion == "" {
+		plan.ContractVersion = "v1"
 	}
 
 	for i, task := range out.Tasks {
@@ -265,6 +281,10 @@ func toTaskItem(task taskItemOutput) (core.TaskItem, error) {
 		Description: strings.TrimSpace(task.Description),
 		Labels:      compactStrings(task.Labels),
 		DependsOn:   compactStrings(task.DependsOn),
+		Inputs:      compactStrings(task.Inputs),
+		Outputs:     compactStrings(task.Outputs),
+		Acceptance:  compactStrings(task.Acceptance),
+		Constraints: compactStrings(task.Constraints),
 		Template:    strings.TrimSpace(task.Template),
 		Status:      core.ItemPending,
 	}
@@ -280,7 +300,7 @@ func toTaskItem(task taskItemOutput) (core.TaskItem, error) {
 	if !isValidTemplate(item.Template) {
 		return core.TaskItem{}, fmt.Errorf("invalid template %q", item.Template)
 	}
-	if err := item.Validate(); err != nil {
+	if err := item.Validate(true); err != nil {
 		return core.TaskItem{}, err
 	}
 	return item, nil

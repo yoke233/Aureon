@@ -766,6 +766,35 @@ func (s *spyRegenerator) Regenerate(_ context.Context, req RegenerationRequest) 
 	return &cp, nil
 }
 
+func TestReviewAgent_RejectsMissingAcceptance(t *testing.T) {
+	t.Parallel()
+
+	store := newMockReviewStore()
+	panel := ReviewPanel{
+		Store: store,
+		Reviewers: []Reviewer{
+			newStubReviewer("completeness", passVerdict("completeness")),
+			newStubReviewer("dependency", passVerdict("dependency")),
+			newStubReviewer("feasibility", passVerdict("feasibility")),
+		},
+		Aggregator: newStubAggregator(func(_ context.Context, _ AggregatorInput) (AggregatorDecision, error) {
+			return AggregatorDecision{Decision: DecisionApprove}, nil
+		}),
+	}
+
+	plan := newReviewTestPlan("plan-review-structured-missing-acceptance")
+	plan.ContractVersion = "v1"
+	plan.Tasks[0].Acceptance = nil
+
+	_, err := panel.Run(context.Background(), plan, ReviewInput{})
+	if err == nil {
+		t.Fatal("expected review run to reject missing acceptance under structured contract")
+	}
+	if !strings.Contains(err.Error(), "acceptance") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func passVerdict(reviewer string) func(context.Context, ReviewerInput) (core.ReviewVerdict, error) {
 	return func(_ context.Context, _ ReviewerInput) (core.ReviewVerdict, error) {
 		return core.ReviewVerdict{

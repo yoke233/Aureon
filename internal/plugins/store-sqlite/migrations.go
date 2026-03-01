@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS pipelines (
     total_retries     INTEGER DEFAULT 0,
     run_count         INTEGER DEFAULT 0,
     last_error_type   TEXT,
+    task_item_id      TEXT,
     queued_at         DATETIME,
     last_heartbeat_at DATETIME,
     started_at        DATETIME,
@@ -108,16 +109,19 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_project ON chat_sessions(project_id);
 
 CREATE TABLE IF NOT EXISTS task_plans (
-    id           TEXT PRIMARY KEY,
-    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    session_id   TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
-    name         TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'draft',
-    wait_reason  TEXT NOT NULL DEFAULT '',
-    fail_policy  TEXT NOT NULL DEFAULT 'block',
-    review_round INTEGER DEFAULT 0,
-    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+    id                TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    session_id        TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
+    name              TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'draft',
+    wait_reason       TEXT NOT NULL DEFAULT '',
+    fail_policy       TEXT NOT NULL DEFAULT 'block',
+    review_round      INTEGER DEFAULT 0,
+    spec_profile      TEXT NOT NULL DEFAULT '',
+    contract_version  TEXT NOT NULL DEFAULT '',
+    contract_checksum TEXT NOT NULL DEFAULT '',
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_plans_project ON task_plans(project_id);
@@ -130,6 +134,10 @@ CREATE TABLE IF NOT EXISTS task_items (
     description TEXT NOT NULL,
     labels      TEXT DEFAULT '[]',
     depends_on  TEXT DEFAULT '[]',
+    inputs      TEXT DEFAULT '[]',
+    outputs     TEXT DEFAULT '[]',
+    acceptance  TEXT DEFAULT '[]',
+    constraints TEXT DEFAULT '[]',
     template    TEXT NOT NULL DEFAULT 'standard',
     pipeline_id TEXT REFERENCES pipelines(id) ON DELETE SET NULL,
     external_id TEXT,
@@ -162,24 +170,148 @@ func applyMigrations(db *sql.DB) error {
 	}
 
 	// Keep older local sqlite files backward-compatible when new columns are introduced.
-	columns := map[string]string{
+	if err := ensureColumns(db, "pipelines", map[string]string{
 		"run_count":         "run_count INTEGER DEFAULT 0",
 		"last_error_type":   "last_error_type TEXT",
 		"queued_at":         "queued_at DATETIME",
 		"last_heartbeat_at": "last_heartbeat_at DATETIME",
+		"task_item_id":      "task_item_id TEXT",
+	}); err != nil {
+		return err
 	}
+	if err := ensureColumns(db, "task_plans", map[string]string{
+		"spec_profile":      "spec_profile TEXT NOT NULL DEFAULT ''",
+		"contract_version":  "contract_version TEXT NOT NULL DEFAULT ''",
+		"contract_checksum": "contract_checksum TEXT NOT NULL DEFAULT ''",
+	}); err != nil {
+		return err
+	}
+	if err := ensureColumns(db, "task_items", map[string]string{
+		"inputs":      "inputs TEXT DEFAULT '[]'",
+		"outputs":     "outputs TEXT DEFAULT '[]'",
+		"acceptance":  "acceptance TEXT DEFAULT '[]'",
+		"constraints": "constraints TEXT DEFAULT '[]'",
+	}); err != nil {
+		return err
+	}
+	if err := applyWave2Cutover(db); err != nil {
+		return err
+	}
+	if err := backfillPipelineTaskItemID(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureColumns(db *sql.DB, table string, columns map[string]string) error {
 	for column, ddl := range columns {
-		exists, err := hasColumn(db, "pipelines", column)
+		exists, err := hasColumn(db, table, column)
 		if err != nil {
 			return err
 		}
 		if exists {
 			continue
 		}
-		if _, err := db.Exec("ALTER TABLE pipelines ADD COLUMN " + ddl); err != nil {
-			return fmt.Errorf("add pipelines.%s: %w", column, err)
+		if _, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + ddl); err != nil {
+			return fmt.Errorf("add %s.%s: %w", table, column, err)
 		}
 	}
+	return nil
+}
+
+func backfillPipelineTaskItemID(db *sql.DB) error {
+	_, err := db.Exec(`
+UPDATE pipelines
+SET task_item_id = (
+	SELECT ti.id
+	FROM task_items ti
+	WHERE ti.pipeline_id = pipelines.id
+	ORDER BY ti.created_at ASC, ti.id ASC
+	LIMIT 1
+)
+WHERE COALESCE(task_item_id, '') = ''
+  AND EXISTS (SELECT 1 FROM task_items ti2 WHERE ti2.pipeline_id = pipelines.id)
+`)
+	if err != nil {
+		return fmt.Errorf("backfill pipelines.task_item_id: %w", err)
+	}
+	return nil
+}
+
+func applyWave2Cutover(db *sql.DB) error {
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS migration_flags (
+	flag_key   TEXT PRIMARY KEY,
+	flag_value TEXT NOT NULL,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`); err != nil {
+		return fmt.Errorf("ensure migration_flags: %w", err)
+	}
+
+	var done int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM migration_flags WHERE flag_key='wave2_destructive_cutover_done' AND flag_value='1'`).Scan(&done); err != nil {
+		return fmt.Errorf("query wave2 cutover flag: %w", err)
+	}
+	if done > 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin wave2 cutover: %w", err)
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.Exec(`
+DELETE FROM task_items
+WHERE lower(trim(status)) <> 'done'
+`); err != nil {
+		return fmt.Errorf("purge legacy task_items: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+DELETE FROM task_plans
+WHERE lower(trim(status)) <> 'done'
+`); err != nil {
+		return fmt.Errorf("purge legacy task_plans: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+DELETE FROM pipelines
+WHERE lower(trim(status)) <> 'done'
+`); err != nil {
+		return fmt.Errorf("purge legacy pipelines: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+UPDATE task_items
+SET pipeline_id=NULL
+WHERE pipeline_id IS NOT NULL
+  AND trim(pipeline_id) <> ''
+  AND pipeline_id NOT IN (SELECT id FROM pipelines WHERE lower(trim(status))='done')
+`); err != nil {
+		return fmt.Errorf("reset dangling task_items.pipeline_id: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+INSERT INTO migration_flags(flag_key, flag_value)
+VALUES ('wave2_destructive_cutover_done', '1')
+ON CONFLICT(flag_key) DO UPDATE SET
+	flag_value='1',
+	updated_at=CURRENT_TIMESTAMP
+`); err != nil {
+		return fmt.Errorf("set wave2 cutover flag: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit wave2 cutover: %w", err)
+	}
+	rollback = false
 	return nil
 }
 

@@ -217,6 +217,9 @@ func (p *ReviewPanel) Run(ctx context.Context, plan *core.TaskPlan, input Review
 					Round:    round,
 				}, nil
 			}
+			if err := validateStructuredTasks(working.ContractVersion, decision.RevisedTasks); err != nil {
+				return nil, fmt.Errorf("invalid revised tasks in round %d: %w", round, err)
+			}
 
 			working.Tasks = cloneTaskItems(decision.RevisedTasks)
 			working.Status = core.PlanReviewing
@@ -343,6 +346,25 @@ func (p *ReviewPanel) validateForRun(plan *core.TaskPlan) error {
 	}
 	if p.Aggregator == nil {
 		return errors.New("aggregator is required")
+	}
+	if err := validateStructuredTasks(plan.ContractVersion, plan.Tasks); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateStructuredTasks(contractVersion string, tasks []core.TaskItem) error {
+	if strings.TrimSpace(contractVersion) == "" {
+		return nil
+	}
+	for i, task := range tasks {
+		if err := task.Validate(true); err != nil {
+			taskID := strings.TrimSpace(task.ID)
+			if taskID == "" {
+				taskID = fmt.Sprintf("#%d", i+1)
+			}
+			return fmt.Errorf("task %s: %w", taskID, err)
+		}
 	}
 	return nil
 }

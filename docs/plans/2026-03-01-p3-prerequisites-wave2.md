@@ -43,7 +43,7 @@ Expected: 当前无切换策略实现，测试失败。
 实现一次性切换策略：
 - 删除/归档不满足新结构化契约的 task_plans/task_items（如 acceptance 为空且状态非 done）。
 - 清理旧阶段残留 artifacts 与无效 pipeline->task 关系。
-- 在 entry checklist 中新增“已执行切换窗口”标记。
+- 在 entry checklist 中新增“已执行切换窗口”标记（`migration_flags.wave2_destructive_cutover_done=1`）。
 ```
 
 **Step 4: Run tests to confirm pass**

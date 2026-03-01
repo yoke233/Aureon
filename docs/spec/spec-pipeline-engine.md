@@ -46,6 +46,8 @@ spec_gen     → artifacts["spec_path"], artifacts["tasks_md"]
 spec_review  → artifacts["review_result"] (JSON: status + issues)
 worktree     → artifacts["worktree_path"], artifacts["branch_name"]
 implement    → artifacts["implement_summary"]
+               artifacts["progress_md"]          -- 执行期进度文件内容（如启用，见 spec-secretary-layer.md Section 五）
+               artifacts["findings_md"]          -- 执行期发现记录（如启用）
 code_review  → artifacts["code_review"] (JSON: status + issues)
 fixup        → artifacts["fix_summary"]
 cleanup      → artifacts["archive_path"], artifacts["cleanup_done"]
@@ -104,10 +106,11 @@ cleanup 必须在 merge 之后，因为 merge 需要 worktree 中的代码和分
 
 优先级从高到低：
 
-1. **用户显式指定** — CLI 参数 `--template quick` 或 Web/GitHub 指定
-2. **项目配置映射** — 项目配置中定义 `label_mapping: { "bug": "quick" }`
-3. **AI 推断** — 将需求描述发给 Claude，返回模板名称
-4. **全局默认** — 配置文件中的 `default_template`，兜底值为 `standard`
+1. **用户显式指定** — CLI 参数 `--template quick` 或 Web 指定
+2. **TaskItem.Template** — Secretary Agent 拆解时为每个子任务建议的模板（P2a）
+3. **项目配置映射** — 项目配置中定义 `label_mapping: { "bug": "quick" }`（仅适用于 GitHub Issue 触发的 Pipeline，P3）
+4. **AI 推断** — 将需求描述发给 Claude，返回模板名称
+5. **全局默认** — 配置文件中的 `default_template`，兜底值为 `standard`
 
 ### AI 推断规则
 
@@ -224,7 +227,7 @@ Checkpoint {
 1. 进程启动时扫描 Store 中所有 `status = running | paused | waiting_human` 的 Pipeline
 2. 对每条 Pipeline，重建内存结构（重新创建 humanCh、cancelFn 等）
 3. 根据状态分别处理：
-   - `waiting_human`：重新创建 channel，保持等待状态，推送 `human_required` 事件通知 TUI/Web/GitHub
+   - `waiting_human`：重新创建 channel，保持等待状态，推送 `human_required` 事件通知 Web/TUI/GitHub
    - `paused`：仅恢复内存结构，不启动执行，等待 Resume
    - `running`：找到最后一个 Checkpoint，根据其 Status 决定：
      - `in_progress`：该 Stage 执行中崩溃，需要清理脏状态后重新执行
@@ -288,8 +291,8 @@ skip 操作执行前需要检查硬依赖关系，以下组合不允许 skip：
 三个来源，统一进入同一个 channel：
 
 ```
-TUI 键盘操作    ─┐
-Web API 请求    ─┼──► Pipeline.humanCh ──► Executor.handleHumanAction()
+Web API 请求    ─┐
+TUI 键盘操作    ─┼──► Pipeline.humanCh ──► Executor.handleHumanAction()
 GitHub 评论命令  ─┘
 ```
 
@@ -435,7 +438,7 @@ Pipeline 级别新增 `max_total_retries` 配置（默认 5）：
 Reactions 中涉及通知的动作通过 Notifier 插件发送：
 
 ```go
-type NotifierPlugin interface {
+type Notifier interface {
     Plugin
     Notify(ctx context.Context, msg Notification) error
 }
@@ -452,9 +455,52 @@ type Notification struct {
 
 多个 Notifier 可以同时启用（desktop + slack），通知并行发送。
 
-## 七、并行执行（未来）
+## 七、与 Secretary Layer 的集成
 
-当前设计是串行执行所有 Stage。未来可通过 `depends_on` 字段实现 DAG 调度：
+### Pipeline 的创建来源
+
+Pipeline 可以从以下来源创建：
+
+| 来源 | 说明 | 阶段 |
+|------|------|------|
+| 手动创建 | 用户通过 CLI/TUI/Web 直接创建单个 Pipeline | P0 ✅ |
+| **DAG Scheduler 自动创建** | **Secretary Layer 审核通过后，为每个 TaskItem 自动创建 Pipeline** | **P2a** |
+| GitHub Issue 触发 | Webhook 监听 Issue 事件自动创建 | P3（可选） |
+
+当由 DAG Scheduler 创建时：
+- Pipeline.Name = TaskItem.Title
+- Pipeline.Description = TaskItem.Description
+- 模板由 TaskItem.Template 字段指定
+- requirements 阶段自动注入 TaskItem.Description 作为需求描述
+- Pipeline 完成/失败事件通过 Event Bus 通知 DAG Scheduler
+
+### Event Bus 新增事件
+
+以下事件由 Secretary Layer 引入。本节为这些事件的规范定义，[spec-secretary-layer.md](spec-secretary-layer.md) 引用此处。
+
+| 事件类型 | 触发时机 | 数据 |
+|---------|---------|------|
+| `plan_created` | TaskPlan 创建 | plan_id, project_id |
+| `plan_reviewing` | 进入审核 | plan_id, round |
+| `review_agent_done` | 单个 Reviewer 完成 | plan_id, reviewer, verdict |
+| `review_complete` | 审核流程完成 | plan_id, decision |
+| `plan_approved` | TaskPlan 通过审核 | plan_id |
+| `plan_waiting_human` | 等待人工确认或反馈 | plan_id, wait_reason |
+| `task_ready` | TaskItem 变为 ready | plan_id, task_id |
+| `task_running` | TaskItem 开始执行 | plan_id, task_id, pipeline_id |
+| `task_done` | TaskItem 完成 | plan_id, task_id |
+| `task_failed` | TaskItem 失败 | plan_id, task_id, error |
+| `plan_done` | 所有 TaskItem 完成 | plan_id, stats |
+| `plan_failed` | TaskPlan 失败 | plan_id, reason |
+| `plan_partially_done` | 部分成功部分失败 | plan_id, stats |
+
+这些事件和现有的 `stage_*`、`pipeline_*` 事件共存于同一个 Event Bus。
+
+> 详细的 Secretary Layer 设计（Secretary Agent、Multi-Agent Review、DAG Scheduler、Workbench UI）见 [spec-secretary-layer.md](spec-secretary-layer.md)。
+
+## 八、Stage 内并行执行（未来）
+
+当前设计是串行执行所有 Stage。未来可通过 `depends_on` 字段实现 Stage 级 DAG 调度：
 
 ```yaml
 stages:
@@ -467,3 +513,7 @@ stages:
 ```
 
 实现时 Executor 用 WaitGroup 或 errgroup 协调。但 P0 阶段不需要这个。
+
+> 注意区分两层并行：
+> - **任务级并行**（P2a）：多个 TaskItem 的 Pipeline 并行执行，由 DAG Scheduler 调度
+> - **Stage 级并行**（未来）：单个 Pipeline 内的多个 Stage 并行执行

@@ -10,6 +10,12 @@ type PipelineFilter struct {
 	Offset int
 }
 
+type TaskPlanFilter struct {
+	Status string
+	Limit  int
+	Offset int
+}
+
 type LogEntry struct {
 	ID         int64  `json:"id"`
 	PipelineID string `json:"pipeline_id"`
@@ -56,6 +62,26 @@ type Store interface {
 
 	RecordAction(action HumanAction) error
 	GetActions(pipelineID string) ([]HumanAction, error)
+
+	CreateChatSession(s *ChatSession) error
+	GetChatSession(id string) (*ChatSession, error)
+	UpdateChatSession(s *ChatSession) error
+	ListChatSessions(projectID string) ([]ChatSession, error)
+
+	CreateTaskPlan(p *TaskPlan) error
+	GetTaskPlan(id string) (*TaskPlan, error)
+	SaveTaskPlan(p *TaskPlan) error
+	ListTaskPlans(projectID string, filter TaskPlanFilter) ([]TaskPlan, error)
+	GetActiveTaskPlans() ([]TaskPlan, error)
+
+	CreateTaskItem(item *TaskItem) error
+	GetTaskItem(id string) (*TaskItem, error)
+	SaveTaskItem(item *TaskItem) error
+	GetTaskItemsByPlan(planID string) ([]TaskItem, error)
+	GetTaskItemByPipeline(pipelineID string) (*TaskItem, error)
+
+	SaveReviewRecord(r *ReviewRecord) error
+	GetReviewRecords(planID string) ([]ReviewRecord, error)
 
 	Close() error
 }

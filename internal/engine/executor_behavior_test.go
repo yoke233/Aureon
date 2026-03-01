@@ -428,6 +428,15 @@ func TestExecutor_Run_AgentPromptFromTemplate(t *testing.T) {
 	if !strings.Contains(prompt, "请根据以下需求实现代码") {
 		t.Fatalf("prompt should come from implement template, got: %s", prompt)
 	}
+	for _, required := range []string{
+		".ai-workflow/task_plan.md",
+		".ai-workflow/progress.md",
+		".ai-workflow/findings.md",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("prompt should include execution documentation instruction %q, got: %s", required, prompt)
+		}
+	}
 	if len(runtime.workDirs) == 0 || runtime.workDirs[0] != workDir {
 		t.Fatalf("runtime should execute in worktree dir %q, got %v", workDir, runtime.workDirs)
 	}

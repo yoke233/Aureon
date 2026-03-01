@@ -483,20 +483,58 @@ Agent Driver 需要同时捕获 stdout 和 stderr：
 - stdout/stderr pipe 在 Windows 上使用命名管道，行为与 Unix 的 fd 一致，无需特殊处理。
 - Session 文件路径使用 `filepath.Join()` 确保跨平台兼容。
 
-## 十、Prompt 模板管理
+## 十、Secretary Layer 对 Agent Driver 的复用
+
+### Secretary Agent
+
+Secretary Agent 不是新的 Agent 类型，而是复用 Claude Driver 的一次特殊调用。它使用 `AgentPlugin.BuildCommand()` 构造 Claude CLI 命令，传入任务拆解专用 prompt，解析 JSON 输出为 TaskPlan。
+
+```
+Secretary Agent 调用链：
+  构造 secretary.tmpl prompt → AgentPlugin(claude).BuildCommand(opts)
+  → RuntimePlugin.Create(session) → 解析 JSON → TaskPlan
+```
+
+### Review Panel Agents
+
+Multi-Agent 审核委员会的每个 Reviewer 和 Aggregator 也是复用 Claude Driver：
+
+```
+Review Agent 调用链（× 4 次，3 Reviewer + 1 Aggregator）：
+  构造 review_*.tmpl prompt → AgentPlugin(claude).BuildCommand(opts)
+  → RuntimePlugin.Create(session) → 解析 JSON → ReviewVerdict
+```
+
+与普通 Stage 执行的区别：
+- 不创建 worktree（纯分析任务）
+- 不写 Checkpoint（审核结果写入 review_records 表）
+- 超时更短（默认 5 分钟，Stage 默认 30 分钟）
+- AllowedTools 更受限（只需 Read，不需要 Write/Edit/Bash）
+
+> 详见 [spec-secretary-layer.md](spec-secretary-layer.md) 的 Multi-Agent 审核委员会章节。
+
+## 十一、Prompt 模板管理
 
 ### 模板存储
 
-每个 Stage 对应一个 prompt 模板文件：
+Pipeline Stage 和 Secretary Layer 各有对应的 prompt 模板文件：
 
 ```
 configs/prompts/
+  ├── # Pipeline Stage 模板
   ├── requirements.tmpl
   ├── spec_gen.tmpl
   ├── spec_review.tmpl
   ├── implement.tmpl
   ├── code_review.tmpl
-  └── fixup.tmpl
+  ├── fixup.tmpl
+  │
+  ├── # Secretary Layer 模板（P2a/P2b 新增）
+  ├── secretary.tmpl              # Secretary Agent 任务拆解
+  ├── review_completeness.tmpl    # 完整性审核
+  ├── review_dependency.tmpl      # 依赖性审核
+  ├── review_feasibility.tmpl     # 可行性审核
+  └── review_aggregator.tmpl      # Aggregator 综合研判
 ```
 
 ### 模板变量

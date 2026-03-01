@@ -106,6 +106,70 @@ func (noopStore) GetActions(pipelineID string) ([]core.HumanAction, error) {
 	return nil, nil
 }
 
+func (noopStore) CreateChatSession(s *core.ChatSession) error {
+	return nil
+}
+
+func (noopStore) GetChatSession(id string) (*core.ChatSession, error) {
+	return nil, nil
+}
+
+func (noopStore) UpdateChatSession(s *core.ChatSession) error {
+	return nil
+}
+
+func (noopStore) ListChatSessions(projectID string) ([]core.ChatSession, error) {
+	return nil, nil
+}
+
+func (noopStore) CreateTaskPlan(p *core.TaskPlan) error {
+	return nil
+}
+
+func (noopStore) GetTaskPlan(id string) (*core.TaskPlan, error) {
+	return nil, nil
+}
+
+func (noopStore) SaveTaskPlan(p *core.TaskPlan) error {
+	return nil
+}
+
+func (noopStore) ListTaskPlans(projectID string, filter core.TaskPlanFilter) ([]core.TaskPlan, error) {
+	return nil, nil
+}
+
+func (noopStore) GetActiveTaskPlans() ([]core.TaskPlan, error) {
+	return nil, nil
+}
+
+func (noopStore) CreateTaskItem(item *core.TaskItem) error {
+	return nil
+}
+
+func (noopStore) GetTaskItem(id string) (*core.TaskItem, error) {
+	return nil, nil
+}
+
+func (noopStore) SaveTaskItem(item *core.TaskItem) error {
+	return nil
+}
+
+func (noopStore) GetTaskItemsByPlan(planID string) ([]core.TaskItem, error) {
+	return nil, nil
+}
+
+func (noopStore) GetTaskItemByPipeline(pipelineID string) (*core.TaskItem, error) {
+	return nil, nil
+}
+
+func (noopStore) SaveReviewRecord(r *core.ReviewRecord) error {
+	return nil
+}
+
+func (noopStore) GetReviewRecords(planID string) ([]core.ReviewRecord, error) {
+	return nil, nil
+}
+
 func (noopStore) Close() error {
 	return nil
 }

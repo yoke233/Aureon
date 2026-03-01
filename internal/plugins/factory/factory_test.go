@@ -29,6 +29,30 @@ func TestFactoryBuildKnownPlugin(t *testing.T) {
 	if _, ok := set.Agents["codex"]; !ok {
 		t.Fatal("expected codex agent to be initialized")
 	}
+	if set.ReviewGate == nil {
+		t.Fatal("expected review gate to be initialized")
+	}
+	if set.ReviewGate.Name() != "local" {
+		t.Fatalf("expected review gate name local, got %q", set.ReviewGate.Name())
+	}
+	if set.Tracker == nil {
+		t.Fatal("expected tracker to be initialized")
+	}
+	if set.Tracker.Name() != "local" {
+		t.Fatalf("expected tracker name local, got %q", set.Tracker.Name())
+	}
+	if set.SCM == nil {
+		t.Fatal("expected scm to be initialized")
+	}
+	if set.SCM.Name() != "local-git" {
+		t.Fatalf("expected scm name local-git, got %q", set.SCM.Name())
+	}
+	if set.Notifier == nil {
+		t.Fatal("expected notifier to be initialized")
+	}
+	if set.Notifier.Name() != "desktop" {
+		t.Fatalf("expected notifier name desktop, got %q", set.Notifier.Name())
+	}
 }
 
 func TestFactoryBuildUnknownPlugin(t *testing.T) {

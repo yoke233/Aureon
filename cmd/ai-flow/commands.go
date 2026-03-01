@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,19 +22,49 @@ import (
 	"github.com/user/ai-workflow/internal/engine"
 	"github.com/user/ai-workflow/internal/eventbus"
 	pluginfactory "github.com/user/ai-workflow/internal/plugins/factory"
+	"github.com/user/ai-workflow/internal/web"
 )
 
 var recoveryOnce sync.Once
 
+const defaultServerPort = 8080
+
+type apiServer interface {
+	Start() error
+	Shutdown(ctx context.Context) error
+}
+
+type serverScheduler interface {
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+}
+
+var (
+	newAPIServer = func(cfg web.Config) apiServer {
+		return web.NewServer(cfg)
+	}
+	newServerScheduler = func(exec *engine.Executor, store core.Store) (serverScheduler, error) {
+		return buildScheduler(exec, store)
+	}
+)
+
 func bootstrap() (*engine.Executor, core.Store, error) {
-	cfg, err := loadBootstrapConfig()
+	exec, store, _, err := bootstrapWithEventBus()
 	if err != nil {
 		return nil, nil, err
+	}
+	return exec, store, nil
+}
+
+func bootstrapWithEventBus() (*engine.Executor, core.Store, *eventbus.Bus, error) {
+	cfg, err := loadBootstrapConfig()
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	bootstrapSet, err := pluginfactory.BuildFromConfig(*cfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	bus := eventbus.New()
@@ -47,7 +79,7 @@ func bootstrap() (*engine.Executor, core.Store, error) {
 		}()
 	})
 
-	return exec, bootstrapSet.Store, nil
+	return exec, bootstrapSet.Store, bus, nil
 }
 
 func loadBootstrapConfig() (*config.Config, error) {
@@ -60,11 +92,10 @@ func loadBootstrapConfig() (*config.Config, error) {
 		return nil, err
 	}
 	cfgPath := filepath.Join(dataDir, "config.yaml")
-	if _, err := os.Stat(cfgPath); err == nil {
+	if _, statErr := os.Stat(cfgPath); statErr == nil {
 		return config.LoadGlobal(cfgPath)
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
 	}
 
 	cfg := config.Defaults()
@@ -391,6 +422,165 @@ func parseActionType(raw string) (core.HumanActionType, error) {
 	default:
 		return "", fmt.Errorf("unknown action type: %s", raw)
 	}
+}
+
+func cmdServer(args []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runServer(ctx, args)
+}
+
+func runServer(ctx context.Context, args []string) error {
+	port, err := parseServerPort(args)
+	if err != nil {
+		return err
+	}
+
+	exec, store, bus, err := bootstrapWithEventBus()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	defer bus.Close()
+
+	cfg, err := loadBootstrapConfig()
+	if err != nil {
+		return err
+	}
+
+	port = resolveServerPort(port, cfg.Server.Port)
+	listenAddr := buildServerAddress(cfg.Server.Host, port)
+
+	scheduler, err := newServerScheduler(exec, store)
+	if err != nil {
+		return err
+	}
+	if err := scheduler.Start(ctx); err != nil {
+		return err
+	}
+
+	hub := web.NewHub()
+	sub := bus.Subscribe()
+	bridgeDone := make(chan struct{})
+	go func() {
+		defer close(bridgeDone)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case evt, ok := <-sub:
+				if !ok {
+					return
+				}
+				hub.BroadcastCoreEvent(evt)
+			}
+		}
+	}()
+
+	apiServer := newAPIServer(web.Config{
+		Addr:        listenAddr,
+		AuthEnabled: cfg.Server.AuthEnabled,
+		BearerToken: cfg.Server.AuthToken,
+		Store:       store,
+		Hub:         hub,
+	})
+
+	serverErrCh := make(chan error, 1)
+	go func() {
+		serverErrCh <- apiServer.Start()
+	}()
+
+	fmt.Printf("Server started on %s (ws: /api/v1/ws). Press Ctrl+C to stop.\n", listenAddr)
+
+	select {
+	case serverErr := <-serverErrCh:
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		stopErr := scheduler.Stop(stopCtx)
+		bus.Unsubscribe(sub)
+		<-bridgeDone
+		return errors.Join(serverErr, stopErr)
+	case <-ctx.Done():
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var shutdownErr error
+	if err := apiServer.Shutdown(stopCtx); err != nil {
+		shutdownErr = err
+	}
+	if err := scheduler.Stop(stopCtx); err != nil && shutdownErr == nil {
+		shutdownErr = err
+	}
+	bus.Unsubscribe(sub)
+	<-bridgeDone
+
+	select {
+	case serverErr := <-serverErrCh:
+		if serverErr != nil && shutdownErr == nil {
+			shutdownErr = serverErr
+		}
+	case <-stopCtx.Done():
+	}
+
+	return shutdownErr
+}
+
+func parseServerPort(args []string) (int, error) {
+	port := 0
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "--port":
+			i++
+			if i >= len(args) {
+				return 0, fmt.Errorf("usage: ai-flow server [--port <port>]")
+			}
+			parsed, err := parsePortValue(args[i])
+			if err != nil {
+				return 0, err
+			}
+			port = parsed
+		case strings.HasPrefix(arg, "--port="):
+			raw := strings.TrimSpace(strings.TrimPrefix(arg, "--port="))
+			parsed, err := parsePortValue(raw)
+			if err != nil {
+				return 0, err
+			}
+			port = parsed
+		default:
+			return 0, fmt.Errorf("usage: ai-flow server [--port <port>]")
+		}
+	}
+	return port, nil
+}
+
+func parsePortValue(raw string) (int, error) {
+	trimmed := strings.TrimSpace(raw)
+	port, err := strconv.Atoi(trimmed)
+	if err != nil || port <= 0 || port > 65535 {
+		return 0, fmt.Errorf("invalid --port value: %s", raw)
+	}
+	return port, nil
+}
+
+func resolveServerPort(cliPort int, cfgPort int) int {
+	if cliPort > 0 {
+		return cliPort
+	}
+	if cfgPort > 0 && cfgPort <= 65535 {
+		return cfgPort
+	}
+	return defaultServerPort
+}
+
+func buildServerAddress(host string, port int) string {
+	trimmedHost := strings.TrimSpace(host)
+	if trimmedHost == "" {
+		return fmt.Sprintf(":%d", port)
+	}
+	return net.JoinHostPort(trimmedHost, strconv.Itoa(port))
 }
 
 func cmdSchedulerRun() error {

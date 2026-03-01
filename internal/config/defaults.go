@@ -35,6 +35,10 @@ func Defaults() Config {
 			MaxGlobalAgents:     3,
 			MaxProjectPipelines: 2,
 		},
+		Server: ServerConfig{
+			Host: "127.0.0.1",
+			Port: 8080,
+		},
 		Store: StoreConfig{
 			Driver: "sqlite",
 			Path:   "~/.ai-workflow/data.db",

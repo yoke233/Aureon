@@ -11,16 +11,31 @@ import (
 	"github.com/user/ai-workflow/internal/core"
 	agentclaude "github.com/user/ai-workflow/internal/plugins/agent-claude"
 	agentcodex "github.com/user/ai-workflow/internal/plugins/agent-codex"
+	notifierdesktop "github.com/user/ai-workflow/internal/plugins/notifier-desktop"
+	reviewlocal "github.com/user/ai-workflow/internal/plugins/review-local"
 	runtimeprocess "github.com/user/ai-workflow/internal/plugins/runtime-process"
+	scmlocalgit "github.com/user/ai-workflow/internal/plugins/scm-local-git"
 	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+	trackerlocal "github.com/user/ai-workflow/internal/plugins/tracker-local"
 )
 
 // BootstrapSet contains initialized plugins required by engine bootstrap.
 type BootstrapSet struct {
-	Agents  map[string]core.AgentPlugin
-	Runtime core.RuntimePlugin
-	Store   core.Store
+	Agents     map[string]core.AgentPlugin
+	Runtime    core.RuntimePlugin
+	Store      core.Store
+	ReviewGate core.ReviewGate
+	Tracker    core.Tracker
+	SCM        core.SCM
+	Notifier   core.Notifier
 }
+
+const (
+	defaultReviewGatePlugin = "review-local"
+	defaultTrackerPlugin    = "tracker-local"
+	defaultSCMPlugin        = "local-git"
+	defaultNotifierPlugin   = "desktop"
+)
 
 type storeProvider interface {
 	core.Plugin
@@ -111,10 +126,68 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 		return nil, fmt.Errorf("no agent plugins configured")
 	}
 
+	reviewGateModule, ok := registry.Get(core.SlotReviewGate, defaultReviewGatePlugin)
+	if !ok {
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotReviewGate, defaultReviewGatePlugin)
+	}
+	reviewGateRaw, err := reviewGateModule.Factory(map[string]any{
+		"store": storePlugin.Store(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build review gate plugin %q: %w", defaultReviewGatePlugin, err)
+	}
+	reviewGatePlugin, ok := reviewGateRaw.(core.ReviewGate)
+	if !ok {
+		return nil, fmt.Errorf("plugin is not a review gate plugin: slot=%s name=%s", core.SlotReviewGate, defaultReviewGatePlugin)
+	}
+
+	trackerModule, ok := registry.Get(core.SlotTracker, defaultTrackerPlugin)
+	if !ok {
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotTracker, defaultTrackerPlugin)
+	}
+	trackerRaw, err := trackerModule.Factory(nil)
+	if err != nil {
+		return nil, fmt.Errorf("build tracker plugin %q: %w", defaultTrackerPlugin, err)
+	}
+	trackerPlugin, ok := trackerRaw.(core.Tracker)
+	if !ok {
+		return nil, fmt.Errorf("plugin is not a tracker plugin: slot=%s name=%s", core.SlotTracker, defaultTrackerPlugin)
+	}
+
+	scmModule, ok := registry.Get(core.SlotSCM, defaultSCMPlugin)
+	if !ok {
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotSCM, defaultSCMPlugin)
+	}
+	scmRaw, err := scmModule.Factory(nil)
+	if err != nil {
+		return nil, fmt.Errorf("build scm plugin %q: %w", defaultSCMPlugin, err)
+	}
+	scmPlugin, ok := scmRaw.(core.SCM)
+	if !ok {
+		return nil, fmt.Errorf("plugin is not a scm plugin: slot=%s name=%s", core.SlotSCM, defaultSCMPlugin)
+	}
+
+	notifierModule, ok := registry.Get(core.SlotNotifier, defaultNotifierPlugin)
+	if !ok {
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotNotifier, defaultNotifierPlugin)
+	}
+	notifierRaw, err := notifierModule.Factory(nil)
+	if err != nil {
+		return nil, fmt.Errorf("build notifier plugin %q: %w", defaultNotifierPlugin, err)
+	}
+	notifierPlugin, ok := notifierRaw.(core.Notifier)
+	if !ok {
+		return nil, fmt.Errorf("plugin is not a notifier plugin: slot=%s name=%s", core.SlotNotifier, defaultNotifierPlugin)
+	}
+
 	return &BootstrapSet{
-		Agents:  agents,
-		Runtime: runtimePlugin,
-		Store:   storePlugin.Store(),
+		Agents:     agents,
+		Runtime:    runtimePlugin,
+		Store:      storePlugin.Store(),
+		ReviewGate: reviewGatePlugin,
+		Tracker:    trackerPlugin,
+		SCM:        scmPlugin,
+		Notifier:   notifierPlugin,
 	}, nil
 }
 
@@ -161,6 +234,46 @@ func newDefaultRegistry() (*core.Registry, error) {
 					return nil, err
 				}
 				return &storeAdapter{name: "sqlite", store: store}, nil
+			},
+		},
+		{
+			Name: defaultReviewGatePlugin,
+			Slot: core.SlotReviewGate,
+			Factory: func(cfg map[string]any) (core.Plugin, error) {
+				if cfg == nil {
+					return nil, fmt.Errorf("review-local requires store dependency")
+				}
+				rawStore, ok := cfg["store"]
+				if !ok {
+					return nil, fmt.Errorf("review-local requires store dependency")
+				}
+				store, ok := rawStore.(core.Store)
+				if !ok || store == nil {
+					return nil, fmt.Errorf("review-local requires valid store dependency")
+				}
+				return reviewlocal.New(store), nil
+			},
+		},
+		{
+			Name: defaultTrackerPlugin,
+			Slot: core.SlotTracker,
+			Factory: func(map[string]any) (core.Plugin, error) {
+				return trackerlocal.New(), nil
+			},
+		},
+		{
+			Name: defaultSCMPlugin,
+			Slot: core.SlotSCM,
+			Factory: func(cfg map[string]any) (core.Plugin, error) {
+				repoDir := stringFromMap(cfg, "repo_dir", ".")
+				return scmlocalgit.New(repoDir), nil
+			},
+		},
+		{
+			Name: defaultNotifierPlugin,
+			Slot: core.SlotNotifier,
+			Factory: func(map[string]any) (core.Plugin, error) {
+				return notifierdesktop.New(), nil
 			},
 		},
 	}

@@ -1,0 +1,451 @@
+package web
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/user/ai-workflow/internal/core"
+)
+
+func TestCreateListGetPlanAndDAG(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-plan-api",
+		Name:     "plan-api",
+		RepoPath: filepath.Join(t.TempDir(), "repo-plan-api"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	session := &core.ChatSession{
+		ID:        "chat-20260301-planapi01",
+		ProjectID: project.ID,
+		Messages: []core.ChatMessage{
+			{Role: "user", Content: "把 OAuth 登录拆成任务"},
+		},
+	}
+	if err := store.CreateChatSession(session); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	rawBody, err := json.Marshal(map[string]any{
+		"session_id": session.ID,
+		"name":       "oauth-plan",
+	})
+	if err != nil {
+		t.Fatalf("marshal create plan body: %v", err)
+	}
+
+	createResp, err := http.Post(
+		ts.URL+"/api/v1/projects/proj-plan-api/plans",
+		"application/json",
+		bytes.NewReader(rawBody),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/v1/projects/{pid}/plans: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", createResp.StatusCode)
+	}
+
+	var created core.TaskPlan
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created plan: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatal("expected non-empty plan id")
+	}
+	if created.Status != core.PlanDraft {
+		t.Fatalf("expected status draft, got %s", created.Status)
+	}
+
+	task1 := core.TaskItem{
+		ID:          "task-planapi-1",
+		PlanID:      created.ID,
+		Title:       "设计 OAuth 回调路由",
+		Description: "设计 OAuth 回调路由并定义请求参数",
+		Status:      core.ItemPending,
+	}
+	task2 := core.TaskItem{
+		ID:          "task-planapi-2",
+		PlanID:      created.ID,
+		Title:       "补齐登录状态测试",
+		Description: "补齐登录状态测试并覆盖 token 刷新路径",
+		DependsOn:   []string{task1.ID},
+		Status:      core.ItemRunning,
+	}
+	if err := store.CreateTaskItem(&task1); err != nil {
+		t.Fatalf("seed task1: %v", err)
+	}
+	if err := store.CreateTaskItem(&task2); err != nil {
+		t.Fatalf("seed task2: %v", err)
+	}
+
+	listResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans?status=draft&limit=10&offset=0")
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects/{pid}/plans: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", listResp.StatusCode)
+	}
+
+	var listed struct {
+		Items  []core.TaskPlan `json:"items"`
+		Total  int             `json:"total"`
+		Offset int             `json:"offset"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list plans response: %v", err)
+	}
+	if listed.Total != 1 {
+		t.Fatalf("expected total=1, got %d", listed.Total)
+	}
+	if len(listed.Items) != 1 || listed.Items[0].ID != created.ID {
+		t.Fatalf("unexpected list items: %#v", listed.Items)
+	}
+
+	getResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans/" + created.ID)
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects/{pid}/plans/{id}: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", getResp.StatusCode)
+	}
+
+	var got core.TaskPlan
+	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode get plan response: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Fatalf("expected plan id %s, got %s", created.ID, got.ID)
+	}
+	if len(got.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(got.Tasks))
+	}
+
+	dagResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans/" + created.ID + "/dag")
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects/{pid}/plans/{id}/dag: %v", err)
+	}
+	defer dagResp.Body.Close()
+	if dagResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", dagResp.StatusCode)
+	}
+
+	var dag struct {
+		Nodes []struct {
+			ID         string              `json:"id"`
+			Title      string              `json:"title"`
+			Status     core.TaskItemStatus `json:"status"`
+			PipelineID string              `json:"pipeline_id"`
+		} `json:"nodes"`
+		Edges []struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		} `json:"edges"`
+		Stats struct {
+			Total   int `json:"total"`
+			Pending int `json:"pending"`
+			Ready   int `json:"ready"`
+			Running int `json:"running"`
+			Done    int `json:"done"`
+			Failed  int `json:"failed"`
+		} `json:"stats"`
+	}
+	if err := json.NewDecoder(dagResp.Body).Decode(&dag); err != nil {
+		t.Fatalf("decode dag response: %v", err)
+	}
+	if len(dag.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(dag.Nodes))
+	}
+	if len(dag.Edges) != 1 {
+		t.Fatalf("expected 1 edge, got %d", len(dag.Edges))
+	}
+	if dag.Stats.Total != 2 || dag.Stats.Pending != 1 || dag.Stats.Running != 1 {
+		t.Fatalf("unexpected stats: %#v", dag.Stats)
+	}
+}
+
+func TestSubmitPlanReviewReturnsReviewing(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-review-api",
+		Name:     "review-api",
+		RepoPath: filepath.Join(t.TempDir(), "repo-review-api"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	plan := &core.TaskPlan{
+		ID:         "plan-20260301-reviewapi",
+		ProjectID:  project.ID,
+		Name:       "review-plan",
+		Status:     core.PlanDraft,
+		WaitReason: core.WaitNone,
+		FailPolicy: core.FailBlock,
+	}
+	if err := store.CreateTaskPlan(plan); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		ts.URL+"/api/v1/projects/proj-review-api/plans/"+plan.ID+"/review",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/v1/projects/{pid}/plans/{id}/review: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode review response: %v", err)
+	}
+	if out.Status != string(core.PlanReviewing) {
+		t.Fatalf("expected status reviewing, got %s", out.Status)
+	}
+
+	updated, err := store.GetTaskPlan(plan.ID)
+	if err != nil {
+		t.Fatalf("reload plan: %v", err)
+	}
+	if updated.Status != core.PlanReviewing {
+		t.Fatalf("expected persisted status reviewing, got %s", updated.Status)
+	}
+}
+
+func TestPlanActionRejectRequiresTwoPhaseFeedback(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-action-api",
+		Name:     "action-api",
+		RepoPath: filepath.Join(t.TempDir(), "repo-action-api"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	plan := &core.TaskPlan{
+		ID:         "plan-20260301-actionapi",
+		ProjectID:  project.ID,
+		Name:       "action-plan",
+		Status:     core.PlanWaitingHuman,
+		WaitReason: core.WaitFinalApproval,
+		FailPolicy: core.FailBlock,
+	}
+	if err := store.CreateTaskPlan(plan); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	assertActionCode := func(body string, wantCode string) {
+		t.Helper()
+		resp, err := http.Post(
+			ts.URL+"/api/v1/projects/proj-action-api/plans/"+plan.ID+"/action",
+			"application/json",
+			strings.NewReader(body),
+		)
+		if err != nil {
+			t.Fatalf("POST /api/v1/projects/{pid}/plans/{id}/action: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d", resp.StatusCode)
+		}
+
+		var apiErr apiError
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+			t.Fatalf("decode api error: %v", err)
+		}
+		if apiErr.Code != wantCode {
+			t.Fatalf("expected code %s, got %s", wantCode, apiErr.Code)
+		}
+	}
+
+	assertActionCode(`{"action":"reject"}`, "FEEDBACK_REQUIRED")
+	assertActionCode(`{"action":"reject","feedback":{"detail":"这是足够长的说明用于触发缺失类别校验"}}`, "FEEDBACK_CATEGORY_REQUIRED")
+	assertActionCode(`{"action":"reject","feedback":{"category":"coverage_gap"}}`, "FEEDBACK_DETAIL_REQUIRED")
+	assertActionCode(`{"action":"reject","feedback":{"category":"coverage_gap","detail":"太短"}}`, "INVALID_FEEDBACK")
+
+	successBody := map[string]any{
+		"action": "reject",
+		"feedback": map[string]any{
+			"category":           "coverage_gap",
+			"detail":             "当前计划遗漏了审计日志回归测试任务，请补齐并补充依赖关系。",
+			"expected_direction": "增加审计日志回归任务并依赖登录主流程任务",
+		},
+	}
+	rawSuccessBody, err := json.Marshal(successBody)
+	if err != nil {
+		t.Fatalf("marshal success request body: %v", err)
+	}
+	successResp, err := http.Post(
+		ts.URL+"/api/v1/projects/proj-action-api/plans/"+plan.ID+"/action",
+		"application/json",
+		bytes.NewReader(rawSuccessBody),
+	)
+	if err != nil {
+		t.Fatalf("POST reject with valid feedback: %v", err)
+	}
+	defer successResp.Body.Close()
+	if successResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", successResp.StatusCode)
+	}
+
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(successResp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode success response: %v", err)
+	}
+	if out.Status != string(core.PlanReviewing) {
+		t.Fatalf("expected status reviewing, got %s", out.Status)
+	}
+
+	updated, err := store.GetTaskPlan(plan.ID)
+	if err != nil {
+		t.Fatalf("reload plan: %v", err)
+	}
+	if updated.Status != core.PlanReviewing {
+		t.Fatalf("expected persisted status reviewing, got %s", updated.Status)
+	}
+}
+
+func TestListPlansTotalReflectsUnpaginatedCount(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-plan-total",
+		Name:     "plan-total",
+		RepoPath: filepath.Join(t.TempDir(), "repo-plan-total"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+
+	plan1 := &core.TaskPlan{
+		ID:         "plan-20260301-total01",
+		ProjectID:  project.ID,
+		Name:       "total-1",
+		Status:     core.PlanDraft,
+		WaitReason: core.WaitNone,
+		FailPolicy: core.FailBlock,
+	}
+	plan2 := &core.TaskPlan{
+		ID:         "plan-20260301-total02",
+		ProjectID:  project.ID,
+		Name:       "total-2",
+		Status:     core.PlanDraft,
+		WaitReason: core.WaitNone,
+		FailPolicy: core.FailBlock,
+	}
+	if err := store.CreateTaskPlan(plan1); err != nil {
+		t.Fatalf("seed plan1: %v", err)
+	}
+	if err := store.CreateTaskPlan(plan2); err != nil {
+		t.Fatalf("seed plan2: %v", err)
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-total/plans?status=draft&limit=1&offset=0")
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects/{pid}/plans: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var listed struct {
+		Items  []core.TaskPlan `json:"items"`
+		Total  int             `json:"total"`
+		Offset int             `json:"offset"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list plans response: %v", err)
+	}
+	if listed.Total != 2 {
+		t.Fatalf("expected total=2, got %d", listed.Total)
+	}
+	if len(listed.Items) != 1 {
+		t.Fatalf("expected paginated items=1, got %d", len(listed.Items))
+	}
+}
+
+func TestPlanActionApproveRequiresWaitingHumanFinalApproval(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-action-conflict",
+		Name:     "action-conflict",
+		RepoPath: filepath.Join(t.TempDir(), "repo-action-conflict"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	plan := &core.TaskPlan{
+		ID:         "plan-20260301-conflict",
+		ProjectID:  project.ID,
+		Name:       "conflict-plan",
+		Status:     core.PlanDraft,
+		WaitReason: core.WaitNone,
+		FailPolicy: core.FailBlock,
+	}
+	if err := store.CreateTaskPlan(plan); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(
+		ts.URL+"/api/v1/projects/proj-action-conflict/plans/"+plan.ID+"/action",
+		"application/json",
+		strings.NewReader(`{"action":"approve"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/v1/projects/{pid}/plans/{id}/action: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", resp.StatusCode)
+	}
+
+	var apiErr apiError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode api error: %v", err)
+	}
+	if apiErr.Code != "PLAN_STATUS_INVALID" {
+		t.Fatalf("expected PLAN_STATUS_INVALID, got %s", apiErr.Code)
+	}
+}

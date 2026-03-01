@@ -1,0 +1,301 @@
+package web
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/user/ai-workflow/internal/core"
+)
+
+const (
+	wsWriteWait  = 10 * time.Second
+	wsPongWait   = 60 * time.Second
+	wsPingPeriod = 30 * time.Second
+	wsMaxMessage = 1 << 20
+)
+
+type WSMessage struct {
+	Type       string         `json:"type"`
+	PipelineID string         `json:"pipeline_id,omitempty"`
+	ProjectID  string         `json:"project_id,omitempty"`
+	PlanID     string         `json:"plan_id,omitempty"`
+	Data       map[string]any `json:"data,omitempty"`
+}
+
+type wsClientMessage struct {
+	Type       string `json:"type"`
+	PipelineID string `json:"pipeline_id,omitempty"`
+	PlanID     string `json:"plan_id,omitempty"`
+}
+
+type Hub struct {
+	upgrader websocket.Upgrader
+
+	mu      sync.RWMutex
+	clients map[*wsClient]struct{}
+}
+
+type wsClient struct {
+	hub  *Hub
+	conn *websocket.Conn
+	send chan []byte
+
+	subMu        sync.RWMutex
+	pipelineSubs map[string]struct{}
+	planSubs     map[string]struct{}
+}
+
+func NewHub() *Hub {
+	return &Hub{
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(_ *http.Request) bool {
+				return true
+			},
+		},
+		clients: make(map[*wsClient]struct{}),
+	}
+}
+
+func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+
+	client := &wsClient{
+		hub:          h,
+		conn:         conn,
+		send:         make(chan []byte, 64),
+		pipelineSubs: make(map[string]struct{}),
+		planSubs:     make(map[string]struct{}),
+	}
+
+	h.register(client)
+	go client.writePump()
+	client.readPump()
+}
+
+func (h *Hub) register(client *wsClient) {
+	h.mu.Lock()
+	h.clients[client] = struct{}{}
+	h.mu.Unlock()
+}
+
+func (h *Hub) unregister(client *wsClient) {
+	h.mu.Lock()
+	if _, ok := h.clients[client]; ok {
+		delete(h.clients, client)
+		close(client.send)
+	}
+	h.mu.Unlock()
+}
+
+func (h *Hub) ConnectionCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients)
+}
+
+func (h *Hub) Broadcast(msg WSMessage) {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		if !client.shouldReceive(msg) {
+			continue
+		}
+		select {
+		case client.send <- payload:
+		default:
+		}
+	}
+}
+
+func (h *Hub) BroadcastCoreEvent(evt core.Event) {
+	data := map[string]any{
+		"timestamp": evt.Timestamp.UTC().Format(time.RFC3339Nano),
+	}
+	if evt.Stage != "" {
+		data["stage"] = evt.Stage
+	}
+	if evt.Agent != "" {
+		data["agent"] = evt.Agent
+	}
+	if len(evt.Data) > 0 {
+		for k, v := range evt.Data {
+			data[k] = v
+		}
+	}
+	if evt.Error != "" {
+		data["error"] = evt.Error
+	}
+	planID := strings.TrimSpace(evt.PlanID)
+	if planID == "" && evt.Data != nil {
+		planID = strings.TrimSpace(evt.Data["plan_id"])
+	}
+
+	h.Broadcast(WSMessage{
+		Type:       string(evt.Type),
+		PipelineID: evt.PipelineID,
+		ProjectID:  evt.ProjectID,
+		PlanID:     planID,
+		Data:       data,
+	})
+}
+
+func (c *wsClient) readPump() {
+	defer func() {
+		c.hub.unregister(c)
+		_ = c.conn.Close()
+	}()
+
+	c.conn.SetReadLimit(wsMaxMessage)
+	_ = c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+
+	for {
+		var msg wsClientMessage
+		if err := c.conn.ReadJSON(&msg); err != nil {
+			return
+		}
+		c.handleClientMessage(msg)
+	}
+}
+
+func (c *wsClient) writePump() {
+	ticker := time.NewTicker(wsPingPeriod)
+	defer func() {
+		ticker.Stop()
+		_ = c.conn.Close()
+	}()
+
+	for {
+		select {
+		case payload, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if !ok {
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *wsClient) handleClientMessage(msg wsClientMessage) {
+	switch msg.Type {
+	case "subscribe_pipeline":
+		id := strings.TrimSpace(msg.PipelineID)
+		if id == "" {
+			c.sendError("pipeline_id is required")
+			return
+		}
+		c.subMu.Lock()
+		c.pipelineSubs[id] = struct{}{}
+		c.subMu.Unlock()
+		c.sendJSON(WSMessage{Type: "subscribed", PipelineID: id})
+	case "unsubscribe_pipeline":
+		id := strings.TrimSpace(msg.PipelineID)
+		if id == "" {
+			c.sendError("pipeline_id is required")
+			return
+		}
+		c.subMu.Lock()
+		delete(c.pipelineSubs, id)
+		c.subMu.Unlock()
+		c.sendJSON(WSMessage{Type: "unsubscribed", PipelineID: id})
+	case "subscribe_plan":
+		id := strings.TrimSpace(msg.PlanID)
+		if id == "" {
+			c.sendError("plan_id is required")
+			return
+		}
+		c.subMu.Lock()
+		c.planSubs[id] = struct{}{}
+		c.subMu.Unlock()
+		c.sendJSON(WSMessage{Type: "subscribed", PlanID: id})
+	case "unsubscribe_plan":
+		id := strings.TrimSpace(msg.PlanID)
+		if id == "" {
+			c.sendError("plan_id is required")
+			return
+		}
+		c.subMu.Lock()
+		delete(c.planSubs, id)
+		c.subMu.Unlock()
+		c.sendJSON(WSMessage{Type: "unsubscribed", PlanID: id})
+	default:
+		c.sendError("unsupported message type")
+	}
+}
+
+func (c *wsClient) shouldReceive(msg WSMessage) bool {
+	if msg.Type == "" {
+		return false
+	}
+
+	if msg.Type == "agent_output" {
+		if msg.PipelineID == "" {
+			return false
+		}
+		c.subMu.RLock()
+		_, ok := c.pipelineSubs[msg.PipelineID]
+		c.subMu.RUnlock()
+		return ok
+	}
+
+	eventType := core.EventType(msg.Type)
+	if core.IsAlwaysBroadcastPlanEvent(eventType) {
+		return true
+	}
+	if core.IsPlanScopedEvent(eventType) {
+		if msg.PlanID == "" {
+			return false
+		}
+		c.subMu.RLock()
+		_, ok := c.planSubs[msg.PlanID]
+		c.subMu.RUnlock()
+		return ok
+	}
+
+	return true
+}
+
+func (c *wsClient) sendError(message string) {
+	c.sendJSON(WSMessage{
+		Type: "error",
+		Data: map[string]any{
+			"message": message,
+		},
+	})
+}
+
+func (c *wsClient) sendJSON(msg WSMessage) {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	select {
+	case c.send <- payload:
+	default:
+	}
+}

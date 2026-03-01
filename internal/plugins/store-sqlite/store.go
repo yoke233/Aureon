@@ -507,6 +507,565 @@ func (s *SQLiteStore) GetActions(pipelineID string) ([]core.HumanAction, error) 
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) CreateChatSession(session *core.ChatSession) error {
+	messagesJSON, err := marshalJSON(session.Messages)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO chat_sessions (id, project_id, messages) VALUES (?,?,?)`,
+		session.ID, session.ProjectID, messagesJSON,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetChatSession(id string) (*core.ChatSession, error) {
+	session := &core.ChatSession{}
+	var messagesJSON string
+	err := s.db.QueryRow(
+		`SELECT id, project_id, messages, created_at, updated_at FROM chat_sessions WHERE id=?`,
+		id,
+	).Scan(&session.ID, &session.ProjectID, &messagesJSON, &session.CreatedAt, &session.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("chat session %s not found", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(messagesJSON, &session.Messages); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+func (s *SQLiteStore) UpdateChatSession(session *core.ChatSession) error {
+	messagesJSON, err := marshalJSON(session.Messages)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.Exec(
+		`UPDATE chat_sessions SET messages=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		messagesJSON, session.ID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("chat session %s not found", session.ID)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListChatSessions(projectID string) ([]core.ChatSession, error) {
+	rows, err := s.db.Query(
+		`SELECT id, project_id, messages, created_at, updated_at
+		 FROM chat_sessions
+		 WHERE project_id=?
+		 ORDER BY created_at DESC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.ChatSession
+	for rows.Next() {
+		var (
+			session      core.ChatSession
+			messagesJSON string
+		)
+		if err := rows.Scan(&session.ID, &session.ProjectID, &messagesJSON, &session.CreatedAt, &session.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(messagesJSON, &session.Messages); err != nil {
+			return nil, err
+		}
+		out = append(out, session)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) DeleteChatSession(id string) error {
+	result, err := s.db.Exec(`DELETE FROM chat_sessions WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("chat session %s not found", id)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) CreateTaskPlan(plan *core.TaskPlan) error {
+	_, err := s.db.Exec(
+		`INSERT INTO task_plans (id, project_id, session_id, name, status, wait_reason, fail_policy, review_round)
+		 VALUES (?,?,?,?,?,?,?,?)`,
+		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetTaskPlan(id string) (*core.TaskPlan, error) {
+	plan := &core.TaskPlan{}
+	err := s.db.QueryRow(
+		`SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round, created_at, updated_at
+		 FROM task_plans WHERE id=?`,
+		id,
+	).Scan(
+		&plan.ID, &plan.ProjectID, &plan.SessionID, &plan.Name, &plan.Status, &plan.WaitReason, &plan.FailPolicy,
+		&plan.ReviewRound, &plan.CreatedAt, &plan.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("task plan %s not found", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := s.GetTaskItemsByPlan(plan.ID)
+	if err != nil {
+		return nil, err
+	}
+	plan.Tasks = tasks
+	return plan, nil
+}
+
+func (s *SQLiteStore) SaveTaskPlan(plan *core.TaskPlan) error {
+	_, err := s.db.Exec(`
+INSERT INTO task_plans (
+	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round
+) VALUES (?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+	project_id=excluded.project_id,
+	session_id=excluded.session_id,
+	name=excluded.name,
+	status=excluded.status,
+	wait_reason=excluded.wait_reason,
+	fail_policy=excluded.fail_policy,
+	review_round=excluded.review_round,
+	updated_at=CURRENT_TIMESTAMP`,
+		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
+	)
+	return err
+}
+
+// ReplaceTaskPlanAndItems atomically upserts a plan and replaces all its task_items.
+func (s *SQLiteStore) ReplaceTaskPlanAndItems(plan *core.TaskPlan, items []core.TaskItem) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.Exec(`
+INSERT INTO task_plans (
+	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round
+) VALUES (?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+	project_id=excluded.project_id,
+	session_id=excluded.session_id,
+	name=excluded.name,
+	status=excluded.status,
+	wait_reason=excluded.wait_reason,
+	fail_policy=excluded.fail_policy,
+	review_round=excluded.review_round,
+	updated_at=CURRENT_TIMESTAMP`,
+		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`DELETE FROM task_items WHERE plan_id=?`, plan.ID); err != nil {
+		return err
+	}
+
+	for i := range items {
+		item := items[i]
+		if err := item.Validate(); err != nil {
+			return err
+		}
+
+		labelsJSON, err := marshalJSON(item.Labels)
+		if err != nil {
+			return err
+		}
+		dependsOnJSON, err := marshalJSON(item.DependsOn)
+		if err != nil {
+			return err
+		}
+		template := item.Template
+		if strings.TrimSpace(template) == "" {
+			template = "standard"
+		}
+
+		if _, err := tx.Exec(
+			`INSERT INTO task_items (id, plan_id, title, description, labels, depends_on, template, pipeline_id, external_id, status)
+			 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON, template,
+			nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
+		); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	rollback = false
+	return nil
+}
+
+func (s *SQLiteStore) ListTaskPlans(projectID string, filter core.TaskPlanFilter) ([]core.TaskPlan, error) {
+	query := `SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round, created_at, updated_at
+	          FROM task_plans WHERE project_id=?`
+	args := []any{projectID}
+	if filter.Status != "" {
+		query += ` AND status=?`
+		args = append(args, filter.Status)
+	}
+	query += ` ORDER BY created_at DESC`
+	if filter.Limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.TaskPlan
+	for rows.Next() {
+		var plan core.TaskPlan
+		if err := rows.Scan(
+			&plan.ID, &plan.ProjectID, &plan.SessionID, &plan.Name, &plan.Status, &plan.WaitReason, &plan.FailPolicy,
+			&plan.ReviewRound, &plan.CreatedAt, &plan.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, plan)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range out {
+		tasks, err := s.GetTaskItemsByPlan(out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Tasks = tasks
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) GetActiveTaskPlans() ([]core.TaskPlan, error) {
+	rows, err := s.db.Query(
+		`SELECT id FROM task_plans
+		 WHERE status IN ('reviewing','approved','waiting_human','executing')
+		 ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]core.TaskPlan, 0, len(ids))
+	for _, id := range ids {
+		plan, err := s.GetTaskPlan(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *plan)
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) DeleteTaskItemsByPlan(planID string) error {
+	_, err := s.db.Exec(`DELETE FROM task_items WHERE plan_id=?`, planID)
+	return err
+}
+
+func (s *SQLiteStore) CreateTaskItem(item *core.TaskItem) error {
+	if err := item.Validate(); err != nil {
+		return err
+	}
+	labelsJSON, err := marshalJSON(item.Labels)
+	if err != nil {
+		return err
+	}
+	dependsOnJSON, err := marshalJSON(item.DependsOn)
+	if err != nil {
+		return err
+	}
+	template := item.Template
+	if strings.TrimSpace(template) == "" {
+		template = "standard"
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO task_items (id, plan_id, title, description, labels, depends_on, template, pipeline_id, external_id, status)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON, template,
+		nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetTaskItem(id string) (*core.TaskItem, error) {
+	item := &core.TaskItem{}
+	var (
+		labelsJSON    string
+		dependsOnJSON string
+	)
+	err := s.db.QueryRow(
+		`SELECT id, plan_id, title, description, labels, depends_on, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
+		 FROM task_items WHERE id=?`,
+		id,
+	).Scan(
+		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON, &item.Template, &item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("task item %s not found", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(labelsJSON, &item.Labels); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+func (s *SQLiteStore) SaveTaskItem(item *core.TaskItem) error {
+	if err := item.Validate(); err != nil {
+		return err
+	}
+	labelsJSON, err := marshalJSON(item.Labels)
+	if err != nil {
+		return err
+	}
+	dependsOnJSON, err := marshalJSON(item.DependsOn)
+	if err != nil {
+		return err
+	}
+	template := item.Template
+	if strings.TrimSpace(template) == "" {
+		template = "standard"
+	}
+	_, err = s.db.Exec(`
+INSERT INTO task_items (
+	id, plan_id, title, description, labels, depends_on, template, pipeline_id, external_id, status
+) VALUES (?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET
+	plan_id=excluded.plan_id,
+	title=excluded.title,
+	description=excluded.description,
+	labels=excluded.labels,
+	depends_on=excluded.depends_on,
+	template=excluded.template,
+	pipeline_id=excluded.pipeline_id,
+	external_id=excluded.external_id,
+	status=excluded.status,
+	updated_at=CURRENT_TIMESTAMP`,
+		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON, template,
+		nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetTaskItemsByPlan(planID string) ([]core.TaskItem, error) {
+	rows, err := s.db.Query(
+		`SELECT id, plan_id, title, description, labels, depends_on, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
+		 FROM task_items WHERE plan_id=?
+		 ORDER BY created_at, id`,
+		planID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.TaskItem
+	for rows.Next() {
+		var (
+			item          core.TaskItem
+			labelsJSON    string
+			dependsOnJSON string
+		)
+		if err := rows.Scan(
+			&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON, &item.Template,
+			&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(labelsJSON, &item.Labels); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) GetTaskItemByPipeline(pipelineID string) (*core.TaskItem, error) {
+	item := &core.TaskItem{}
+	var (
+		labelsJSON    string
+		dependsOnJSON string
+	)
+	err := s.db.QueryRow(
+		`SELECT id, plan_id, title, description, labels, depends_on, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
+		 FROM task_items WHERE pipeline_id=? LIMIT 1`,
+		pipelineID,
+	).Scan(
+		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON, &item.Template,
+		&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(labelsJSON, &item.Labels); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+func (s *SQLiteStore) SaveReviewRecord(record *core.ReviewRecord) error {
+	issuesJSON, err := marshalJSON(record.Issues)
+	if err != nil {
+		return err
+	}
+	fixesJSON, err := marshalJSON(record.Fixes)
+	if err != nil {
+		return err
+	}
+	var score any
+	if record.Score != nil {
+		score = *record.Score
+	}
+	result, err := s.db.Exec(
+		`INSERT INTO review_records (plan_id, round, reviewer, verdict, issues, fixes, score)
+		 VALUES (?,?,?,?,?,?,?)`,
+		record.PlanID, record.Round, record.Reviewer, record.Verdict, issuesJSON, fixesJSON, score,
+	)
+	if err != nil {
+		return err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	record.ID = id
+	return nil
+}
+
+func (s *SQLiteStore) GetReviewRecords(planID string) ([]core.ReviewRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, plan_id, round, reviewer, verdict, issues, fixes, score, created_at
+		 FROM review_records
+		 WHERE plan_id=?
+		 ORDER BY id`,
+		planID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.ReviewRecord
+	for rows.Next() {
+		var (
+			record     core.ReviewRecord
+			issuesJSON string
+			fixesJSON  string
+			score      sql.NullInt64
+		)
+		if err := rows.Scan(
+			&record.ID, &record.PlanID, &record.Round, &record.Reviewer, &record.Verdict,
+			&issuesJSON, &fixesJSON, &score, &record.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(issuesJSON, &record.Issues); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(fixesJSON, &record.Fixes); err != nil {
+			return nil, err
+		}
+		if score.Valid {
+			v := int(score.Int64)
+			record.Score = &v
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func marshalJSON(v any) (string, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalJSON(raw string, target any) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		trimmed = "[]"
+	}
+	return json.Unmarshal([]byte(trimmed), target)
+}
+
+func nullableString(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
+}
+
 func nullableTime(t time.Time) any {
 	if t.IsZero() {
 		return nil

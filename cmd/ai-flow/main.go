@@ -73,6 +73,8 @@ func runWithArgs(args []string) error {
 		default:
 			return fmt.Errorf("unknown scheduler command: %s", args[1])
 		}
+	case "server":
+		return cmdServer(args[1:])
 	case "tui":
 		exec, store, err := bootstrap()
 		if err != nil {
@@ -103,5 +105,6 @@ Usage:
   ai-flow pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_agent|abort|pause|resume> [--stage <stage>] [--agent <agent>] [--message <text>]
   ai-flow scheduler run
   ai-flow scheduler once
+  ai-flow server [--port <port>]
   ai-flow tui`)
 }

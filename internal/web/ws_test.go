@@ -1,0 +1,293 @@
+package web
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/user/ai-workflow/internal/core"
+)
+
+func TestWSRequiresAuthWhenEnabled(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{
+		AuthEnabled: true,
+		BearerToken: "ws-secret",
+		Hub:         hub,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("expected handshake error without token")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 handshake response, got %#v", resp)
+	}
+
+	queryTokenURL := wsURL + "?token=ws-secret"
+	conn, resp, err := websocket.DefaultDialer.Dial(queryTokenURL, nil)
+	if err != nil {
+		t.Fatalf("dial with query token: %v", err)
+	}
+	defer conn.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected 101, got %d", resp.StatusCode)
+	}
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer ws-secret")
+	connByHeader, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("dial with header token: %v", err)
+	}
+	defer connByHeader.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected 101, got %d", resp.StatusCode)
+	}
+}
+
+func TestWSBroadcastAndPipelineSubscriptionFlow(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitForConnections(hub, 1, time.Second) {
+		t.Fatal("ws connection did not register in hub")
+	}
+
+	hub.Broadcast(WSMessage{
+		Type:       "stage_start",
+		PipelineID: "pipe-1",
+		ProjectID:  "proj-1",
+	})
+	stageStart := readWSMessage(t, conn, 2*time.Second)
+	if stageStart.Type != "stage_start" {
+		t.Fatalf("expected stage_start, got %s", stageStart.Type)
+	}
+
+	hub.Broadcast(WSMessage{
+		Type:       "agent_output",
+		PipelineID: "pipe-1",
+		ProjectID:  "proj-1",
+		Data: map[string]any{
+			"content": "before-subscribe",
+		},
+	})
+
+	subReq := map[string]string{
+		"type":        "subscribe_pipeline",
+		"pipeline_id": "pipe-1",
+	}
+	if err := conn.WriteJSON(subReq); err != nil {
+		t.Fatalf("write subscribe message: %v", err)
+	}
+
+	subAck := readWSMessage(t, conn, 2*time.Second)
+	if subAck.Type != "subscribed" || subAck.PipelineID != "pipe-1" {
+		t.Fatalf("unexpected subscribe ack: %+v", subAck)
+	}
+	if content, ok := subAck.Data["content"].(string); ok && content == "before-subscribe" {
+		t.Fatalf("received unsubscribed agent_output unexpectedly: %+v", subAck)
+	}
+
+	hub.Broadcast(WSMessage{
+		Type:       "agent_output",
+		PipelineID: "pipe-1",
+		ProjectID:  "proj-1",
+		Data: map[string]any{
+			"content": "after-subscribe",
+		},
+	})
+	out := readWSMessage(t, conn, 2*time.Second)
+	if out.Type != "agent_output" || out.PipelineID != "pipe-1" {
+		t.Fatalf("unexpected broadcast payload: %+v", out)
+	}
+}
+
+func TestWSPlanSubscriptionReceivesCoreEventsByPlanID(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitForConnections(hub, 1, time.Second) {
+		t.Fatal("ws connection did not register in hub")
+	}
+
+	if err := conn.WriteJSON(map[string]string{
+		"type":    "subscribe_plan",
+		"plan_id": "plan-1",
+	}); err != nil {
+		t.Fatalf("write subscribe_plan message: %v", err)
+	}
+	ack := readWSMessage(t, conn, 2*time.Second)
+	if ack.Type != "subscribed" || ack.PlanID != "plan-1" {
+		t.Fatalf("unexpected subscribe ack: %+v", ack)
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:       core.EventTaskReady,
+		PipelineID: "pipe-2",
+		ProjectID:  "proj-1",
+		PlanID:     "plan-2",
+		Timestamp:  time.Now(),
+	})
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:       core.EventTaskReady,
+		PipelineID: "pipe-1",
+		ProjectID:  "proj-1",
+		PlanID:     "plan-1",
+		Timestamp:  time.Now(),
+		Data: map[string]string{
+			"task_id": "task-1",
+		},
+	})
+
+	got := readWSMessage(t, conn, 2*time.Second)
+	if got.Type != string(core.EventTaskReady) {
+		t.Fatalf("expected %q, got %q", core.EventTaskReady, got.Type)
+	}
+	if got.PlanID != "plan-1" {
+		t.Fatalf("expected plan_id=plan-1, got %+v", got)
+	}
+	if got.PipelineID != "pipe-1" {
+		t.Fatalf("expected pipeline_id=pipe-1, got %+v", got)
+	}
+	if got.Data["task_id"] != "task-1" {
+		t.Fatalf("expected task_id=task-1 in data, got %+v", got.Data)
+	}
+}
+
+func TestWSPlanCreatedAlwaysBroadcastEvenWhenPlanIDPresent(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitForConnections(hub, 1, time.Second) {
+		t.Fatal("ws connection did not register in hub")
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventPlanCreated,
+		ProjectID: "proj-1",
+		PlanID:    "plan-created-1",
+		Timestamp: time.Now(),
+	})
+
+	got := readWSMessage(t, conn, 2*time.Second)
+	if got.Type != string(core.EventPlanCreated) {
+		t.Fatalf("expected %q, got %q", core.EventPlanCreated, got.Type)
+	}
+	if got.PlanID != "plan-created-1" {
+		t.Fatalf("expected plan_id=plan-created-1, got %+v", got)
+	}
+}
+
+func TestWSBroadcastCoreEventFallsBackPlanIDFromData(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitForConnections(hub, 1, time.Second) {
+		t.Fatal("ws connection did not register in hub")
+	}
+
+	if err := conn.WriteJSON(map[string]string{
+		"type":    "subscribe_plan",
+		"plan_id": "plan-fallback-1",
+	}); err != nil {
+		t.Fatalf("write subscribe_plan message: %v", err)
+	}
+	ack := readWSMessage(t, conn, 2*time.Second)
+	if ack.Type != "subscribed" || ack.PlanID != "plan-fallback-1" {
+		t.Fatalf("unexpected subscribe ack: %+v", ack)
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventTaskReady,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"plan_id": "plan-fallback-1",
+			"task_id": "task-fallback-1",
+		},
+	})
+
+	got := readWSMessage(t, conn, 2*time.Second)
+	if got.Type != string(core.EventTaskReady) {
+		t.Fatalf("expected %q, got %q", core.EventTaskReady, got.Type)
+	}
+	if got.PlanID != "plan-fallback-1" {
+		t.Fatalf("expected fallback plan_id=plan-fallback-1, got %+v", got)
+	}
+	if got.Data["task_id"] != "task-fallback-1" {
+		t.Fatalf("expected task_id=task-fallback-1, got %+v", got.Data)
+	}
+}
+
+func waitForConnections(hub *Hub, want int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if hub.ConnectionCount() == want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return hub.ConnectionCount() == want
+}
+
+func readWSMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration) WSMessage {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+
+	_, payload, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read ws message: %v", err)
+	}
+
+	var msg WSMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		t.Fatalf("unmarshal ws message: %v, payload=%s", err, string(payload))
+	}
+	return msg
+}

@@ -2,7 +2,7 @@
 
 ## 概述
 
-本文档定义三件事：Web API 设计（REST + WebSocket）、三级配置体系、以及数据库 Schema。这些是 TUI/Web 前端和运维需要的参考。
+本文档定义三件事：Web API 设计（REST + WebSocket）、三级配置体系、以及数据库 Schema。这些是 Web/TUI 前端和运维需要的参考。
 
 ## 一、REST API
 
@@ -32,7 +32,7 @@ PUT    /api/v1/projects/:id
 
 DELETE /api/v1/projects/:id
   → 204（需确认无活跃 Pipeline）
-  → 删除项目时级联删除关联的 pipelines、checkpoints、logs、human_actions（通过应用层事务实现，不依赖 SQLite CASCADE）
+  → 删除项目时级联删除关联的 pipelines、checkpoints、logs、human_actions、chat_sessions、task_plans、task_items、review_records（通过应用层事务实现，不依赖 SQLite CASCADE）
 ```
 
 ### Pipeline 操作
@@ -107,9 +107,71 @@ GET    /api/v1/templates
   → 200: [{ name, stages, description }]
 ```
 
+> ChatSession、TaskPlan、TaskItem、ReviewRecord 的领域模型、状态机和设计背景见 [spec-secretary-layer.md](spec-secretary-layer.md)。
+
+### ChatSession（P2c 新增）
+
+```
+POST   /api/v1/projects/:pid/chat
+  Body: { message: "需求描述..." }
+  → 200: { session_id, reply: "..." }
+  注：回复通过 WebSocket secretary_thinking 事件流式推送
+
+GET    /api/v1/projects/:pid/chat/:sid
+  → 200: { id, project_id, messages: [...], created_at }
+
+DELETE /api/v1/projects/:pid/chat/:sid
+  → 204
+```
+
+### TaskPlan 管理（P2a 新增）
+
+```
+POST   /api/v1/projects/:pid/plans
+  Body: { session_id: "chat-xxx" }
+  → 201: { id, name, tasks: [...], status: "draft" }
+
+GET    /api/v1/projects/:pid/plans
+  Query: ?status=executing&limit=20&offset=0
+  → 200: { items: [...], total, offset }
+
+GET    /api/v1/projects/:pid/plans/:id
+  → 200: { id, name, tasks: [...], status, review_round, fail_policy, ... }
+
+GET    /api/v1/projects/:pid/plans/:id/dag
+  → 200: {
+    nodes: [{ id, title, status, pipeline_id }],
+    edges: [{ from, to }],
+    stats: { total, pending, ready, running, done, failed }
+  }
+
+POST   /api/v1/projects/:pid/plans/:id/review
+  → 200: { status: "reviewing" }
+
+POST   /api/v1/projects/:pid/plans/:id/action
+  Body: {
+    action: "approve" | "reject" | "abort",
+    feedback: {                  // reject 时必填（两段式反馈）
+      category: "cycle" | "missing_node" | "bad_granularity" | "coverage_gap" | "other",
+      detail: "至少 20 字的说明",
+      expected_direction: "可选"
+    }
+  }
+  → 200: { status }
+  注：reject 触发 Secretary 自动重生成并重新进入 AI review
+
+POST   /api/v1/projects/:pid/plans/:id/tasks/:tid/action
+  Body: {
+    action: "retry" | "skip" | "abort"
+  }
+  → 200: { status }
+```
+
 ### API 设计规则
 
-- Pipeline 的 action 端点是唯一的人工操作入口，TUI/Web/GitHub 最终都调用它
+- Pipeline 的 action 端点是唯一的 Pipeline 级人工操作入口，TUI/Web/GitHub 最终都调用它
+- TaskPlan 的 action 端点是 TaskPlan 级操作入口
+- TaskItem 的 action 端点用于单个子任务的 retry/skip/abort
 - Logs 端点返回的是结构化日志，不是原始 stdout
 - 分页用 limit + offset，默认 limit=20
 - 列表接口支持 status 过滤
@@ -130,9 +192,15 @@ WS /api/v1/ws?token={auth_token}
 {
   "type": "stage_start" | "stage_complete" | "stage_failed"
        | "human_required" | "pipeline_done" | "pipeline_failed"
-       | "agent_output" | "system_info",
+       | "agent_output" | "system_info"
+       | "secretary_thinking" | "plan_created" | "plan_reviewing"
+       | "review_agent_done" | "review_complete" | "plan_approved"
+       | "plan_waiting_human"
+       | "task_ready" | "task_running" | "task_done" | "task_failed"
+       | "plan_done" | "plan_failed" | "plan_partially_done",
   "pipeline_id": "xxx",
   "project_id": "yyy",
+  "plan_id": "zzz",
   "data": {
     "stage": "implement",
     "agent": "codex",
@@ -142,34 +210,58 @@ WS /api/v1/ws?token={auth_token}
 }
 ```
 
+Secretary Layer 新增事件说明：
+
+| 事件 | 用途 |
+|------|------|
+| `secretary_thinking` | 秘书 Agent 流式输出（对话回复 + 任务拆解过程） |
+| `plan_created` | 新 TaskPlan 创建 |
+| `plan_reviewing` | 进入审核 |
+| `review_agent_done` | 单个 Reviewer 完成（含 verdict） |
+| `review_complete` | 审核流程完成（含 decision: approve/fix/escalate） |
+| `plan_approved` | TaskPlan 通过审核 |
+| `plan_waiting_human` | 等待人工（含 wait_reason: final_approval / feedback_required） |
+| `task_ready` | TaskItem 变为 ready（可调度） |
+| `task_running` | TaskItem 开始执行（含 pipeline_id） |
+| `task_done` | TaskItem 完成 |
+| `task_failed` | TaskItem 失败（含 error） |
+| `plan_done` | 所有 TaskItem 完成 |
+| `plan_failed` | TaskPlan 失败 |
+| `plan_partially_done` | 部分成功部分失败（含 stats） |
+
 客户端消息（Client → Server）：
 
 ```json
 {
-  "type": "subscribe" | "unsubscribe",
-  "pipeline_id": "xxx"
+  "type": "subscribe_pipeline" | "unsubscribe_pipeline"
+       | "subscribe_plan" | "unsubscribe_plan",
+  "pipeline_id": "xxx",
+  "plan_id": "zzz"
 }
 ```
 
 ### 订阅规则
 
 - 连接后默认不推送任何 Pipeline 的详细日志
-- 客户端发 `subscribe` 后开始接收指定 Pipeline 的实时 agent_output
+- 客户端发 `subscribe_pipeline` 后开始接收指定 Pipeline 的实时 agent_output
+- 客户端发 `subscribe_plan` 后开始接收指定 TaskPlan 的所有事件（审核进度、任务状态变更等）
 - `stage_start`、`stage_complete`、`human_required` 等状态事件始终推送所有活跃 Pipeline
+- `plan_created`、`plan_done`、`plan_failed` 等 Plan 级状态事件始终推送
 - 客户端断开后自动清理订阅
 
 ### 连接管理
 
 - **心跳**：服务端每 30 秒发送 WebSocket ping frame，客户端必须回复 pong，连续 2 次无响应则断开连接
 - **subscribe 响应**：subscribe 消息发送后服务端回复确认消息 `{"type": "subscribed", "pipeline_id": "xxx"}`
-- **重连恢复**：客户端重连后发送 subscribe，服务端推送该 Pipeline 的当前状态快照（当前 stage、status、最近 N 条 agent_output）
+- **重连恢复**：客户端重连后发送 `subscribe_pipeline`/`subscribe_plan`，服务端推送对应的当前状态快照（当前 stage、status、最近 N 条 agent_output）
 
 ### 广播策略
 
 ```
 EventBus 事件
-  ├── 状态事件（stage_start 等） → 广播给所有 WS 连接
-  └── 输出事件（agent_output）   → 只发给订阅了该 Pipeline 的连接
+  ├── 状态事件（stage_start / plan_done 等） → 广播给所有 WS 连接
+  ├── 输出事件（agent_output）               → 只发给 subscribe_pipeline 了该 Pipeline 的连接
+  └── 计划事件（review_progress / task_status_changed 等） → 只发给 subscribe_plan 了该 Plan 的连接
 ```
 
 ## 三、配置体系
@@ -222,9 +314,41 @@ scheduler:
   max_global_agents: 3             # 全局最多同时运行几个 Agent
   max_project_pipelines: 2         # 每个项目最多几条活跃 Pipeline
 
-# GitHub 全局配置
-github:
+# Secretary Layer 配置（P2a 新增）
+secretary:
+  context_max_tokens: 4000       # 项目上下文 token 预算
+  session_max_messages: 100      # 对话历史最大消息数
+  refine_enabled: false          # TaskPlan 细化（补充实施级细节），V1 默认关闭
+  refine_timeout: 2m             # 单个 TaskItem 细化超时
+  execution_files_enabled: true  # 执行期三文件沉淀（task_plan.md/progress.md/findings.md）
+
+# Multi-Agent 审核配置（P2b 新增）
+review_panel:
   enabled: true
+  max_rounds: 2                  # 审核-修正最大循环次数（超限进入 waiting_human）
+  min_score: 70                  # 通过最低分
+  reviewers:
+    - name: completeness
+      prompt_template: review_completeness
+    - name: dependency
+      prompt_template: review_dependency
+    - name: feasibility
+      prompt_template: review_feasibility
+  aggregator:
+    prompt_template: review_aggregator
+  timeout_per_reviewer: 5m       # 每个 Reviewer 的超时
+
+# DAG 调度配置（P2a 新增）
+dag_scheduler:
+  fail_policy: block             # 默认失败策略: block / skip / human
+  max_concurrent_tasks: 0        # 0 = 不额外限制，使用全局 max_global_agents
+  dispatch_interval: 1s          # 调度检查间隔
+  stale_check_interval: 5m       # 停滞检测间隔
+  stale_threshold: 30m           # 超过此时间无进展视为停滞
+
+# GitHub 全局配置（P3，可选）
+github:
+  enabled: false                   # 默认关闭，核心功能不依赖 GitHub
   token: ""                        # 或使用环境变量 AI_WORKFLOW_GITHUB_TOKEN
   app_id: 0
   private_key_path: ""
@@ -413,7 +537,8 @@ CREATE TABLE pipelines (
 
 CREATE INDEX idx_pipelines_project ON pipelines(project_id);
 CREATE INDEX idx_pipelines_status ON pipelines(status);
-CREATE INDEX idx_pipelines_issue ON pipelines(issue_number);
+CREATE UNIQUE INDEX idx_pipelines_project_issue ON pipelines(project_id, issue_number)
+  WHERE issue_number IS NOT NULL;  -- 部分唯一索引：同一项目下 Issue 不重复关联（幂等），无 Issue 的 Pipeline 不受约束
 ```
 
 #### checkpoints
@@ -473,10 +598,88 @@ CREATE TABLE human_actions (
 CREATE INDEX idx_human_actions_pipeline ON human_actions(pipeline_id);
 ```
 
+> 以下 4 张表对应 Secretary Layer 引入的领域模型，Go struct 定义见 [spec-secretary-layer.md](spec-secretary-layer.md) Section I/II。
+
+#### chat_sessions（P2c 新增）
+
+```sql
+CREATE TABLE chat_sessions (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id),
+    messages    TEXT NOT NULL DEFAULT '[]',   -- JSON array of ChatMessage
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_chat_sessions_project ON chat_sessions(project_id);
+```
+
+#### task_plans（P2a 新增）
+
+```sql
+CREATE TABLE task_plans (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id),
+    session_id  TEXT REFERENCES chat_sessions(id),
+    name        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'draft',
+    -- draft / reviewing / waiting_human / approved / executing / partially_done / done / failed / abandoned
+    wait_reason TEXT NOT NULL DEFAULT '',         -- '' / final_approval / feedback_required
+    fail_policy TEXT NOT NULL DEFAULT 'block',   -- block / skip / human
+    review_round INTEGER DEFAULT 0,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_task_plans_project ON task_plans(project_id);
+CREATE INDEX idx_task_plans_status ON task_plans(status);
+```
+
+#### task_items（P2a 新增）
+
+```sql
+CREATE TABLE task_items (
+    id          TEXT PRIMARY KEY,
+    plan_id     TEXT NOT NULL REFERENCES task_plans(id),
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    labels      TEXT DEFAULT '[]',            -- JSON array
+    depends_on  TEXT DEFAULT '[]',            -- JSON array of task_item IDs
+    template    TEXT NOT NULL DEFAULT 'standard',
+    pipeline_id TEXT REFERENCES pipelines(id),
+    external_id TEXT,                         -- GitHub Issue # 等外部系统 ID（可选）
+    status      TEXT NOT NULL DEFAULT 'pending',
+    -- pending / ready / running / done / failed / skipped / blocked_by_failure
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_task_items_plan ON task_items(plan_id);
+CREATE INDEX idx_task_items_status ON task_items(status);
+```
+
+#### review_records（P2b 新增）
+
+```sql
+CREATE TABLE review_records (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id     TEXT NOT NULL REFERENCES task_plans(id),
+    round       INTEGER NOT NULL,
+    reviewer    TEXT NOT NULL,                -- "completeness" / "dependency" / "feasibility" / "aggregator"
+    verdict     TEXT NOT NULL,                -- "pass" / "issues_found" / "approve" / "fix" / "escalate"
+    issues      TEXT DEFAULT '[]',            -- JSON array of ReviewIssue
+    fixes       TEXT DEFAULT '[]',            -- JSON array of ProposedFix
+    score       INTEGER,                      -- 0-100 评分（Reviewer 用）
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_review_records_plan ON review_records(plan_id);
+```
+
 ### 数据库维护规则
 
-- 迁移文件放在 `internal/store/migrations/` 目录，按序号命名
-- 使用 `golang-migrate` 或手写迁移（项目简单，手写即可）
+- 迁移由各 Store 插件自行管理（如 `store-sqlite/migrations.go` 中嵌入 schema），不使用独立迁移目录
+- 项目简单，直接在 `Open()` 时执行建表（IF NOT EXISTS），无需版本化迁移工具
 - 已完成超过 30 天的 Pipeline 的 logs 可以归档或清理（配置项）
 - 数据库文件默认位置 `~/.ai-workflow/data.db`，可配置
 
@@ -517,6 +720,30 @@ type Store interface {
     // Human Actions
     RecordAction(action HumanAction) error
     GetActions(pipelineID string) ([]HumanAction, error)
+
+    // ChatSessions（P2c 新增）
+    CreateChatSession(s *ChatSession) error
+    GetChatSession(id string) (*ChatSession, error)
+    UpdateChatSession(s *ChatSession) error
+    ListChatSessions(projectID string) ([]ChatSession, error)
+
+    // TaskPlans（P2a 新增）
+    CreateTaskPlan(p *TaskPlan) error
+    GetTaskPlan(id string) (*TaskPlan, error)
+    SaveTaskPlan(p *TaskPlan) error
+    ListTaskPlans(projectID string, filter TaskPlanFilter) ([]TaskPlan, error)
+    GetActiveTaskPlans() ([]TaskPlan, error)  // 崩溃恢复用
+
+    // TaskItems（P2a 新增）
+    CreateTaskItem(item *TaskItem) error
+    GetTaskItem(id string) (*TaskItem, error)
+    SaveTaskItem(item *TaskItem) error
+    GetTaskItemsByPlan(planID string) ([]TaskItem, error)
+    GetTaskItemByPipeline(pipelineID string) (*TaskItem, error)  // 反查
+
+    // ReviewRecords（P2b 新增）
+    SaveReviewRecord(r *ReviewRecord) error
+    GetReviewRecords(planID string) ([]ReviewRecord, error)
 }
 ```
 
@@ -528,8 +755,14 @@ type Store interface {
 | Pipeline | `{日期}-{12位随机hex}` | `20260228-a3f1b2c0d4e6` |
 | Checkpoint | 自增整数 | 1, 2, 3... |
 | Log | 自增整数 | 1, 2, 3... |
+| **ChatSession** | `chat-{日期}-{8位hex}` | `chat-20260301-d4e5f6a7` |
+| **TaskPlan** | `plan-{日期}-{8位hex}` | `plan-20260301-a3f1b2c0` |
+| **TaskItem** | `task-{plan短ID}-{序号}` | `task-a3f1b2c0-1` |
+| **ReviewRecord** | 自增整数 | 1, 2, 3... |
 
 Pipeline ID 用日期前缀便于人类识别和按时间排序。12 位 hex（6 bytes = 48 bits）提供约 281 万亿种组合，碰撞概率大幅降低。
+
+TaskItem ID 使用 plan 短 ID + 序号，便于从 ID 直接看出所属计划。
 
 ## 六、安全
 

@@ -96,6 +96,64 @@ CREATE TABLE IF NOT EXISTS human_actions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_human_actions_pipeline ON human_actions(pipeline_id);
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    messages    TEXT NOT NULL DEFAULT '[]',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_project ON chat_sessions(project_id);
+
+CREATE TABLE IF NOT EXISTS task_plans (
+    id           TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    session_id   TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
+    name         TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'draft',
+    wait_reason  TEXT NOT NULL DEFAULT '',
+    fail_policy  TEXT NOT NULL DEFAULT 'block',
+    review_round INTEGER DEFAULT 0,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_plans_project ON task_plans(project_id);
+CREATE INDEX IF NOT EXISTS idx_task_plans_status ON task_plans(status);
+
+CREATE TABLE IF NOT EXISTS task_items (
+    id          TEXT PRIMARY KEY,
+    plan_id     TEXT NOT NULL REFERENCES task_plans(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    labels      TEXT DEFAULT '[]',
+    depends_on  TEXT DEFAULT '[]',
+    template    TEXT NOT NULL DEFAULT 'standard',
+    pipeline_id TEXT REFERENCES pipelines(id) ON DELETE SET NULL,
+    external_id TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_items_plan ON task_items(plan_id);
+CREATE INDEX IF NOT EXISTS idx_task_items_status ON task_items(status);
+
+CREATE TABLE IF NOT EXISTS review_records (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id    TEXT NOT NULL REFERENCES task_plans(id) ON DELETE CASCADE,
+    round      INTEGER NOT NULL,
+    reviewer   TEXT NOT NULL,
+    verdict    TEXT NOT NULL,
+    issues     TEXT DEFAULT '[]',
+    fixes      TEXT DEFAULT '[]',
+    score      INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_records_plan ON review_records(plan_id);
 `
 
 func applyMigrations(db *sql.DB) error {

@@ -1,8 +1,33 @@
 # GitHub 集成 — 设计文档
 
-## 概述
+> **重要：GitHub 集成是可选增强，不是必需组件。** 系统的核心功能（任务拆解、审核、DAG 调度、Pipeline 执行）完全在本地运行（SQLite + 本地 Git）。GitHub 集成提供双向状态同步：GitHub Issue/PR 的变化驱动 Pipeline，Pipeline 的执行进度反映到 Issue/PR。启用后，用户可以在 GitHub 上通过评论驱动整个开发流程。
+>
+> **阶段：P3**（P0~P2 不需要 GitHub 即可完整运行）
 
-GitHub 集成层实现双向联动：GitHub Issue/PR 的变化驱动 Pipeline，Pipeline 的执行进度反映到 Issue/PR。目标是让用户可以完全在 GitHub 上通过评论驱动整个开发流程。
+## 前置条件：基础设施抽象
+
+GitHub 集成通过两个插件槽位接入系统，不侵入核心逻辑：
+
+| 插件槽位 | GitHub 实现 | 默认实现（无 GitHub） | 职责 |
+|---------|------------|---------------------|------|
+| Tracker | `tracker-github` | `tracker-local`（空实现） | 将 TaskItem 同步为 GitHub Issue + Label 管理 |
+| ReviewGate | `review-github-pr` | `review-ai-panel`（Multi-Agent 审核） | 将 TaskPlan 审核通过 GitHub PR 进行 |
+
+核心逻辑（DAG Scheduler、Pipeline Engine）只依赖抽象接口，不直接调用 GitHub API。
+
+### 与 Secretary Layer 的关系
+
+启用 GitHub 集成后，Secretary Layer 的行为增强如下：
+
+| 功能 | 无 GitHub | 有 GitHub |
+|------|----------|----------|
+| 任务存储 | SQLite `task_items` 表 | SQLite + 同步为 GitHub Issue |
+| 依赖管理 | DAG Scheduler 本地管理 | 本地管理 + Label 镜像（`depends-on-#N`、`ready`、`blocked`） |
+| 审核方式 | Multi-Agent AI 审核 | 可选：AI 审核 或 GitHub PR 审核 |
+| 状态可视化 | Workbench Board View | Workbench + GitHub Issue 标签 |
+| Pipeline 触发 | DAG Scheduler 自动创建 | DAG Scheduler 或 GitHub Issue 事件触发 |
+
+**GitHub Issue 和 Label 是 TaskItem 状态的镜像，不是 source of truth。** DAG Scheduler 在本地完成所有调度决策后，通过 Tracker 插件（`tracker-github`）将状态同步到 GitHub。
 
 ## 一、Webhook 监听
 
@@ -56,13 +81,23 @@ projects:
 
 ## 二、Issue → Pipeline 触发
 
-### 触发条件
+### 两种模式
+
+GitHub Issue 可以在两种模式下触发执行：
+
+**模式 A — 独立 Issue（不经过 Secretary Layer）：**
+外部创建的 GitHub Issue（人工创建或其他工具创建），直接映射为单个 Pipeline。适合简单任务。
+
+**模式 B — Tracker 同步的 Issue（经过 Secretary Layer）：**
+由 `tracker-github` 插件从 TaskItem 同步创建的 Issue。这类 Issue 的生命周期由 DAG Scheduler 管理，GitHub 上的状态变更会通过 Webhook 回传给 Scheduler。详见 [spec-secretary-layer.md](spec-secretary-layer.md)。
+
+### 模式 A 的触发条件
 
 满足以下任一条件时自动创建 Pipeline：
 
 1. **标签触发**（推荐）：Issue 被打上配置中映射的标签
 2. **评论触发**：有人在 Issue 中评论 `/run` 或 `/run {template}`
-3. **手动触发**：通过 TUI 或 Web 手动关联 Issue 创建 Pipeline
+3. **手动触发**：通过 Workbench 或 TUI 手动关联 Issue 创建 Pipeline
 
 ### 标签 → 模板映射
 
@@ -115,16 +150,16 @@ Pipeline 已创建：`pipeline-20260228-abc123`
 | `/status` | 查看当前状态 | `/status` |
 | `/abort` | 终止 Pipeline | `/abort` |
 
-以上 5 个命令为 P2 核心命令。以下命令延后到 P3+：
+以上 5 个命令为 **P3** 核心命令。以下命令延后到 P4+：
 
 | 命令 | 效果 | 目标阶段 |
 |---|---|---|
-| `/modify <feedback>` | 带反馈重跑当前阶段 | P3 |
-| `/skip` | 跳过当前阶段 | P3 |
-| `/rerun` | 重跑当前阶段 | P3 |
+| `/modify <feedback>` | 带反馈重跑当前阶段 | P4 |
+| `/skip` | 跳过当前阶段 | P4 |
+| `/rerun` | 重跑当前阶段 | P4 |
 | `/switch <agent>` | 换 Agent 重跑 | P4 |
-| `/pause` / `/resume` | 暂停/恢复 Pipeline | P3 |
-| `/logs [stage]` | 查看某阶段日志摘要 | P3 |
+| `/pause` / `/resume` | 暂停/恢复 Pipeline | P4 |
+| `/logs [stage]` | 查看某阶段日志摘要 | P4 |
 
 ### 命令解析规则
 
@@ -358,20 +393,71 @@ github:
 
 > 注意：权限检查使用 webhook event 中的 `author_association` 字段，不需要额外的 collaborator API 调用（该 API 需要 admin 权限）。
 
-## 八、离线/降级模式
+## 八、tracker-github 插件实现
 
-如果 GitHub 不可达或 Webhook 配置未启用：
+`tracker-github` 是 Tracker 接口的 GitHub 实现，负责将 TaskItem 状态镜像到 GitHub Issue：
+
+```go
+// tracker-github 实现 Tracker 接口
+type GitHubTracker struct {
+    client *github.Client
+    owner  string
+    repo   string
+}
+
+func (t *GitHubTracker) CreateTask(ctx context.Context, item *TaskItem) (string, error) {
+    // 创建 GitHub Issue
+    // Issue title = item.Title
+    // Issue body = item.Description
+    // Labels = item.Labels + 依赖标签 (depends-on-#N) + 状态标签 (ready/blocked)
+    // 返回 Issue number 作为 externalID
+}
+
+func (t *GitHubTracker) UpdateStatus(ctx context.Context, externalID string, status TaskItemStatus) error {
+    // 更新 Issue 标签：移除旧状态标签，添加新状态标签
+    // done → 关闭 Issue
+    // failed → 添加 "failed" 标签
+}
+
+func (t *GitHubTracker) SyncDependencies(ctx context.Context, item *TaskItem, allItems []TaskItem) error {
+    // 为 Issue 添加 depends-on-#N 标签（N = 上游 Issue number）
+    // 无依赖 → 添加 "ready" 标签
+    // 有未完成依赖 → 添加 "blocked" 标签
+}
+```
+
+### Label 命名规范
+
+```
+status: ready               ← 可执行
+status: blocked             ← 等待依赖
+status: in-progress         ← 执行中
+status: done                ← 完成
+status: failed              ← 失败
+depends-on-#123             ← 依赖 Issue #123
+plan: {plan-id}             ← 所属 TaskPlan
+template: standard          ← 使用的 Pipeline 模板
+```
+
+## 九、离线/降级模式
+
+GitHub 集成完全关闭时（默认）：
+
+- 所有功能通过 Workbench / TUI 完成
+- Tracker 使用 `tracker-local`（空实现），不同步到外部系统
+- ReviewGate 使用 `review-ai-panel`（Multi-Agent 审核）
+- 执行日志和结果保存在本地 SQLite Store
+
+GitHub 集成启用但不可达时：
 
 - Pipeline 正常执行，只是不同步状态到 GitHub
-- 所有操作通过 TUI 或 Web 完成
-- 执行日志和结果仍保存在本地 Store
-- 恢复连接后做一次"最终状态同步"：只同步 Pipeline 当前状态到 Issue 标签和评论（不回溯中间状态变化），确保 GitHub 侧反映最终结果
+- 恢复连接后做一次"最终状态同步"：只同步 Pipeline 当前状态到 Issue 标签和评论（不回溯中间状态变化）
 
 配置方式：
 
 ```yaml
 github:
-  enabled: false    # 完全关闭 GitHub 集成
+  enabled: false    # 完全关闭 GitHub 集成（默认）
   # 或者只关闭 Webhook 触发，保留 PR 创建
   webhook_enabled: false
   pr_enabled: true

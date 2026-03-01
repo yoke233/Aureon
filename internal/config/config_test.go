@@ -24,6 +24,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Scheduler.MaxGlobalAgents != 3 {
 		t.Errorf("expected max_global_agents 3, got %d", cfg.Scheduler.MaxGlobalAgents)
 	}
+	if cfg.Server.Host != "127.0.0.1" {
+		t.Errorf("expected server host 127.0.0.1, got %s", cfg.Server.Host)
+	}
+	if cfg.Server.Port != 8080 {
+		t.Errorf("expected server port 8080, got %d", cfg.Server.Port)
+	}
 }
 
 func ptr[T any](v T) *T { return &v }

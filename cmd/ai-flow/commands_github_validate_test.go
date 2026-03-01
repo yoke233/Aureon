@@ -76,3 +76,16 @@ func TestGitHubValidate_GitHubAppInstallationPasses(t *testing.T) {
 		t.Fatalf("validateGitHubConfigWithProbe() error = %v", err)
 	}
 }
+
+func TestCommand_GitHubValidate_InvalidConfig_Fails(t *testing.T) {
+	err := validateGitHubConfigWithProbe(context.Background(), config.GitHubConfig{
+		Enabled: true,
+		// webhook secret intentionally missing
+	})
+	if err == nil {
+		t.Fatal("expected invalid config validation to fail")
+	}
+	if !strings.Contains(err.Error(), "webhook_secret") {
+		t.Fatalf("expected webhook secret validation error, got %v", err)
+	}
+}

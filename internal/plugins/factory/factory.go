@@ -9,12 +9,14 @@ import (
 
 	"github.com/user/ai-workflow/internal/config"
 	"github.com/user/ai-workflow/internal/core"
+	githubsvc "github.com/user/ai-workflow/internal/github"
 	agentclaude "github.com/user/ai-workflow/internal/plugins/agent-claude"
 	agentcodex "github.com/user/ai-workflow/internal/plugins/agent-codex"
 	notifierdesktop "github.com/user/ai-workflow/internal/plugins/notifier-desktop"
 	reviewaipanel "github.com/user/ai-workflow/internal/plugins/review-ai-panel"
 	reviewlocal "github.com/user/ai-workflow/internal/plugins/review-local"
 	runtimeprocess "github.com/user/ai-workflow/internal/plugins/runtime-process"
+	scmgithub "github.com/user/ai-workflow/internal/plugins/scm-github"
 	scmlocalgit "github.com/user/ai-workflow/internal/plugins/scm-local-git"
 	specnoop "github.com/user/ai-workflow/internal/plugins/spec-noop"
 	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
@@ -208,15 +210,29 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 
 	scmName := selectedPlugins.SCM
 	scmModule, ok := registry.Get(core.SlotSCM, scmName)
-	if !ok && scmName != defaultSCMPlugin {
-		// GitHub SCM plugin is expected to be added in later waves. Fallback keeps current behavior.
-		scmName = defaultSCMPlugin
-		scmModule, ok = registry.Get(core.SlotSCM, scmName)
-	}
 	if !ok {
 		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotSCM, scmName)
 	}
-	scmRaw, err := scmModule.Factory(nil)
+
+	scmFactoryCfg := map[string]any{}
+	if scmName == githubSCMPluginName {
+		client, clientErr := githubsvc.NewClient(effective.GitHub)
+		if clientErr != nil {
+			return nil, fmt.Errorf("build scm plugin %q: %w", scmName, clientErr)
+		}
+		service, serviceErr := githubsvc.NewGitHubService(client, effective.GitHub.Owner, effective.GitHub.Repo)
+		if serviceErr != nil {
+			return nil, fmt.Errorf("build scm plugin %q: %w", scmName, serviceErr)
+		}
+		scmFactoryCfg["github_service"] = service
+		scmFactoryCfg["draft"] = effective.GitHub.PR.Draft
+		scmFactoryCfg["reviewers"] = append([]string(nil), effective.GitHub.PR.Reviewers...)
+	}
+	if len(scmFactoryCfg) == 0 {
+		scmFactoryCfg = nil
+	}
+
+	scmRaw, err := scmModule.Factory(scmFactoryCfg)
 	if err != nil {
 		return nil, fmt.Errorf("build scm plugin %q: %w", scmName, err)
 	}
@@ -357,6 +373,7 @@ func newDefaultRegistry() (*core.Registry, error) {
 				return scmlocalgit.New(repoDir), nil
 			},
 		},
+		scmgithub.Module(),
 		{
 			Name: defaultNotifierPlugin,
 			Slot: core.SlotNotifier,

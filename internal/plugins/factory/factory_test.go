@@ -298,7 +298,7 @@ func TestBuildWithRegistry_SpecInitError_OnFailureFail_ReturnsError(t *testing.T
 	}
 }
 
-func TestFactory_GitHubEnabled_SelectsGitHubPluginNames(t *testing.T) {
+func TestFactory_GitHubEnabled_SelectsTrackerAndSCM(t *testing.T) {
 	selected := selectTrackerAndSCMPluginNames(true, pluginNameOverrides{})
 
 	if selected.Tracker != githubTrackerPluginName {
@@ -307,7 +307,9 @@ func TestFactory_GitHubEnabled_SelectsGitHubPluginNames(t *testing.T) {
 	if selected.SCM != githubSCMPluginName {
 		t.Fatalf("expected scm plugin %q when github.enabled=true, got %q", githubSCMPluginName, selected.SCM)
 	}
+}
 
+func TestFactory_GitHubExplicitOverride_Wins(t *testing.T) {
 	overrideSelected := selectTrackerAndSCMPluginNames(true, pluginNameOverrides{
 		Tracker: "tracker-local",
 		SCM:     "local-git",
@@ -329,6 +331,36 @@ func TestFactory_GitHubDisabled_UsesLocalDefaults(t *testing.T) {
 	}
 	if selected.SCM != defaultSCMPlugin {
 		t.Fatalf("expected local scm plugin %q when github.enabled=false, got %q", defaultSCMPlugin, selected.SCM)
+	}
+}
+
+func TestFactory_GitHubEnabled_BuildFromConfigSelectsTrackerAndSCMPlugins(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Store.Path = ":memory:"
+	cfg.GitHub.Enabled = true
+	cfg.GitHub.Token = "ghp_test_token"
+	cfg.GitHub.AllowPATFallback = true
+	cfg.GitHub.Owner = "acme"
+	cfg.GitHub.Repo = "ai-workflow"
+	cfg.GitHub.WebhookSecret = "secret"
+
+	set, err := BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig() error = %v", err)
+	}
+	defer set.Store.Close()
+
+	if set.Tracker == nil {
+		t.Fatal("expected github tracker plugin")
+	}
+	if set.Tracker.Name() != githubTrackerPluginName {
+		t.Fatalf("expected tracker %q, got %q", githubTrackerPluginName, set.Tracker.Name())
+	}
+	if set.SCM == nil {
+		t.Fatal("expected github scm plugin")
+	}
+	if set.SCM.Name() != githubSCMPluginName {
+		t.Fatalf("expected scm %q, got %q", githubSCMPluginName, set.SCM.Name())
 	}
 }
 

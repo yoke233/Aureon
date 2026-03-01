@@ -298,6 +298,40 @@ func TestBuildWithRegistry_SpecInitError_OnFailureFail_ReturnsError(t *testing.T
 	}
 }
 
+func TestFactory_GitHubEnabled_SelectsGitHubPluginNames(t *testing.T) {
+	selected := selectTrackerAndSCMPluginNames(true, pluginNameOverrides{})
+
+	if selected.Tracker != githubTrackerPluginName {
+		t.Fatalf("expected tracker plugin %q when github.enabled=true, got %q", githubTrackerPluginName, selected.Tracker)
+	}
+	if selected.SCM != githubSCMPluginName {
+		t.Fatalf("expected scm plugin %q when github.enabled=true, got %q", githubSCMPluginName, selected.SCM)
+	}
+
+	overrideSelected := selectTrackerAndSCMPluginNames(true, pluginNameOverrides{
+		Tracker: "tracker-local",
+		SCM:     "local-git",
+	})
+
+	if overrideSelected.Tracker != "tracker-local" {
+		t.Fatalf("expected explicit tracker override to win, got %q", overrideSelected.Tracker)
+	}
+	if overrideSelected.SCM != "local-git" {
+		t.Fatalf("expected explicit scm override to win, got %q", overrideSelected.SCM)
+	}
+}
+
+func TestFactory_GitHubDisabled_UsesLocalDefaults(t *testing.T) {
+	selected := selectTrackerAndSCMPluginNames(false, pluginNameOverrides{})
+
+	if selected.Tracker != defaultTrackerPlugin {
+		t.Fatalf("expected local tracker plugin %q when github.enabled=false, got %q", defaultTrackerPlugin, selected.Tracker)
+	}
+	if selected.SCM != defaultSCMPlugin {
+		t.Fatalf("expected local scm plugin %q when github.enabled=false, got %q", defaultSCMPlugin, selected.SCM)
+	}
+}
+
 func stringPtr(v string) *string { return &v }
 
 type stubSpecPlugin struct {

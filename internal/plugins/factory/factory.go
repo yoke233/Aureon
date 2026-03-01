@@ -40,7 +40,38 @@ const (
 	defaultTrackerPlugin    = "tracker-local"
 	defaultSCMPlugin        = "local-git"
 	defaultNotifierPlugin   = "desktop"
+	githubTrackerPluginName = "tracker-github"
+	githubSCMPluginName     = "scm-github"
 )
+
+type pluginNameOverrides struct {
+	Tracker string
+	SCM     string
+}
+
+type trackerAndSCMPluginNames struct {
+	Tracker string
+	SCM     string
+}
+
+func selectTrackerAndSCMPluginNames(githubEnabled bool, overrides pluginNameOverrides) trackerAndSCMPluginNames {
+	selected := trackerAndSCMPluginNames{
+		Tracker: defaultTrackerPlugin,
+		SCM:     defaultSCMPlugin,
+	}
+	if githubEnabled {
+		selected.Tracker = githubTrackerPluginName
+		selected.SCM = githubSCMPluginName
+	}
+
+	if overrideTracker := strings.TrimSpace(overrides.Tracker); overrideTracker != "" {
+		selected.Tracker = overrideTracker
+	}
+	if overrideSCM := strings.TrimSpace(overrides.SCM); overrideSCM != "" {
+		selected.SCM = overrideSCM
+	}
+	return selected
+}
 
 type storeProvider interface {
 	core.Plugin

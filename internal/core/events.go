@@ -32,6 +32,14 @@ const (
 	EventPlanDone          EventType = "plan_done"
 	EventPlanFailed        EventType = "plan_failed"
 	EventPlanPartiallyDone EventType = "plan_partially_done"
+
+	// GitHub integration lifecycle events.
+	EventGitHubWebhookReceived            EventType = "github_webhook_received"
+	EventGitHubIssueOpened                EventType = "github_issue_opened"
+	EventGitHubIssueCommentCreated        EventType = "github_issue_comment_created"
+	EventGitHubPullRequestReviewSubmitted EventType = "github_pull_request_review_submitted"
+	EventGitHubPullRequestClosed          EventType = "github_pull_request_closed"
+	EventGitHubReconnected                EventType = "github_reconnected"
 )
 
 type Event struct {

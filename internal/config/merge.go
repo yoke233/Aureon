@@ -68,6 +68,7 @@ func cloneConfig(in Config) Config {
 		OpenSpec: cloneAgentConfig(in.Agents.OpenSpec),
 	}
 	out.Spec = cloneSpecConfig(in.Spec)
+	out.GitHub = cloneGitHubConfig(in.GitHub)
 	return out
 }
 
@@ -208,8 +209,60 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 		if github.InstallationID != nil {
 			cfg.GitHub.InstallationID = *github.InstallationID
 		}
+		if github.Owner != nil {
+			cfg.GitHub.Owner = *github.Owner
+		}
+		if github.Repo != nil {
+			cfg.GitHub.Repo = *github.Repo
+		}
 		if github.WebhookSecret != nil {
 			cfg.GitHub.WebhookSecret = *github.WebhookSecret
+		}
+		if github.WebhookEnabled != nil {
+			cfg.GitHub.WebhookEnabled = *github.WebhookEnabled
+		}
+		if github.PREnabled != nil {
+			cfg.GitHub.PREnabled = *github.PREnabled
+		}
+		if github.LabelMapping != nil {
+			cfg.GitHub.LabelMapping = cloneStringMap(*github.LabelMapping)
+		}
+		if github.AuthorizedUsernames != nil {
+			cfg.GitHub.AuthorizedUsernames = cloneStringSlice(*github.AuthorizedUsernames)
+		}
+		if github.AutoTrigger != nil {
+			cfg.GitHub.AutoTrigger = *github.AutoTrigger
+		}
+		if plugins := github.Plugins; plugins != nil {
+			if plugins.Tracker != nil {
+				cfg.GitHub.Plugins.Tracker = *plugins.Tracker
+			}
+			if plugins.SCM != nil {
+				cfg.GitHub.Plugins.SCM = *plugins.SCM
+			}
+			if plugins.ReviewGate != nil {
+				cfg.GitHub.Plugins.ReviewGate = *plugins.ReviewGate
+			}
+		}
+		if pr := github.PR; pr != nil {
+			if pr.AutoCreate != nil {
+				cfg.GitHub.PR.AutoCreate = *pr.AutoCreate
+			}
+			if pr.Draft != nil {
+				cfg.GitHub.PR.Draft = *pr.Draft
+			}
+			if pr.AutoMerge != nil {
+				cfg.GitHub.PR.AutoMerge = *pr.AutoMerge
+			}
+			if pr.Reviewers != nil {
+				cfg.GitHub.PR.Reviewers = cloneStringSlice(*pr.Reviewers)
+			}
+			if pr.Labels != nil {
+				cfg.GitHub.PR.Labels = cloneStringSlice(*pr.Labels)
+			}
+			if pr.BranchPrefix != nil {
+				cfg.GitHub.PR.BranchPrefix = *pr.BranchPrefix
+			}
 		}
 	}
 
@@ -255,4 +308,31 @@ func cloneSpecConfig(in SpecConfig) SpecConfig {
 			Binary: in.OpenSpec.Binary,
 		},
 	}
+}
+
+func cloneGitHubConfig(in GitHubConfig) GitHubConfig {
+	out := in
+	out.LabelMapping = cloneStringMap(in.LabelMapping)
+	out.AuthorizedUsernames = cloneStringSlice(in.AuthorizedUsernames)
+	out.PR.Reviewers = cloneStringSlice(in.PR.Reviewers)
+	out.PR.Labels = cloneStringSlice(in.PR.Labels)
+	return out
+}
+
+func cloneStringSlice(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	return append([]string(nil), in...)
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

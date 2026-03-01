@@ -33,6 +33,7 @@ type Config struct {
 	Addr           string
 	AuthEnabled    bool
 	BearerToken    string
+	WebhookSecret  string
 	AllowedOrigins []string
 	Frontend       fs.FS
 	Store          core.Store
@@ -80,6 +81,11 @@ func NewServer(cfg Config) *Server {
 
 	r.Get("/health", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
+	webhookSecret := strings.TrimSpace(cfg.WebhookSecret)
+	if webhookSecret == "" {
+		webhookSecret = strings.TrimSpace(cfg.BearerToken)
+	}
+	registerWebhookRoutes(r, cfg.Store, webhookSecret)
 	r.Route("/api/v1", func(r chi.Router) {
 		if cfg.AuthEnabled {
 			r.Use(BearerAuthMiddleware(cfg.BearerToken))

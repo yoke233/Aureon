@@ -31,6 +31,12 @@ type githubWebhookEnvelope struct {
 			Login string `json:"login"`
 		} `json:"owner"`
 	} `json:"repository"`
+	Issue struct {
+		Number int `json:"number"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	} `json:"issue"`
 }
 
 func registerWebhookRoutes(r chi.Router, store core.Store, secret string) WebhookDeliveryReplayer {
@@ -105,6 +111,7 @@ func (h *webhookHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) 
 		deliveryID := strings.TrimSpace(r.Header.Get("X-GitHub-Delivery"))
 		traceID := observability.TraceIDFromWebhook(strings.TrimSpace(r.Header.Get("X-Trace-ID")), deliveryID)
 		dispatchCtx := observability.WithTraceID(r.Context(), traceID)
+		_ = extractIssueLabels(envelope)
 
 		result, err := h.dispatcher.Dispatch(dispatchCtx, ghwebhook.WebhookDispatchRequest{
 			ProjectID:  project.ID,
@@ -139,6 +146,21 @@ func (h *webhookHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) 
 		"event":      eventType,
 		"action":     envelope.Action,
 	})
+}
+
+func extractIssueLabels(envelope githubWebhookEnvelope) []string {
+	if len(envelope.Issue.Labels) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(envelope.Issue.Labels))
+	for _, label := range envelope.Issue.Labels {
+		name := strings.TrimSpace(label.Name)
+		if name == "" {
+			continue
+		}
+		labels = append(labels, name)
+	}
+	return labels
 }
 
 func verifyWebhookSignature(payload []byte, signatureHeader, secret string) bool {

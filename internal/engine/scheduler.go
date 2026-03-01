@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -212,4 +214,69 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// FindPipelineByIssueNumber returns an existing pipeline bound to issue_number in pipeline config/artifacts.
+func FindPipelineByIssueNumber(store core.Store, projectID string, issueNumber int) (*core.Pipeline, error) {
+	if store == nil {
+		return nil, fmt.Errorf("store is required")
+	}
+	if strings.TrimSpace(projectID) == "" || issueNumber <= 0 {
+		return nil, nil
+	}
+
+	pipelines, err := store.ListPipelines(projectID, core.PipelineFilter{Limit: 500})
+	if err != nil {
+		return nil, err
+	}
+	for i := range pipelines {
+		summary := pipelines[i]
+		pipeline, err := store.GetPipeline(summary.ID)
+		if err != nil {
+			return nil, err
+		}
+		if issueNumberFromConfigMap(pipeline.Config) == issueNumber || issueNumberFromArtifacts(pipeline.Artifacts) == issueNumber {
+			return pipeline, nil
+		}
+	}
+	return nil, nil
+}
+
+func issueNumberFromConfigMap(config map[string]any) int {
+	if config == nil {
+		return 0
+	}
+	raw, ok := config["issue_number"]
+	if !ok {
+		return 0
+	}
+	switch v := raw.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func issueNumberFromArtifacts(artifacts map[string]string) int {
+	if artifacts == nil {
+		return 0
+	}
+	raw := strings.TrimSpace(artifacts["issue_number"])
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return n
 }

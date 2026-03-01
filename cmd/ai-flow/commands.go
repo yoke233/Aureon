@@ -66,6 +66,9 @@ var (
 		if bootstrapSet == nil {
 			return nil, errors.New("bootstrap set is required for plan manager")
 		}
+		if bootstrapSet.Spec == nil {
+			return nil, errors.New("spec plugin is required for plan manager")
+		}
 		agentPlugin, err := selectSecretaryAgentPlugin(bootstrapSet.Agents)
 		if err != nil {
 			return nil, err
@@ -123,6 +126,9 @@ func bootstrapWithEventBus() (*engine.Executor, *pluginfactory.BootstrapSet, *ev
 	bootstrapSet, err := pluginfactory.BuildFromConfig(*cfg)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if bootstrapSet.Spec == nil {
+		return nil, nil, nil, errors.New("spec plugin is not configured in bootstrap set")
 	}
 
 	bus := eventbus.New()

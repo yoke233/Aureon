@@ -316,6 +316,23 @@ func reserveFreePort(t *testing.T) int {
 	return addr.Port
 }
 
+func TestBootstrapWithEventBus_ContainsSpecPlugin(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("USERPROFILE", tempHome)
+
+	_, bootstrapSet, bus, err := bootstrapWithEventBus()
+	if err != nil {
+		t.Fatalf("bootstrapWithEventBus() error = %v", err)
+	}
+	defer bootstrapSet.Store.Close()
+	defer bus.Close()
+
+	if bootstrapSet.Spec == nil {
+		t.Fatal("expected bootstrap set to include spec plugin")
+	}
+}
+
 type testAPIServer struct {
 	startErr    error
 	shutdownErr error

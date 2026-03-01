@@ -43,6 +43,7 @@ func registerWebhookRoutes(r chi.Router, store core.Store, secret string) {
 		secret: strings.TrimSpace(secret),
 		dispatcher: ghwebhook.NewWebhookDispatcher(ghwebhook.WebhookDispatcherOptions{
 			Publisher: publisher,
+			DLQStore:  ghwebhook.DefaultDLQStore(),
 		}),
 	}
 	r.Post("/webhook", h.handleWebhook)
@@ -99,11 +100,17 @@ func (h *webhookHandlers) handleWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if h.dispatcher != nil {
+		traceID := strings.TrimSpace(r.Header.Get("X-Trace-ID"))
+		if traceID == "" {
+			traceID = strings.TrimSpace(r.Header.Get("X-GitHub-Delivery"))
+		}
+
 		result, err := h.dispatcher.Dispatch(r.Context(), ghwebhook.WebhookDispatchRequest{
 			ProjectID:  project.ID,
 			EventType:  eventType,
 			Action:     strings.TrimSpace(envelope.Action),
 			DeliveryID: strings.TrimSpace(r.Header.Get("X-GitHub-Delivery")),
+			TraceID:    traceID,
 			Payload:    payload,
 			ReceivedAt: time.Now(),
 		})

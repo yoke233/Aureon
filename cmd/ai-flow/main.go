@@ -73,6 +73,16 @@ func runWithArgs(args []string) error {
 		default:
 			return fmt.Errorf("unknown scheduler command: %s", args[1])
 		}
+	case "github":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ai-flow github <replay>")
+		}
+		switch args[1] {
+		case "replay":
+			return cmdGitHubReplay(args[2:])
+		default:
+			return fmt.Errorf("unknown github command: %s", args[1])
+		}
 	case "server":
 		return cmdServer(args[1:])
 	case "tui":
@@ -105,6 +115,7 @@ Usage:
   ai-flow pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_agent|abort|pause|resume> [--stage <stage>] [--agent <agent>] [--message <text>]
   ai-flow scheduler run
   ai-flow scheduler once
+  ai-flow github replay --delivery-id <id>
   ai-flow server [--port <port>]
   ai-flow tui`)
 }

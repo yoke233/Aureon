@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -196,6 +197,37 @@ func TestWebhookDispatcher_DeduplicatesDeliveryID(t *testing.T) {
 
 	if atomic.LoadInt32(&called) != 1 {
 		t.Fatalf("expected handler called once, got %d", called)
+	}
+}
+
+func TestWebhookDispatcher_FailedEvent_PushedToDLQ(t *testing.T) {
+	dlqStore := NewInMemoryDLQStore()
+	dispatcher := NewWebhookDispatcher(WebhookDispatcherOptions{
+		DLQStore: dlqStore,
+		Handler: WebhookDispatchHandlerFunc(func(_ context.Context, _ WebhookDispatchRequest) error {
+			return errors.New("dispatcher panic")
+		}),
+	})
+	defer dispatcher.Close()
+
+	req := testWebhookDispatchRequest(t, "proj-dlq", "issues", "opened", "delivery-dlq-1", "acme", "demo", 301)
+	_, err := dispatcher.Dispatch(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected dispatch error")
+	}
+
+	entry, getErr := dlqStore.GetByDeliveryID(context.Background(), "delivery-dlq-1")
+	if getErr != nil {
+		t.Fatalf("GetByDeliveryID() error = %v", getErr)
+	}
+	if entry.EventType != "issues" || entry.Action != "opened" {
+		t.Fatalf("unexpected dlq entry event fields: %+v", entry)
+	}
+	if entry.IssueNumber != 301 {
+		t.Fatalf("IssueNumber = %d, want 301", entry.IssueNumber)
+	}
+	if entry.ProjectID != "proj-dlq" {
+		t.Fatalf("ProjectID = %q, want %q", entry.ProjectID, "proj-dlq")
 	}
 }
 

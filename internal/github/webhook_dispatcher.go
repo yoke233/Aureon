@@ -22,6 +22,7 @@ type WebhookDispatchRequest struct {
 	EventType  string
 	Action     string
 	DeliveryID string
+	TraceID    string
 	Payload    []byte
 	ReceivedAt time.Time
 }
@@ -58,6 +59,7 @@ type WebhookDispatcherOptions struct {
 	Handler        WebhookDispatchHandler
 	Publisher      webhookEventPublisher
 	PipelineEvents webhookPipelineEvents
+	DLQStore       DLQStore
 	CleanupDelay   time.Duration
 	DeliveryTTL    time.Duration
 	Now            func() time.Time
@@ -74,6 +76,7 @@ type issueLockState struct {
 type WebhookDispatcher struct {
 	handler      WebhookDispatchHandler
 	publisher    webhookEventPublisher
+	dlqStore     DLQStore
 	cleanupDelay time.Duration
 	deliveryTTL  time.Duration
 	now          func() time.Time
@@ -122,6 +125,7 @@ func NewWebhookDispatcher(opts WebhookDispatcherOptions) *WebhookDispatcher {
 	d := &WebhookDispatcher{
 		handler:        handler,
 		publisher:      opts.Publisher,
+		dlqStore:       opts.DLQStore,
 		cleanupDelay:   cleanupDelay,
 		deliveryTTL:    deliveryTTL,
 		now:            nowFn,
@@ -155,6 +159,42 @@ func (d *WebhookDispatcher) Close() {
 
 // Dispatch routes one webhook payload through dedupe + serialization flow.
 func (d *WebhookDispatcher) Dispatch(ctx context.Context, req WebhookDispatchRequest) (WebhookDispatchResult, error) {
+	return d.dispatch(ctx, req, false)
+}
+
+// ReplayByDeliveryID re-dispatches one failed delivery from DLQ. Replayed delivery is idempotent.
+func (d *WebhookDispatcher) ReplayByDeliveryID(ctx context.Context, deliveryID string) (bool, error) {
+	if d == nil || d.dlqStore == nil {
+		return false, ErrDLQEntryNotFound
+	}
+
+	entry, err := d.dlqStore.GetByDeliveryID(ctx, strings.TrimSpace(deliveryID))
+	if err != nil {
+		return false, err
+	}
+	if entry.Replayed {
+		return false, nil
+	}
+
+	_, err = d.dispatch(ctx, WebhookDispatchRequest{
+		ProjectID:  entry.ProjectID,
+		EventType:  entry.EventType,
+		Action:     entry.Action,
+		DeliveryID: entry.DeliveryID,
+		TraceID:    entry.TraceID,
+		Payload:    append([]byte(nil), entry.Payload...),
+		ReceivedAt: d.now(),
+	}, true)
+	if err != nil {
+		return false, err
+	}
+	if err := d.dlqStore.MarkReplayed(ctx, entry.DeliveryID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (d *WebhookDispatcher) dispatch(ctx context.Context, req WebhookDispatchRequest, ignoreDeliveryDedupe bool) (WebhookDispatchResult, error) {
 	if d == nil {
 		return WebhookDispatchResult{}, nil
 	}
@@ -165,8 +205,9 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, req WebhookDispatchReq
 	req.EventType = strings.TrimSpace(req.EventType)
 	req.Action = strings.TrimSpace(req.Action)
 	req.DeliveryID = strings.TrimSpace(req.DeliveryID)
+	req.TraceID = strings.TrimSpace(req.TraceID)
 
-	if req.DeliveryID != "" && d.markDuplicateDelivery(req.DeliveryID) {
+	if !ignoreDeliveryDedupe && req.DeliveryID != "" && d.markDuplicateDelivery(req.DeliveryID) {
 		return WebhookDispatchResult{Duplicate: true}, nil
 	}
 
@@ -180,13 +221,18 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, req WebhookDispatchReq
 
 	result := WebhookDispatchResult{IssueKey: issueKey}
 	if issueKey == "" {
-		return result, d.handler.HandleWebhook(ctx, req)
+		err := d.handler.HandleWebhook(ctx, req)
+		if err != nil {
+			d.pushFailedToDLQ(ctx, req, issue.number, err)
+		}
+		return result, err
 	}
 
 	entry := d.acquireIssueLock(issueKey)
 	defer d.releaseIssueLock(issueKey, entry)
 
 	if err := d.handler.HandleWebhook(ctx, req); err != nil {
+		d.pushFailedToDLQ(ctx, req, issue.number, err)
 		return result, err
 	}
 
@@ -313,6 +359,9 @@ func (d *WebhookDispatcher) publishReceivedEvent(req WebhookDispatchRequest, iss
 	if req.DeliveryID != "" {
 		data["delivery_id"] = req.DeliveryID
 	}
+	if req.TraceID != "" {
+		data["trace_id"] = req.TraceID
+	}
 	if issue.owner != "" {
 		data["github_owner"] = issue.owner
 	}
@@ -331,6 +380,28 @@ func (d *WebhookDispatcher) publishReceivedEvent(req WebhookDispatchRequest, iss
 		ProjectID: strings.TrimSpace(req.ProjectID),
 		Data:      data,
 		Timestamp: d.now(),
+	})
+}
+
+func (d *WebhookDispatcher) pushFailedToDLQ(
+	ctx context.Context,
+	req WebhookDispatchRequest,
+	issueNumber int,
+	dispatchErr error,
+) {
+	if d == nil || d.dlqStore == nil || strings.TrimSpace(req.DeliveryID) == "" {
+		return
+	}
+	_ = d.dlqStore.Push(ctx, DLQEntry{
+		DeliveryID:  req.DeliveryID,
+		ProjectID:   strings.TrimSpace(req.ProjectID),
+		EventType:   strings.TrimSpace(req.EventType),
+		Action:      strings.TrimSpace(req.Action),
+		IssueNumber: issueNumber,
+		TraceID:     strings.TrimSpace(req.TraceID),
+		Payload:     append([]byte(nil), req.Payload...),
+		FailedAt:    d.now(),
+		LastError:   dispatchErr.Error(),
 	})
 }
 

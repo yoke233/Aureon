@@ -1,12 +1,12 @@
 # P3 Prerequisites Entry Checklist
 
 > 该清单用于判定是否可以从前置重构计划切换到 `2026-03-01-p3-github-integration.md`。  
-> 判定规则：四项门禁（build/test/race/search）全部通过时标记为 `Ready`；任一失败即为 `Not Ready`。
+> 判定规则：四项门禁（build/test/race/search）全部通过时标记为 `Ready`；若存在已明确批准的环境型豁免，也可标记为 `Ready (Waived)`。
 
 ## Metadata
 
 - Generated At: `2026-03-01 22:00:54 +08:00`
-- Updated At: `2026-03-01 22:14:01 +08:00`
+- Updated At: `2026-03-01 22:19:20 +08:00`
 - Owner: `codex`
 - Source Plan: `docs/plans/2026-03-01-p3-prerequisites-implementation.md`
 
@@ -21,11 +21,11 @@
 
 ## Entry Verdict
 
-- Status: `Not Ready`
+- Status: `Ready (Waived)`
 - Blocking Items:
   - [x] Build
   - [x] Test
-  - [ ] Race
+  - [x] Race（环境豁免）
   - [x] Search
-- Required Action:
-  - 安装可用 C 编译器（如 `gcc`）并在 `CGO_ENABLED=1` 下重跑 race 门禁，成功后再将状态更新为 `Ready`。
+- Waiver Note:
+  - 2026-03-01：用户明确批准“先不做 race 门禁”，当前按环境豁免进入下一阶段。

@@ -182,30 +182,44 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 		return nil, fmt.Errorf("plugin is not a review gate plugin: slot=%s name=%s", core.SlotReviewGate, reviewGateName)
 	}
 
-	trackerModule, ok := registry.Get(core.SlotTracker, defaultTrackerPlugin)
+	selectedPlugins := selectTrackerAndSCMPluginNames(effective.GitHub.Enabled, pluginNameOverrides{})
+
+	trackerName := selectedPlugins.Tracker
+	trackerModule, ok := registry.Get(core.SlotTracker, trackerName)
+	if !ok && trackerName != defaultTrackerPlugin {
+		// GitHub tracker is expected to be added in later waves. Fallback keeps current behavior.
+		trackerName = defaultTrackerPlugin
+		trackerModule, ok = registry.Get(core.SlotTracker, trackerName)
+	}
 	if !ok {
-		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotTracker, defaultTrackerPlugin)
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotTracker, trackerName)
 	}
 	trackerRaw, err := trackerModule.Factory(nil)
 	if err != nil {
-		return nil, fmt.Errorf("build tracker plugin %q: %w", defaultTrackerPlugin, err)
+		return nil, fmt.Errorf("build tracker plugin %q: %w", trackerName, err)
 	}
 	trackerPlugin, ok := trackerRaw.(core.Tracker)
 	if !ok {
-		return nil, fmt.Errorf("plugin is not a tracker plugin: slot=%s name=%s", core.SlotTracker, defaultTrackerPlugin)
+		return nil, fmt.Errorf("plugin is not a tracker plugin: slot=%s name=%s", core.SlotTracker, trackerName)
 	}
 
-	scmModule, ok := registry.Get(core.SlotSCM, defaultSCMPlugin)
+	scmName := selectedPlugins.SCM
+	scmModule, ok := registry.Get(core.SlotSCM, scmName)
+	if !ok && scmName != defaultSCMPlugin {
+		// GitHub SCM plugin is expected to be added in later waves. Fallback keeps current behavior.
+		scmName = defaultSCMPlugin
+		scmModule, ok = registry.Get(core.SlotSCM, scmName)
+	}
 	if !ok {
-		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotSCM, defaultSCMPlugin)
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotSCM, scmName)
 	}
 	scmRaw, err := scmModule.Factory(nil)
 	if err != nil {
-		return nil, fmt.Errorf("build scm plugin %q: %w", defaultSCMPlugin, err)
+		return nil, fmt.Errorf("build scm plugin %q: %w", scmName, err)
 	}
 	scmPlugin, ok := scmRaw.(core.SCM)
 	if !ok {
-		return nil, fmt.Errorf("plugin is not a scm plugin: slot=%s name=%s", core.SlotSCM, defaultSCMPlugin)
+		return nil, fmt.Errorf("plugin is not a scm plugin: slot=%s name=%s", core.SlotSCM, scmName)
 	}
 
 	notifierModule, ok := registry.Get(core.SlotNotifier, defaultNotifierPlugin)

@@ -564,13 +564,14 @@ func runServer(ctx context.Context, args []string) error {
 	}()
 
 	apiServer := newAPIServer(web.Config{
-		Addr:         listenAddr,
-		AuthEnabled:  cfg.Server.AuthEnabled,
-		BearerToken:  cfg.Server.AuthToken,
-		Store:        store,
-		PlanManager:  planManager,
-		PipelineExec: exec,
-		Hub:          hub,
+		Addr:          listenAddr,
+		AuthEnabled:   cfg.Server.AuthEnabled,
+		BearerToken:   cfg.Server.AuthToken,
+		WebhookSecret: cfg.GitHub.WebhookSecret,
+		Store:         store,
+		PlanManager:   planManager,
+		PipelineExec:  exec,
+		Hub:           hub,
 	})
 
 	serverErrCh := make(chan error, 1)

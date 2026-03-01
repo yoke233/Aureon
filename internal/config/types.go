@@ -81,27 +81,20 @@ type ServerConfig struct {
 }
 
 type GitHubConfig struct {
-	Enabled             bool                `yaml:"enabled"`
-	Token               string              `yaml:"token"`
-	AppID               int64               `yaml:"app_id"`
-	PrivateKeyPath      string              `yaml:"private_key_path"`
-	InstallationID      int64               `yaml:"installation_id"`
-	Owner               string              `yaml:"owner"`
-	Repo                string              `yaml:"repo"`
-	WebhookSecret       string              `yaml:"webhook_secret"`
-	WebhookEnabled      bool                `yaml:"webhook_enabled"`
-	PREnabled           bool                `yaml:"pr_enabled"`
-	LabelMapping        map[string]string   `yaml:"label_mapping"`
-	AuthorizedUsernames []string            `yaml:"authorized_usernames"`
-	AutoTrigger         bool                `yaml:"auto_trigger"`
-	Plugins             GitHubPluginsConfig `yaml:"plugins"`
-	PR                  GitHubPRConfig      `yaml:"pr"`
-}
-
-type GitHubPluginsConfig struct {
-	Tracker    string `yaml:"tracker"`
-	SCM        string `yaml:"scm"`
-	ReviewGate string `yaml:"review_gate"`
+	Enabled             bool              `yaml:"enabled"`
+	Token               string            `yaml:"token"`
+	AppID               int64             `yaml:"app_id"`
+	PrivateKeyPath      string            `yaml:"private_key_path"`
+	InstallationID      int64             `yaml:"installation_id"`
+	Owner               string            `yaml:"owner"`
+	Repo                string            `yaml:"repo"`
+	WebhookSecret       string            `yaml:"webhook_secret"`
+	WebhookEnabled      bool              `yaml:"webhook_enabled"`
+	PREnabled           bool              `yaml:"pr_enabled"`
+	LabelMapping        map[string]string `yaml:"label_mapping"`
+	AuthorizedUsernames []string          `yaml:"authorized_usernames"`
+	AutoTrigger         bool              `yaml:"auto_trigger"`
+	PR                  GitHubPRConfig    `yaml:"pr"`
 }
 
 type GitHubPRConfig struct {
@@ -194,27 +187,20 @@ type ServerLayer struct {
 }
 
 type GitHubLayer struct {
-	Enabled             *bool               `yaml:"enabled"`
-	Token               *string             `yaml:"token"`
-	AppID               *int64              `yaml:"app_id"`
-	PrivateKeyPath      *string             `yaml:"private_key_path"`
-	InstallationID      *int64              `yaml:"installation_id"`
-	Owner               *string             `yaml:"owner"`
-	Repo                *string             `yaml:"repo"`
-	WebhookSecret       *string             `yaml:"webhook_secret"`
-	WebhookEnabled      *bool               `yaml:"webhook_enabled"`
-	PREnabled           *bool               `yaml:"pr_enabled"`
-	LabelMapping        *map[string]string  `yaml:"label_mapping"`
-	AuthorizedUsernames *[]string           `yaml:"authorized_usernames"`
-	AutoTrigger         *bool               `yaml:"auto_trigger"`
-	Plugins             *GitHubPluginsLayer `yaml:"plugins"`
-	PR                  *GitHubPRLayer      `yaml:"pr"`
-}
-
-type GitHubPluginsLayer struct {
-	Tracker    *string `yaml:"tracker"`
-	SCM        *string `yaml:"scm"`
-	ReviewGate *string `yaml:"review_gate"`
+	Enabled             *bool              `yaml:"enabled"`
+	Token               *string            `yaml:"token"`
+	AppID               *int64             `yaml:"app_id"`
+	PrivateKeyPath      *string            `yaml:"private_key_path"`
+	InstallationID      *int64             `yaml:"installation_id"`
+	Owner               *string            `yaml:"owner"`
+	Repo                *string            `yaml:"repo"`
+	WebhookSecret       *string            `yaml:"webhook_secret"`
+	WebhookEnabled      *bool              `yaml:"webhook_enabled"`
+	PREnabled           *bool              `yaml:"pr_enabled"`
+	LabelMapping        *map[string]string `yaml:"label_mapping"`
+	AuthorizedUsernames *[]string          `yaml:"authorized_usernames"`
+	AutoTrigger         *bool              `yaml:"auto_trigger"`
+	PR                  *GitHubPRLayer     `yaml:"pr"`
 }
 
 type GitHubPRLayer struct {

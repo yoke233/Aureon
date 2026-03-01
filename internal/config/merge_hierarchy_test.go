@@ -150,11 +150,6 @@ func TestGitHubConfig_MergeHierarchy_Works(t *testing.T) {
 			AutoTrigger:         false,
 			LabelMapping:        map[string]string{"type:bug": "quick"},
 			AuthorizedUsernames: []string{"global-user"},
-			Plugins: GitHubPluginsConfig{
-				Tracker:    "tracker-local",
-				SCM:        "local-git",
-				ReviewGate: "review-ai-panel",
-			},
 			PR: GitHubPRConfig{
 				AutoCreate:   false,
 				Draft:        true,
@@ -176,9 +171,6 @@ func TestGitHubConfig_MergeHierarchy_Works(t *testing.T) {
 			AutoTrigger:         ptr(true),
 			LabelMapping:        ptrStringMap(map[string]string{"type:feature": "full"}),
 			AuthorizedUsernames: ptrSlice("alice", "bob"),
-			Plugins: &GitHubPluginsLayer{
-				Tracker: ptr("tracker-github"),
-			},
 			PR: &GitHubPRLayer{
 				AutoCreate:   ptr(true),
 				Draft:        ptr(true),
@@ -195,9 +187,6 @@ func TestGitHubConfig_MergeHierarchy_Works(t *testing.T) {
 			"webhook_secret":       "secret-override",
 			"label_mapping":        map[string]any{"type:hotfix": "hotfix"},
 			"authorized_usernames": []any{"carol"},
-			"plugins": map[string]any{
-				"scm": "scm-github",
-			},
 			"pr": map[string]any{
 				"draft":      false,
 				"auto_merge": true,
@@ -239,15 +228,6 @@ func TestGitHubConfig_MergeHierarchy_Works(t *testing.T) {
 	}
 	if len(merged.GitHub.AuthorizedUsernames) != 1 || merged.GitHub.AuthorizedUsernames[0] != "carol" {
 		t.Fatalf("expected pipeline override authorized_usernames, got %#v", merged.GitHub.AuthorizedUsernames)
-	}
-	if merged.GitHub.Plugins.Tracker != "tracker-github" {
-		t.Fatalf("expected project layer github.plugins.tracker, got %q", merged.GitHub.Plugins.Tracker)
-	}
-	if merged.GitHub.Plugins.SCM != "scm-github" {
-		t.Fatalf("expected pipeline override github.plugins.scm, got %q", merged.GitHub.Plugins.SCM)
-	}
-	if merged.GitHub.Plugins.ReviewGate != "review-ai-panel" {
-		t.Fatalf("expected global inheritance github.plugins.review_gate, got %q", merged.GitHub.Plugins.ReviewGate)
 	}
 	if !merged.GitHub.PR.AutoCreate {
 		t.Fatalf("expected project layer github.pr.auto_create=true")

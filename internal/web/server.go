@@ -81,11 +81,7 @@ func NewServer(cfg Config) *Server {
 
 	r.Get("/health", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
-	webhookSecret := strings.TrimSpace(cfg.WebhookSecret)
-	if webhookSecret == "" {
-		webhookSecret = strings.TrimSpace(cfg.BearerToken)
-	}
-	registerWebhookRoutes(r, cfg.Store, webhookSecret)
+	registerWebhookRoutes(r, cfg.Store, strings.TrimSpace(cfg.WebhookSecret))
 	r.Route("/api/v1", func(r chi.Router) {
 		if cfg.AuthEnabled {
 			r.Use(BearerAuthMiddleware(cfg.BearerToken))

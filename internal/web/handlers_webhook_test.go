@@ -30,9 +30,10 @@ func TestWebhook_VerifySignature_Success(t *testing.T) {
 	}
 
 	srv := NewServer(Config{
-		Store:       store,
-		AuthEnabled: true,
-		BearerToken: "webhook-secret",
+		Store:         store,
+		AuthEnabled:   true,
+		BearerToken:   "api-token",
+		WebhookSecret: "webhook-secret",
 	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -61,9 +62,10 @@ func TestWebhook_VerifySignature_Invalid_Returns401(t *testing.T) {
 	}
 
 	srv := NewServer(Config{
-		Store:       store,
-		AuthEnabled: true,
-		BearerToken: "webhook-secret",
+		Store:         store,
+		AuthEnabled:   true,
+		BearerToken:   "api-token",
+		WebhookSecret: "webhook-secret",
 	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -92,8 +94,8 @@ func TestWebhook_ProjectRouting_UsesOwnerRepo(t *testing.T) {
 	}
 
 	srv := NewServer(Config{
-		Store:       store,
-		BearerToken: "webhook-secret",
+		Store:         store,
+		WebhookSecret: "webhook-secret",
 	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -129,8 +131,8 @@ func TestWebhook_UnsupportedEvent_Returns202(t *testing.T) {
 	}
 
 	srv := NewServer(Config{
-		Store:       store,
-		BearerToken: "webhook-secret",
+		Store:         store,
+		WebhookSecret: "webhook-secret",
 	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

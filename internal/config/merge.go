@@ -233,17 +233,6 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 		if github.AutoTrigger != nil {
 			cfg.GitHub.AutoTrigger = *github.AutoTrigger
 		}
-		if plugins := github.Plugins; plugins != nil {
-			if plugins.Tracker != nil {
-				cfg.GitHub.Plugins.Tracker = *plugins.Tracker
-			}
-			if plugins.SCM != nil {
-				cfg.GitHub.Plugins.SCM = *plugins.SCM
-			}
-			if plugins.ReviewGate != nil {
-				cfg.GitHub.Plugins.ReviewGate = *plugins.ReviewGate
-			}
-		}
 		if pr := github.PR; pr != nil {
 			if pr.AutoCreate != nil {
 				cfg.GitHub.PR.AutoCreate = *pr.AutoCreate

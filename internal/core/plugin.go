@@ -25,6 +25,26 @@ type Plugin interface {
 	Close() error
 }
 
+// SpecContextRequest describes input for fetching plan-level spec context.
+type SpecContextRequest struct {
+	ProjectID string `json:"project_id"`
+	PlanID    string `json:"plan_id"`
+	Query     string `json:"query"`
+}
+
+// SpecContext carries spec enrichment for plan/review stages.
+type SpecContext struct {
+	Summary    string   `json:"summary"`
+	References []string `json:"references"`
+}
+
+// SpecPlugin provides plan-level spec context and lifecycle hooks.
+type SpecPlugin interface {
+	Plugin
+	IsInitialized() bool
+	GetContext(ctx context.Context, req SpecContextRequest) (SpecContext, error)
+}
+
 // PluginModule describes a registerable plugin implementation.
 type PluginModule struct {
 	Name    string

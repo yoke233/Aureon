@@ -79,7 +79,7 @@ hotfix:    worktree_setup → implement → merge → cleanup
 ```
 
 > `full` 模板的区分点是 `e2e_test` 阶段（端到端测试），适用于需要严格验证的功能。
-> 原先的 spec_gen/spec_review 阶段已移至 Secretary Layer 的 TaskPlan 级别处理。
+> 旧版的“规格生成/规格审核”阶段已移至 Secretary Layer 的 TaskPlan 级别处理。
 
 ### 动态 fixup 注入规则
 

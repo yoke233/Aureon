@@ -24,7 +24,7 @@
 - 多代码托管平台（GitLab/Bitbucket）统一抽象。
 
 ### 关键架构约束（与最新 spec 对齐）
-- Pipeline 不包含 `spec_gen/spec_review`，P3 不得引入旧阶段命名。
+- Pipeline 不包含“规格生成/规格审核”阶段，P3 不得引入旧阶段命名。
 - Pipeline 关联 TaskItem 统一使用 `task_item_id`，不复制 TaskItem 契约到 Pipeline 字段。
 - Spec 仅作为 Secretary 上下文增强；GitHub 同步层不得承担 Spec 生命周期管理。
 

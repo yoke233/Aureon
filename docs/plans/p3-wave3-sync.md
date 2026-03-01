@@ -213,7 +213,7 @@ git commit -m "feat(github): add draft pr lifecycle orchestration"
 - Execute mandatory gate sequence via `executing-wave-plans`.
 - Wave-specific acceptance:
   - [ ] Issue/Slash/Status/PR 四条主链路全部打通。
-  - [ ] 所有 stage 同步标签使用新 stage id（无 `spec_gen/spec_review` 残留）。
+  - [ ] 所有 stage 同步标签使用新 stage id（无旧规格阶段命名残留）。
   - [ ] 外部 merge 和本地 merge 两条路径都能收敛到一致状态。
 - Wave-specific verification:
   - [ ] `go test ./internal/github -run 'TestPipelineTrigger_|TestParseSlashCommand_|TestStatusSyncer_|TestPRLifecycle_'` 通过。

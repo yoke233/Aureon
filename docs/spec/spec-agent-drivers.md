@@ -265,7 +265,7 @@ Codex `--json` 输出的事件类型到统一 StreamEvent 的映射：
 ### 设计变更
 
 > **重要**：spec 生成和审核已从 Pipeline 阶段上提到 Secretary Layer（TaskPlan 级）。
-> Pipeline 不再包含 `spec_gen` / `spec_review` 阶段。"做什么"由 TaskPlan 决定，
+> Pipeline 不再包含“规格生成/规格审核”阶段。"做什么"由 TaskPlan 决定，
 > Pipeline 通过 `task_item_id` 关联 TaskItem 后进入 requirements → implement 流程。
 >
 > Spec 插件不再驱动 Pipeline 阶段，而是作为 Secretary Agent 构造 prompt 时的**可选上下文增强**。

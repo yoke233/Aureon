@@ -170,8 +170,8 @@ type StageID string
 
 const (
     StageRequirements  StageID = "requirements"
-    StageSpecGen       StageID = "spec_gen"
-    StageSpecReview    StageID = "spec_review"
+    StagePlanDraft     StageID = "plan_draft"
+    StagePlanReview    StageID = "plan_review"
     StageWorktreeSetup StageID = "worktree_setup"
     StageImplement     StageID = "implement"
     StageCodeReview    StageID = "code_review"
@@ -1995,7 +1995,7 @@ import "github.com/user/ai-workflow/internal/core"
 
 var Templates = map[string][]core.StageID{
     "full": {
-        core.StageRequirements, core.StageSpecGen, core.StageSpecReview,
+        core.StageRequirements, core.StagePlanDraft, core.StagePlanReview,
         core.StageWorktreeSetup, core.StageImplement, core.StageCodeReview,
         core.StageFixup, core.StageMerge, core.StageCleanup,
     },
@@ -2302,7 +2302,7 @@ func defaultStageConfig(id core.StageID) core.StageConfig {
         OnFailure:      core.OnFailureHuman,
     }
     switch id {
-    case core.StageRequirements, core.StageSpecGen, core.StageSpecReview, core.StageCodeReview:
+    case core.StageRequirements, core.StagePlanDraft, core.StagePlanReview, core.StageCodeReview:
         cfg.Agent = "claude"
     case core.StageImplement, core.StageFixup:
         cfg.Agent = "codex"

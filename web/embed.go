@@ -1,3 +1,5 @@
+//go:build webdist
+
 package webassets
 
 import (
@@ -9,6 +11,11 @@ import (
 //
 //go:embed all:dist
 var distFS embed.FS
+
+// EmbeddedFrontendMode identifies which embedded frontend source is compiled.
+func EmbeddedFrontendMode() string {
+	return "webdist"
+}
 
 // DistFS returns a filesystem rooted at web/dist.
 func DistFS() (fs.FS, error) {

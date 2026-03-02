@@ -45,7 +45,7 @@ func Defaults() Config {
 		},
 		Secretary: SecretaryConfig{
 			ReviewGatePlugin: "review-ai-panel",
-			ReviewPanel: ReviewPanelConfig{
+			ReviewOrchestrator: ReviewOrchestratorConfig{
 				MaxRounds: 2,
 			},
 			DAGScheduler: DAGSchedulerConfig{

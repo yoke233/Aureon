@@ -27,8 +27,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Secretary.ReviewGatePlugin != "review-ai-panel" {
 		t.Errorf("expected secretary.review_gate_plugin review-ai-panel, got %s", cfg.Secretary.ReviewGatePlugin)
 	}
-	if cfg.Secretary.ReviewPanel.MaxRounds != 2 {
-		t.Errorf("expected secretary.review_panel.max_rounds 2, got %d", cfg.Secretary.ReviewPanel.MaxRounds)
+	if cfg.Secretary.ReviewOrchestrator.MaxRounds != 2 {
+		t.Errorf("expected secretary.review_orchestrator.max_rounds 2, got %d", cfg.Secretary.ReviewOrchestrator.MaxRounds)
 	}
 	if cfg.Server.Host != "127.0.0.1" {
 		t.Errorf("expected server host 127.0.0.1, got %s", cfg.Server.Host)

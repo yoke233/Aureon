@@ -30,7 +30,7 @@ scheduler:
 
 secretary:
   review_gate_plugin: review-ai-panel
-  review_panel:
+  review_orchestrator:
     max_rounds: 2
   dag_scheduler:
     max_concurrent_tasks: 2

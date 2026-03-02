@@ -825,7 +825,7 @@ func runPipelineCommand(ctx context.Context, store core.Store, executor pipeline
 
 	case "action":
 		if len(args) < 3 {
-			return "", fmt.Errorf("usage: pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_agent|abort|pause|resume> [--stage <stage>] [--agent <agent>] [--message <text>]")
+			return "", fmt.Errorf("usage: pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_role|abort|pause|resume> [--stage <stage>] [--role <role>] [--message <text>]")
 		}
 		actionType, err := parseHumanActionType(args[2])
 		if err != nil {
@@ -844,12 +844,12 @@ func runPipelineCommand(ctx context.Context, store core.Store, executor pipeline
 					return "", fmt.Errorf("--stage requires a value")
 				}
 				action.Stage = core.StageID(args[i])
-			case "--agent":
+			case "--role":
 				i++
 				if i >= len(args) {
-					return "", fmt.Errorf("--agent requires a value")
+					return "", fmt.Errorf("--role requires a value")
 				}
-				action.Agent = args[i]
+				action.Role = args[i]
 			case "--message":
 				i++
 				if i >= len(args) {
@@ -881,7 +881,7 @@ func parseHumanActionType(raw string) (core.HumanActionType, error) {
 		core.ActionModify,
 		core.ActionSkip,
 		core.ActionRerun,
-		core.ActionChangeAgent,
+		core.ActionChangeRole,
 		core.ActionAbort,
 		core.ActionPause,
 		core.ActionResume:
@@ -981,7 +981,7 @@ func helpText() string {
 		"- /pipeline start <pipeline-id>",
 		"- /pipeline status <pipeline-id>",
 		"- /pipeline list [project-id]",
-		"- /pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_agent|abort|pause|resume> [--stage <stage>] [--agent <agent>] [--message <text>]",
+		"- /pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_role|abort|pause|resume> [--stage <stage>] [--role <role>] [--message <text>]",
 		`Tip: 含空格参数请加引号，例如: /pipeline create demo p1 "实现登录与注册" quick`,
 	}, "\n")
 }

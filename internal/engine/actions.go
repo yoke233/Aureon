@@ -52,8 +52,8 @@ func (e *Executor) ApplyAction(ctx context.Context, action core.PipelineAction) 
 		return e.applySkip(ctx, p, action, stage)
 	case core.ActionRerun:
 		return e.applyRerun(ctx, p, action, stage)
-	case core.ActionChangeAgent:
-		return e.applyChangeAgent(ctx, p, action, stage)
+	case core.ActionChangeRole:
+		return e.applyChangeRole(ctx, p, action, stage)
 	case core.ActionAbort:
 		return e.applyAbort(p, action, stage)
 	case core.ActionPause:
@@ -152,9 +152,9 @@ func (e *Executor) applyRerun(ctx context.Context, p *core.Pipeline, action core
 	return e.RunScheduled(ctx, p.ID)
 }
 
-func (e *Executor) applyChangeAgent(ctx context.Context, p *core.Pipeline, action core.PipelineAction, stage core.StageID) error {
-	if action.Agent == "" {
-		return fmt.Errorf("change_agent requires agent field")
+func (e *Executor) applyChangeRole(ctx context.Context, p *core.Pipeline, action core.PipelineAction, stage core.StageID) error {
+	if action.Role == "" {
+		return fmt.Errorf("change_role requires role field")
 	}
 	target := stage
 	if target == "" {
@@ -164,7 +164,7 @@ func (e *Executor) applyChangeAgent(ctx context.Context, p *core.Pipeline, actio
 	if targetIndex < 0 {
 		return fmt.Errorf("target stage %s not found", target)
 	}
-	p.Stages[targetIndex].Agent = action.Agent
+	p.Stages[targetIndex].Agent = action.Role
 	p.Status = core.StatusRunning
 	p.UpdatedAt = time.Now()
 	if err := e.store.SavePipeline(p); err != nil {
@@ -235,8 +235,8 @@ func (e *Executor) publishActionApplied(p *core.Pipeline, action core.PipelineAc
 	if action.Message != "" {
 		data["message"] = action.Message
 	}
-	if action.Agent != "" {
-		data["agent"] = action.Agent
+	if action.Role != "" {
+		data["role"] = action.Role
 	}
 	if traceID := pipelineTraceID(p); traceID != "" {
 		data["trace_id"] = traceID

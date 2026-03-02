@@ -9,27 +9,27 @@ import (
 type HumanActionType string
 
 const (
-	ActionApprove     HumanActionType = "approve"
-	ActionReject      HumanActionType = "reject"
-	ActionModify      HumanActionType = "modify"
-	ActionSkip        HumanActionType = "skip"
-	ActionRerun       HumanActionType = "rerun"
-	ActionChangeAgent HumanActionType = "change_agent"
-	ActionAbort       HumanActionType = "abort"
-	ActionPause       HumanActionType = "pause"
-	ActionResume      HumanActionType = "resume"
+	ActionApprove    HumanActionType = "approve"
+	ActionReject     HumanActionType = "reject"
+	ActionModify     HumanActionType = "modify"
+	ActionSkip       HumanActionType = "skip"
+	ActionRerun      HumanActionType = "rerun"
+	ActionChangeRole HumanActionType = "change_role"
+	ActionAbort      HumanActionType = "abort"
+	ActionPause      HumanActionType = "pause"
+	ActionResume     HumanActionType = "resume"
 )
 
 var validHumanActionTypes = map[HumanActionType]struct{}{
-	ActionApprove:     {},
-	ActionReject:      {},
-	ActionModify:      {},
-	ActionSkip:        {},
-	ActionRerun:       {},
-	ActionChangeAgent: {},
-	ActionAbort:       {},
-	ActionPause:       {},
-	ActionResume:      {},
+	ActionApprove:    {},
+	ActionReject:     {},
+	ActionModify:     {},
+	ActionSkip:       {},
+	ActionRerun:      {},
+	ActionChangeRole: {},
+	ActionAbort:      {},
+	ActionPause:      {},
+	ActionResume:     {},
 }
 
 // Validate checks whether the action type is one of the supported values.
@@ -46,7 +46,7 @@ type PipelineAction struct {
 	Type       HumanActionType `json:"type"`
 	Stage      StageID         `json:"stage"`
 	Message    string          `json:"message,omitempty"`
-	Agent      string          `json:"agent,omitempty"`
+	Role       string          `json:"role,omitempty"`
 	CreatedAt  time.Time       `json:"created_at,omitempty"`
 }
 

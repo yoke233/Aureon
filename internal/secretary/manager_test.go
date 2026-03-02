@@ -19,7 +19,7 @@ func TestManager_StartCallsRecoverExecutingPlans(t *testing.T) {
 	defer store.Close()
 
 	scheduler := &fakeManagerScheduler{}
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewPanel{}, scheduler)
+	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, scheduler)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -60,7 +60,7 @@ func TestManager_CreateDraftSubmitReviewApproveFlow(t *testing.T) {
 		},
 	}
 
-	review := &fakeManagerReviewPanel{
+	review := &fakeManagerReviewOrchestrator{
 		runFn: func(_ context.Context, plan *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
 			out := cloneManagerTestPlan(plan)
 			out.Status = core.PlanWaitingHuman
@@ -167,10 +167,10 @@ func TestManager_CreateDraftSubmitReviewApproveFlowViaReviewGate(t *testing.T) {
 		},
 	}
 
-	review := &fakeManagerReviewPanel{
+	review := &fakeManagerReviewOrchestrator{
 		runFn: func(_ context.Context, _ *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-			t.Fatal("ReviewPanel.Run should not be called when ReviewGate is enabled")
-			return nil, errors.New("unexpected review panel run")
+			t.Fatal("ReviewOrchestrator.Run should not be called when ReviewGate is enabled")
+			return nil, errors.New("unexpected review orchestrator run")
 		},
 	}
 	gate := &fakeManagerReviewGate{
@@ -270,7 +270,7 @@ func TestManager_ApplyPlanActionApproveRequiresFinalApproval(t *testing.T) {
 	plan := mustCreateManagerPlan(t, store, project.ID, "plan-manager-approve-invalid", core.PlanReviewing, core.WaitNone)
 
 	scheduler := &fakeManagerScheduler{}
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewPanel{}, scheduler)
+	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, scheduler)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -323,7 +323,7 @@ func TestManager_ApplyPlanActionRejectTriggersRegeneration(t *testing.T) {
 		},
 	}
 
-	review := &fakeManagerReviewPanel{}
+	review := &fakeManagerReviewOrchestrator{}
 	review.runFn = func(_ context.Context, plan *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
 		review.mu.Lock()
 		callNo := review.runCalls
@@ -501,10 +501,10 @@ func TestManager_ApplyPlanActionRejectResubmitsToReviewGate(t *testing.T) {
 		},
 	}
 
-	review := &fakeManagerReviewPanel{
+	review := &fakeManagerReviewOrchestrator{
 		runFn: func(_ context.Context, _ *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-			t.Fatal("ReviewPanel.Run should not be called when ReviewGate is enabled")
-			return nil, errors.New("unexpected review panel run")
+			t.Fatal("ReviewOrchestrator.Run should not be called when ReviewGate is enabled")
+			return nil, errors.New("unexpected review orchestrator run")
 		},
 	}
 	review.handleRejectFn = func(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
@@ -648,7 +648,7 @@ func TestManager_ApplyPlanActionRejectRequiresAllowedWaitReason(t *testing.T) {
 	project := mustCreateManagerProject(t, store, "proj-manager-reject-invalid-wait-reason")
 	plan := mustCreateManagerPlan(t, store, project.ID, "plan-manager-reject-invalid-wait-reason", core.PlanWaitingHuman, core.WaitNone)
 
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewPanel{}, &fakeManagerScheduler{})
+	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, &fakeManagerScheduler{})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -692,7 +692,7 @@ func TestManager_CreateDraft_TaskIDCollisionAcrossPlans(t *testing.T) {
 		},
 	}
 
-	manager, err := NewManager(store, agent, &fakeManagerReviewPanel{}, &fakeManagerScheduler{})
+	manager, err := NewManager(store, agent, &fakeManagerReviewOrchestrator{}, &fakeManagerScheduler{})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -754,7 +754,7 @@ func TestManager_ApplyPlanActionRejectAfterManagerRestart(t *testing.T) {
 			},
 		},
 	}
-	reviewCreate := &fakeManagerReviewPanel{
+	reviewCreate := &fakeManagerReviewOrchestrator{
 		runFn: func(_ context.Context, plan *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
 			out := cloneManagerTestPlan(plan)
 			out.Status = core.PlanWaitingHuman
@@ -796,7 +796,7 @@ func TestManager_ApplyPlanActionRejectAfterManagerRestart(t *testing.T) {
 			},
 		},
 	}
-	reviewRestart := &fakeManagerReviewPanel{
+	reviewRestart := &fakeManagerReviewOrchestrator{
 		handleRejectFn: func(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
 			next, err := regenerator.Regenerate(ctx, RegenerationRequest{
 				PlanID:       plan.ID,
@@ -859,7 +859,7 @@ func TestManager_ApplyPlanActionAbandonOnlyWaitingHuman(t *testing.T) {
 	project := mustCreateManagerProject(t, store, "proj-manager-abandon")
 
 	notAllowed := mustCreateManagerPlan(t, store, project.ID, "plan-manager-abandon-invalid", core.PlanReviewing, core.WaitNone)
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewPanel{}, &fakeManagerScheduler{})
+	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, &fakeManagerScheduler{})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -957,7 +957,7 @@ func (a *fakeManagerAgent) Decompose(_ context.Context, req Request) (*core.Task
 	return next, nil
 }
 
-type fakeManagerReviewPanel struct {
+type fakeManagerReviewOrchestrator struct {
 	mu                sync.Mutex
 	runCalls          int
 	handleRejectCalls int
@@ -965,7 +965,7 @@ type fakeManagerReviewPanel struct {
 	handleRejectFn    func(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error)
 }
 
-func (p *fakeManagerReviewPanel) Run(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*ReviewResult, error) {
+func (p *fakeManagerReviewOrchestrator) Run(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*ReviewResult, error) {
 	p.mu.Lock()
 	p.runCalls++
 	runFn := p.runFn
@@ -980,7 +980,7 @@ func (p *fakeManagerReviewPanel) Run(ctx context.Context, plan *core.TaskPlan, i
 	return runFn(ctx, cloneManagerTestPlan(plan), input)
 }
 
-func (p *fakeManagerReviewPanel) HandleHumanReject(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
+func (p *fakeManagerReviewOrchestrator) HandleHumanReject(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
 	p.mu.Lock()
 	p.handleRejectCalls++
 	handleFn := p.handleRejectFn

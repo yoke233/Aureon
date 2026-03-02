@@ -13,11 +13,11 @@ import (
 	"github.com/user/ai-workflow/internal/core"
 )
 
-func TestReviewPanelRunApprovePath(t *testing.T) {
+func TestReviewOrchestratorRunApprovePath(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", passVerdict("completeness")),
@@ -64,12 +64,12 @@ func TestReviewPanelRunApprovePath(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunFixThenApprovePath(t *testing.T) {
+func TestReviewOrchestratorRunFixThenApprovePath(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
 	var sawRevisedTask atomic.Bool
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
@@ -135,11 +135,11 @@ func TestReviewPanelRunFixThenApprovePath(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunEscalatePath(t *testing.T) {
+func TestReviewOrchestratorRunEscalatePath(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", issueVerdict("completeness", "critical", "缺失核心任务")),
@@ -177,11 +177,11 @@ func TestReviewPanelRunEscalatePath(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunMaxRoundsExceeded(t *testing.T) {
+func TestReviewOrchestratorRunMaxRoundsExceeded(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", issueVerdict("completeness", "warning", "覆盖不足")),
@@ -232,7 +232,7 @@ func TestReviewPanelRunMaxRoundsExceeded(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunReviewersInParallel(t *testing.T) {
+func TestReviewOrchestratorRunReviewersInParallel(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
@@ -255,7 +255,7 @@ func TestReviewPanelRunReviewersInParallel(t *testing.T) {
 		})
 	}
 
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newParallelReviewer("completeness"),
@@ -291,11 +291,11 @@ func TestReviewPanelRunReviewersInParallel(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunApproveDecisionWithWhitespace(t *testing.T) {
+func TestReviewOrchestratorRunApproveDecisionWithWhitespace(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", passVerdict("completeness")),
@@ -334,12 +334,12 @@ func TestReviewPanelRunApproveDecisionWithWhitespace(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunFixDecisionWithWhitespace(t *testing.T) {
+func TestReviewOrchestratorRunFixDecisionWithWhitespace(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
 	var sawRevisedTask atomic.Bool
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
@@ -410,11 +410,11 @@ func TestReviewPanelRunFixDecisionWithWhitespace(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunEscalateDecisionWithWhitespace(t *testing.T) {
+func TestReviewOrchestratorRunEscalateDecisionWithWhitespace(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", issueVerdict("completeness", "critical", "缺失核心任务")),
@@ -454,11 +454,11 @@ func TestReviewPanelRunEscalateDecisionWithWhitespace(t *testing.T) {
 	}
 }
 
-func TestReviewPanelRunUnknownDecisionReturnsClearError(t *testing.T) {
+func TestReviewOrchestratorRunUnknownDecisionReturnsClearError(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", passVerdict("completeness")),
@@ -482,7 +482,7 @@ func TestReviewPanelRunUnknownDecisionReturnsClearError(t *testing.T) {
 	}
 }
 
-func TestReviewPanelHandleHumanRejectTriggersRegeneration(t *testing.T) {
+func TestReviewOrchestratorHandleHumanRejectTriggersRegeneration(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
@@ -531,7 +531,7 @@ func TestReviewPanelHandleHumanRejectTriggersRegeneration(t *testing.T) {
 		},
 	}
 
-	panel := ReviewPanel{Store: store}
+	panel := ReviewOrchestrator{Store: store}
 	nextPlan, err := panel.HandleHumanReject(context.Background(), plan, HumanFeedback{
 		Category:          FeedbackCoverageGap,
 		Detail:            "上一版遗漏验收与回归测试任务，请补齐并明确依赖关系。",
@@ -574,7 +574,7 @@ func TestReviewPanelHandleHumanRejectTriggersRegeneration(t *testing.T) {
 	}
 }
 
-func TestReviewPanelHandleHumanRejectFeedbackRequiredTriggersRegeneration(t *testing.T) {
+func TestReviewOrchestratorHandleHumanRejectFeedbackRequiredTriggersRegeneration(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
@@ -615,7 +615,7 @@ func TestReviewPanelHandleHumanRejectFeedbackRequiredTriggersRegeneration(t *tes
 		},
 	}
 
-	panel := ReviewPanel{Store: store}
+	panel := ReviewOrchestrator{Store: store}
 	nextPlan, err := panel.HandleHumanReject(context.Background(), plan, HumanFeedback{
 		Category:          FeedbackCoverageGap,
 		Detail:            "该版本在反馈要求场景中仍遗漏关键验证步骤，请补齐并收敛风险。",
@@ -770,7 +770,7 @@ func TestReviewAgent_RejectsMissingAcceptance(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	panel := ReviewPanel{
+	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newStubReviewer("completeness", passVerdict("completeness")),

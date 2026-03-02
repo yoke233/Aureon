@@ -9,7 +9,7 @@ func TestHumanActionTypeValidate(t *testing.T) {
 		ActionModify,
 		ActionSkip,
 		ActionRerun,
-		ActionChangeAgent,
+		ActionChangeRole,
 		ActionAbort,
 		ActionPause,
 		ActionResume,

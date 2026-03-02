@@ -78,9 +78,9 @@ var (
 			return nil, err
 		}
 
-		reviewPanel := secretary.NewDefaultReviewPanel(bootstrapSet.Store)
-		if secretaryCfg.ReviewPanel.MaxRounds > 0 {
-			reviewPanel.MaxRounds = secretaryCfg.ReviewPanel.MaxRounds
+		reviewPanel := secretary.NewDefaultReviewOrchestrator(bootstrapSet.Store)
+		if secretaryCfg.ReviewOrchestrator.MaxRounds > 0 {
+			reviewPanel.MaxRounds = secretaryCfg.ReviewOrchestrator.MaxRounds
 		}
 		runTaskPipeline := func(ctx context.Context, pipelineID string) error {
 			ok, err := bootstrapSet.Store.TryMarkPipelineRunning(pipelineID, core.StatusCreated)
@@ -417,7 +417,7 @@ func cmdPipelineList(args []string) error {
 
 func cmdPipelineAction(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: ai-flow pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_agent|abort|pause|resume> [--stage <stage>] [--agent <agent>] [--message <text>]")
+		return fmt.Errorf("usage: ai-flow pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_role|abort|pause|resume> [--stage <stage>] [--role <role>] [--message <text>]")
 	}
 
 	actionType, err := parseActionType(args[1])
@@ -438,12 +438,12 @@ func cmdPipelineAction(args []string) error {
 				return fmt.Errorf("--stage requires a value")
 			}
 			action.Stage = core.StageID(args[i])
-		case "--agent":
+		case "--role":
 			i++
 			if i >= len(args) {
-				return fmt.Errorf("--agent requires a value")
+				return fmt.Errorf("--role requires a value")
 			}
-			action.Agent = args[i]
+			action.Role = args[i]
 		case "--message":
 			i++
 			if i >= len(args) {
@@ -478,7 +478,7 @@ func parseActionType(raw string) (core.HumanActionType, error) {
 		core.ActionModify,
 		core.ActionSkip,
 		core.ActionRerun,
-		core.ActionChangeAgent,
+		core.ActionChangeRole,
 		core.ActionAbort,
 		core.ActionPause,
 		core.ActionResume:

@@ -34,7 +34,7 @@ type managerAgent interface {
 	Decompose(ctx context.Context, req Request) (*core.TaskPlan, error)
 }
 
-type managerReviewPanel interface {
+type managerReviewOrchestrator interface {
 	Run(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*ReviewResult, error)
 	HandleHumanReject(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error)
 }
@@ -73,7 +73,7 @@ func WithReviewGate(gate core.ReviewGate) ManagerOption {
 type Manager struct {
 	store      core.Store
 	agent      managerAgent
-	review     managerReviewPanel
+	review     managerReviewOrchestrator
 	reviewGate core.ReviewGate
 	scheduler  managerScheduler
 
@@ -81,7 +81,7 @@ type Manager struct {
 	planMeta map[string]managerPlanContext
 }
 
-func NewManager(store core.Store, agent managerAgent, review managerReviewPanel, scheduler managerScheduler, opts ...ManagerOption) (*Manager, error) {
+func NewManager(store core.Store, agent managerAgent, review managerReviewOrchestrator, scheduler managerScheduler, opts ...ManagerOption) (*Manager, error) {
 	if store == nil {
 		return nil, errors.New("manager store is required")
 	}
@@ -89,7 +89,7 @@ func NewManager(store core.Store, agent managerAgent, review managerReviewPanel,
 		return nil, errors.New("manager agent is required")
 	}
 	if review == nil {
-		return nil, errors.New("manager review panel is required")
+		return nil, errors.New("manager review orchestrator is required")
 	}
 	if scheduler == nil {
 		return nil, errors.New("manager scheduler is required")
@@ -222,7 +222,7 @@ func (m *Manager) SubmitReview(ctx context.Context, planID string, input ReviewI
 
 		fallbackPlan, fallbackErr := m.submitReviewWithPanel(ctx, plan, input)
 		if fallbackErr != nil {
-			return nil, fmt.Errorf("submit review gate failed: %v; fallback review panel failed: %w", gateErr, fallbackErr)
+			return nil, fmt.Errorf("submit review gate failed: %v; fallback review orchestrator failed: %w", gateErr, fallbackErr)
 		}
 		return fallbackPlan, nil
 	}
@@ -326,7 +326,7 @@ func (m *Manager) applyReject(ctx context.Context, plan *core.TaskPlan, action P
 
 		fallbackPlan, fallbackErr := m.submitReviewWithPanel(ctx, regenerated, reviewInput)
 		if fallbackErr != nil {
-			return nil, fmt.Errorf("resubmit review gate failed: %v; fallback review panel failed: %w", gateErr, fallbackErr)
+			return nil, fmt.Errorf("resubmit review gate failed: %v; fallback review orchestrator failed: %w", gateErr, fallbackErr)
 		}
 		return fallbackPlan, nil
 	}
@@ -374,10 +374,10 @@ func normalizePlanAction(action string) string {
 func (m *Manager) submitReviewWithPanel(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*core.TaskPlan, error) {
 	result, err := m.review.Run(ctx, cloneManagerPlan(plan), input)
 	if err != nil {
-		return nil, fmt.Errorf("run review panel: %w", err)
+		return nil, fmt.Errorf("run review orchestrator: %w", err)
 	}
 	if result == nil || result.Plan == nil {
-		return nil, errors.New("review panel returned nil plan")
+		return nil, errors.New("review orchestrator returned nil plan")
 	}
 
 	if err := m.savePlanAndTasks(result.Plan); err != nil {

@@ -35,7 +35,7 @@ type pipelineActionRequest struct {
 	Action  string `json:"action"`
 	Stage   string `json:"stage,omitempty"`
 	Message string `json:"message,omitempty"`
-	Agent   string `json:"agent,omitempty"`
+	Role    string `json:"role,omitempty"`
 }
 
 type pipelineActionResponse struct {
@@ -254,7 +254,7 @@ func (h *pipelineHandlers) applyPipelineAction(w http.ResponseWriter, r *http.Re
 		PipelineID: pipeline.ID,
 		Type:       actionType,
 		Stage:      core.StageID(strings.TrimSpace(req.Stage)),
-		Agent:      strings.TrimSpace(req.Agent),
+		Role:       strings.TrimSpace(req.Role),
 		Message:    strings.TrimSpace(req.Message),
 	}
 
@@ -343,7 +343,7 @@ func parsePipelineActionType(raw string) (core.HumanActionType, error) {
 		core.ActionModify,
 		core.ActionSkip,
 		core.ActionRerun,
-		core.ActionChangeAgent,
+		core.ActionChangeRole,
 		core.ActionAbort,
 		core.ActionPause,
 		core.ActionResume:

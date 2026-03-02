@@ -100,28 +100,18 @@ func TestWorktreeSetupBeforeRequirements(t *testing.T) {
 	}
 }
 
-func TestDefaultStageConfig_DefaultAgentAndE2E(t *testing.T) {
-	t.Run("requirements and code_review use codex", func(t *testing.T) {
+func TestDefaultStageConfig_RoleOnlyDefaults(t *testing.T) {
+	t.Run("agent field is empty for role-driven stages", func(t *testing.T) {
 		for _, stageID := range []core.StageID{
 			core.StageRequirements,
-			core.StageCodeReview,
-		} {
-			cfg := defaultStageConfig(stageID)
-			if cfg.Agent != "codex" {
-				t.Fatalf("stage %s should default to codex, got %q", stageID, cfg.Agent)
-			}
-		}
-	})
-
-	t.Run("implement fixup and e2e use codex", func(t *testing.T) {
-		for _, stageID := range []core.StageID{
 			core.StageImplement,
+			core.StageCodeReview,
 			core.StageFixup,
 			core.StageE2ETest,
 		} {
 			cfg := defaultStageConfig(stageID)
-			if cfg.Agent != "codex" {
-				t.Fatalf("stage %s should default to codex, got %q", stageID, cfg.Agent)
+			if cfg.Agent != "" {
+				t.Fatalf("stage %s should not default stage.agent, got %q", stageID, cfg.Agent)
 			}
 		}
 	})
@@ -132,6 +122,47 @@ func TestDefaultStageConfig_DefaultAgentAndE2E(t *testing.T) {
 			t.Fatalf("e2e_test timeout mismatch, got %s want %s", cfg.Timeout, 15*time.Minute)
 		}
 	})
+}
+
+func TestCreatePipeline_FillsStageRolesFromBindings(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	project := &core.Project{
+		ID:       "proj-role-bindings",
+		Name:     "proj-role-bindings",
+		RepoPath: t.TempDir(),
+	}
+	if err := store.CreateProject(project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	execEngine := newExecutor(store, map[string]core.AgentPlugin{}, nil)
+	execEngine.SetPipelineStageRoles(map[string]string{
+		"requirements": "worker",
+		"implement":    "worker",
+		"code_review":  "reviewer",
+	})
+
+	p, err := execEngine.CreatePipeline(project.ID, "pipe-role", "desc", "quick")
+	if err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+
+	roleByStage := make(map[core.StageID]string, len(p.Stages))
+	for _, stage := range p.Stages {
+		roleByStage[stage.Name] = stage.Role
+	}
+
+	if got := roleByStage[core.StageRequirements]; got != "worker" {
+		t.Fatalf("expected requirements role worker, got %q", got)
+	}
+	if got := roleByStage[core.StageImplement]; got != "worker" {
+		t.Fatalf("expected implement role worker, got %q", got)
+	}
+	if got := roleByStage[core.StageCodeReview]; got != "reviewer" {
+		t.Fatalf("expected code_review role reviewer, got %q", got)
+	}
 }
 
 func TestPromptVars_NoLegacyPipelineSpecFields(t *testing.T) {

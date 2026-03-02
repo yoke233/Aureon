@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/user/ai-workflow/internal/acpclient"
 	"github.com/user/ai-workflow/internal/config"
 	"github.com/user/ai-workflow/internal/core"
 	githubsvc "github.com/user/ai-workflow/internal/github"
@@ -23,29 +24,35 @@ import (
 	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
 	trackergithub "github.com/user/ai-workflow/internal/plugins/tracker-github"
 	trackerlocal "github.com/user/ai-workflow/internal/plugins/tracker-local"
+	workspaceworktree "github.com/user/ai-workflow/internal/plugins/workspace-worktree"
 	"github.com/user/ai-workflow/internal/secretary"
 )
 
 // BootstrapSet contains initialized plugins required by engine bootstrap.
 type BootstrapSet struct {
-	Agents     map[string]core.AgentPlugin
-	Runtime    core.RuntimePlugin
-	Store      core.Store
-	ReviewGate core.ReviewGate
-	Tracker    core.Tracker
-	SCM        core.SCM
-	Notifier   core.Notifier
-	Spec       core.SpecPlugin
+	Agents       map[string]core.AgentPlugin
+	RoleResolver *acpclient.RoleResolver
+	Runtime      core.RuntimePlugin
+	Store        core.Store
+	ReviewGate   core.ReviewGate
+	Tracker      core.Tracker
+	SCM          core.SCM
+	Notifier     core.Notifier
+	Spec         core.SpecPlugin
+	Workspace    core.WorkspacePlugin
 }
 
 const (
-	defaultReviewGatePlugin = "review-ai-panel"
-	localReviewGatePlugin   = "review-local"
-	defaultTrackerPlugin    = "tracker-local"
-	defaultSCMPlugin        = "local-git"
-	defaultNotifierPlugin   = "desktop"
-	githubTrackerPluginName = "tracker-github"
-	githubSCMPluginName     = "scm-github"
+	slotAgentDriver         core.PluginSlot = "agent"
+	slotRuntimeDriver       core.PluginSlot = "runtime"
+	defaultWorkspacePlugin                  = "worktree"
+	defaultReviewGatePlugin                 = "review-ai-panel"
+	localReviewGatePlugin                   = "review-local"
+	defaultTrackerPlugin                    = "tracker-local"
+	defaultSCMPlugin                        = "local-git"
+	defaultNotifierPlugin                   = "desktop"
+	githubTrackerPluginName                 = "tracker-github"
+	githubSCMPluginName                     = "scm-github"
 )
 
 type pluginNameOverrides struct {
@@ -102,6 +109,14 @@ func BuildFromConfig(cfg config.Config) (*BootstrapSet, error) {
 
 func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSet, error) {
 	effective := withDefaults(cfg)
+	if err := config.Validate(&effective); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	roleResolver, err := buildRoleResolver(effective)
+	if err != nil {
+		return nil, fmt.Errorf("build role resolver: %w", err)
+	}
 
 	storeName := strings.TrimSpace(effective.Store.Driver)
 	storeModule, ok := registry.Get(core.SlotStore, storeName)
@@ -121,9 +136,9 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 	}
 
 	runtimeName := strings.TrimSpace(effective.Runtime.Driver)
-	runtimeModule, ok := registry.Get(core.SlotRuntime, runtimeName)
+	runtimeModule, ok := registry.Get(slotRuntimeDriver, runtimeName)
 	if !ok {
-		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotRuntime, runtimeName)
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", slotRuntimeDriver, runtimeName)
 	}
 	runtimeRaw, err := runtimeModule.Factory(nil)
 	if err != nil {
@@ -131,7 +146,7 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 	}
 	runtimePlugin, ok := runtimeRaw.(core.RuntimePlugin)
 	if !ok {
-		return nil, fmt.Errorf("plugin is not a runtime plugin: slot=%s name=%s", core.SlotRuntime, runtimeName)
+		return nil, fmt.Errorf("plugin is not a runtime plugin: slot=%s name=%s", slotRuntimeDriver, runtimeName)
 	}
 
 	agentConfigs := map[string]*config.AgentConfig{
@@ -148,9 +163,9 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 			moduleName = strings.TrimSpace(*agentCfg.Plugin)
 		}
 
-		module, ok := registry.Get(core.SlotAgent, moduleName)
+		module, ok := registry.Get(slotAgentDriver, moduleName)
 		if !ok {
-			return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotAgent, moduleName)
+			return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", slotAgentDriver, moduleName)
 		}
 		raw, err := module.Factory(agentConfigToMap(agentCfg))
 		if err != nil {
@@ -158,12 +173,22 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 		}
 		agentPlugin, ok := raw.(core.AgentPlugin)
 		if !ok {
-			return nil, fmt.Errorf("plugin is not an agent plugin: slot=%s name=%s", core.SlotAgent, moduleName)
+			return nil, fmt.Errorf("plugin is not an agent plugin: slot=%s name=%s", slotAgentDriver, moduleName)
 		}
 		agents[agentName] = agentPlugin
 	}
 	if len(agents) == 0 {
 		return nil, fmt.Errorf("no agent plugins configured")
+	}
+	for _, role := range effective.Roles {
+		roleName := strings.TrimSpace(role.Name)
+		agentName := strings.TrimSpace(role.Agent)
+		if agentName == "" {
+			continue
+		}
+		if _, ok := agents[agentName]; !ok {
+			return nil, fmt.Errorf("role %q resolves to agent %q but no executable agent plugin is configured", roleName, agentName)
+		}
 	}
 
 	reviewGateName := strings.TrimSpace(effective.Secretary.ReviewGatePlugin)
@@ -175,9 +200,14 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotReviewGate, reviewGateName)
 	}
 	reviewGateRaw, err := reviewGateModule.Factory(map[string]any{
-		"store":      storePlugin.Store(),
-		"max_rounds": effective.Secretary.ReviewOrchestrator.MaxRounds,
-		"github":     effective.GitHub,
+		"store": storePlugin.Store(),
+		"review_orchestrator_bindings": secretary.ReviewRoleBindingInput{
+			Reviewers:  cloneStringMapForFactory(effective.RoleBinds.ReviewOrchestrator.Reviewers),
+			Aggregator: effective.RoleBinds.ReviewOrchestrator.Aggregator,
+		},
+		"role_resolver": roleResolver,
+		"max_rounds":    effective.Secretary.ReviewOrchestrator.MaxRounds,
+		"github":        effective.GitHub,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build review gate plugin %q: %w", reviewGateName, err)
@@ -260,16 +290,30 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 	if err != nil {
 		return nil, err
 	}
+	workspaceModule, ok := registry.Get(core.SlotWorkspace, defaultWorkspacePlugin)
+	if !ok {
+		return nil, fmt.Errorf("unknown plugin: slot=%s name=%s", core.SlotWorkspace, defaultWorkspacePlugin)
+	}
+	workspaceRaw, err := workspaceModule.Factory(nil)
+	if err != nil {
+		return nil, fmt.Errorf("build workspace plugin %q: %w", defaultWorkspacePlugin, err)
+	}
+	workspacePlugin, ok := workspaceRaw.(core.WorkspacePlugin)
+	if !ok {
+		return nil, fmt.Errorf("plugin is not a workspace plugin: slot=%s name=%s", core.SlotWorkspace, defaultWorkspacePlugin)
+	}
 
 	return &BootstrapSet{
-		Agents:     agents,
-		Runtime:    runtimePlugin,
-		Store:      storePlugin.Store(),
-		ReviewGate: reviewGatePlugin,
-		Tracker:    trackerPlugin,
-		SCM:        scmPlugin,
-		Notifier:   notifierPlugin,
-		Spec:       specPlugin,
+		Agents:       agents,
+		RoleResolver: roleResolver,
+		Runtime:      runtimePlugin,
+		Store:        storePlugin.Store(),
+		ReviewGate:   reviewGatePlugin,
+		Tracker:      trackerPlugin,
+		SCM:          scmPlugin,
+		Notifier:     notifierPlugin,
+		Spec:         specPlugin,
+		Workspace:    workspacePlugin,
 	}, nil
 }
 
@@ -278,7 +322,7 @@ func newDefaultRegistry() (*core.Registry, error) {
 	modules := []core.PluginModule{
 		{
 			Name: "claude",
-			Slot: core.SlotAgent,
+			Slot: slotAgentDriver,
 			Factory: func(cfg map[string]any) (core.Plugin, error) {
 				binary := stringFromMap(cfg, "binary", "claude")
 				return agentclaude.New(binary), nil
@@ -286,7 +330,7 @@ func newDefaultRegistry() (*core.Registry, error) {
 		},
 		{
 			Name: "codex",
-			Slot: core.SlotAgent,
+			Slot: slotAgentDriver,
 			Factory: func(cfg map[string]any) (core.Plugin, error) {
 				binary := stringFromMap(cfg, "binary", "codex")
 				model := stringFromMap(cfg, "model", "gpt-5.3-codex")
@@ -296,7 +340,7 @@ func newDefaultRegistry() (*core.Registry, error) {
 		},
 		{
 			Name: "process",
-			Slot: core.SlotRuntime,
+			Slot: slotRuntimeDriver,
 			Factory: func(map[string]any) (core.Plugin, error) {
 				return runtimeprocess.New(), nil
 			},
@@ -335,6 +379,18 @@ func newDefaultRegistry() (*core.Registry, error) {
 				}
 
 				panel := secretary.NewDefaultReviewOrchestrator(store)
+				if rawBindings, ok := cfg["review_orchestrator_bindings"]; ok {
+					bindings, ok := rawBindings.(secretary.ReviewRoleBindingInput)
+					if !ok {
+						return nil, fmt.Errorf("%s requires valid review_orchestrator_bindings", defaultReviewGatePlugin)
+					}
+					resolver, _ := cfg["role_resolver"].(*acpclient.RoleResolver)
+					resolvedPanel, err := secretary.NewDefaultReviewOrchestratorFromBindings(store, bindings, resolver)
+					if err != nil {
+						return nil, fmt.Errorf("build review orchestrator from role bindings: %w", err)
+					}
+					panel = resolvedPanel
+				}
 				if maxRounds, ok := cfg["max_rounds"].(int); ok && maxRounds > 0 {
 					panel.MaxRounds = maxRounds
 				}
@@ -384,6 +440,7 @@ func newDefaultRegistry() (*core.Registry, error) {
 				return notifierdesktop.New(), nil
 			},
 		},
+		workspaceworktree.Module(),
 		specnoop.Module(),
 	}
 
@@ -404,6 +461,15 @@ func withDefaults(cfg config.Config) config.Config {
 	if cfg.Agents.Codex == nil {
 		cfg.Agents.Codex = def.Agents.Codex
 	}
+	if len(cfg.Roles) == 0 {
+		cfg.Roles = append([]config.RoleConfig(nil), def.Roles...)
+	}
+	if len(cfg.Agents.Profiles) == 0 && len(def.Agents.Profiles) > 0 {
+		cfg.Agents.Profiles = append([]config.AgentProfileConfig(nil), def.Agents.Profiles...)
+	}
+	if isRoleBindingsEmpty(cfg.RoleBinds) {
+		cfg.RoleBinds = def.RoleBinds
+	}
 	if cfg.Runtime.Driver == "" {
 		cfg.Runtime.Driver = def.Runtime.Driver
 	}
@@ -423,6 +489,91 @@ func withDefaults(cfg config.Config) config.Config {
 		cfg.Spec.OpenSpec.Binary = def.Spec.OpenSpec.Binary
 	}
 	return cfg
+}
+
+func isRoleBindingsEmpty(binds config.RoleBindings) bool {
+	return strings.TrimSpace(binds.Secretary.Role) == "" &&
+		strings.TrimSpace(binds.PlanParser.Role) == "" &&
+		strings.TrimSpace(binds.ReviewOrchestrator.Aggregator) == "" &&
+		len(binds.Pipeline.StageRoles) == 0 &&
+		len(binds.ReviewOrchestrator.Reviewers) == 0
+}
+
+func buildRoleResolver(cfg config.Config) (*acpclient.RoleResolver, error) {
+	agentProfiles := cfg.EffectiveAgentProfiles()
+	agents := make([]acpclient.AgentProfile, 0, len(agentProfiles))
+	for _, agent := range agentProfiles {
+		agentID := strings.TrimSpace(agent.Name)
+		agents = append(agents, acpclient.AgentProfile{
+			ID:            agentID,
+			LaunchCommand: agent.LaunchCommand,
+			LaunchArgs:    append([]string(nil), agent.LaunchArgs...),
+			Env:           cloneStringMapForFactory(agent.Env),
+			CapabilitiesMax: acpclient.ClientCapabilities{
+				FSRead:   agent.CapabilitiesMax.FSRead,
+				FSWrite:  agent.CapabilitiesMax.FSWrite,
+				Terminal: agent.CapabilitiesMax.Terminal,
+			},
+		})
+	}
+
+	roles := make([]acpclient.RoleProfile, 0, len(cfg.Roles))
+	for _, role := range cfg.Roles {
+		roleID := strings.TrimSpace(role.Name)
+		agentID := strings.TrimSpace(role.Agent)
+		roles = append(roles, acpclient.RoleProfile{
+			ID:             roleID,
+			AgentID:        agentID,
+			PromptTemplate: role.PromptTemplate,
+			SessionPolicy: acpclient.SessionPolicy{
+				Reuse:             role.Session.Reuse,
+				PreferLoadSession: role.Session.PreferLoadSession,
+				ResetPrompt:       role.Session.ResetPrompt,
+				MaxTurns:          role.Session.MaxTurns,
+			},
+			Capabilities: acpclient.ClientCapabilities{
+				FSRead:   role.Capabilities.FSRead,
+				FSWrite:  role.Capabilities.FSWrite,
+				Terminal: role.Capabilities.Terminal,
+			},
+			PermissionPolicy: toACPPermissionRules(role.PermissionPolicy),
+			MCPTools:         append([]string(nil), role.MCP.Tools...),
+		})
+	}
+
+	resolver := acpclient.NewRoleResolver(agents, roles)
+	for _, role := range roles {
+		if _, _, err := resolver.Resolve(role.ID); err != nil {
+			return nil, err
+		}
+	}
+	return resolver, nil
+}
+
+func cloneStringMapForFactory(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func toACPPermissionRules(in []config.PermissionRule) []acpclient.PermissionRule {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]acpclient.PermissionRule, len(in))
+	for i := range in {
+		out[i] = acpclient.PermissionRule{
+			Pattern: in[i].Pattern,
+			Action:  in[i].Action,
+			Scope:   in[i].Scope,
+		}
+	}
+	return out
 }
 
 func agentConfigToMap(agent *config.AgentConfig) map[string]any {

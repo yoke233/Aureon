@@ -59,6 +59,7 @@ var (
 		bootstrapSet *pluginfactory.BootstrapSet,
 		bus *eventbus.Bus,
 		secretaryCfg config.SecretaryConfig,
+		roleBinds config.RoleBindings,
 	) (serverPlanManager, error) {
 		if exec == nil {
 			return nil, errors.New("executor is required for plan manager")
@@ -78,7 +79,17 @@ var (
 			return nil, err
 		}
 
-		reviewPanel := secretary.NewDefaultReviewOrchestrator(bootstrapSet.Store)
+		reviewPanel, err := secretary.NewDefaultReviewOrchestratorFromBindings(
+			bootstrapSet.Store,
+			secretary.ReviewRoleBindingInput{
+				Reviewers:  cloneStringMap(roleBinds.ReviewOrchestrator.Reviewers),
+				Aggregator: roleBinds.ReviewOrchestrator.Aggregator,
+			},
+			bootstrapSet.RoleResolver,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build review orchestrator from role bindings: %w", err)
+		}
 		if secretaryCfg.ReviewOrchestrator.MaxRounds > 0 {
 			reviewPanel.MaxRounds = secretaryCfg.ReviewOrchestrator.MaxRounds
 		}
@@ -130,10 +141,16 @@ func bootstrapWithEventBus() (*engine.Executor, *pluginfactory.BootstrapSet, *ev
 	if bootstrapSet.Spec == nil {
 		return nil, nil, nil, errors.New("spec plugin is not configured in bootstrap set")
 	}
+	if bootstrapSet.Workspace == nil {
+		return nil, nil, nil, errors.New("workspace plugin is not configured in bootstrap set")
+	}
 
 	bus := eventbus.New()
 	logger := slog.Default()
 	exec := engine.NewExecutor(bootstrapSet.Store, bus, bootstrapSet.Agents, bootstrapSet.Runtime, logger)
+	exec.SetRoleResolver(bootstrapSet.RoleResolver)
+	exec.SetWorkspace(bootstrapSet.Workspace)
+	exec.SetPipelineStageRoles(cfg.RoleBinds.Pipeline.StageRoles)
 
 	recoveryOnce.Do(func() {
 		go func() {
@@ -443,7 +460,7 @@ func cmdPipelineAction(args []string) error {
 			if i >= len(args) {
 				return fmt.Errorf("--role requires a value")
 			}
-			action.Role = args[i]
+			action.Role = strings.TrimSpace(args[i])
 		case "--message":
 			i++
 			if i >= len(args) {
@@ -524,7 +541,7 @@ func runServer(ctx context.Context, args []string) error {
 		return err
 	}
 
-	planManager, err := newServerPlanManager(exec, bootstrapSet, bus, cfg.Secretary)
+	planManager, err := newServerPlanManager(exec, bootstrapSet, bus, cfg.Secretary, cfg.RoleBinds)
 	if err != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -546,35 +563,14 @@ func runServer(ctx context.Context, args []string) error {
 	}
 
 	hub := web.NewHub()
-	claudeBinary := "claude"
-	if cfg.Agents.Claude != nil && cfg.Agents.Claude.Binary != nil && strings.TrimSpace(*cfg.Agents.Claude.Binary) != "" {
-		claudeBinary = strings.TrimSpace(*cfg.Agents.Claude.Binary)
+	if bootstrapSet.RoleResolver == nil {
+		return errors.New("chat assistant requires role resolver")
 	}
-	codexBinary := "codex"
-	codexModel := "gpt-5.3-codex"
-	codexReasoning := "high"
-	if cfg.Agents.Codex != nil {
-		if cfg.Agents.Codex.Binary != nil && strings.TrimSpace(*cfg.Agents.Codex.Binary) != "" {
-			codexBinary = strings.TrimSpace(*cfg.Agents.Codex.Binary)
-		}
-		if cfg.Agents.Codex.Model != nil && strings.TrimSpace(*cfg.Agents.Codex.Model) != "" {
-			codexModel = strings.TrimSpace(*cfg.Agents.Codex.Model)
-		}
-		if cfg.Agents.Codex.Reasoning != nil && strings.TrimSpace(*cfg.Agents.Codex.Reasoning) != "" {
-			codexReasoning = strings.TrimSpace(*cfg.Agents.Codex.Reasoning)
-		}
-	}
-	chatProvider := strings.ToLower(strings.TrimSpace(os.Getenv("AI_WORKFLOW_CHAT_PROVIDER")))
-	var chatAssistant web.ChatAssistant
-	switch chatProvider {
-	case "", "codex":
-		chatAssistant = web.NewCodexChatAssistant(codexBinary, codexModel, codexReasoning)
-	case "claude":
-		chatAssistant = web.NewClaudeChatAssistant(claudeBinary)
-	default:
-		fmt.Printf("Unknown AI_WORKFLOW_CHAT_PROVIDER=%q, fallback to codex\n", chatProvider)
-		chatAssistant = web.NewCodexChatAssistant(codexBinary, codexModel, codexReasoning)
-	}
+	chatAssistant := web.NewACPChatAssistantWithDeps(web.ACPChatAssistantDeps{
+		DefaultRoleID:  strings.TrimSpace(cfg.RoleBinds.Secretary.Role),
+		RoleResolver:   bootstrapSet.RoleResolver,
+		EventPublisher: bus,
+	})
 	sub := bus.Subscribe()
 	bridgeDone := make(chan struct{})
 	go func() {
@@ -593,15 +589,17 @@ func runServer(ctx context.Context, args []string) error {
 	}()
 
 	apiServer := newAPIServer(web.Config{
-		Addr:          listenAddr,
-		AuthEnabled:   cfg.Server.AuthEnabled,
-		BearerToken:   cfg.Server.AuthToken,
-		WebhookSecret: cfg.GitHub.WebhookSecret,
-		Store:         store,
-		PlanManager:   planManager,
-		ChatAssistant: chatAssistant,
-		PipelineExec:  exec,
-		Hub:           hub,
+		Addr:               listenAddr,
+		AuthEnabled:        cfg.Server.AuthEnabled,
+		BearerToken:        cfg.Server.AuthToken,
+		WebhookSecret:      cfg.GitHub.WebhookSecret,
+		Store:              store,
+		PlanManager:        planManager,
+		ChatAssistant:      chatAssistant,
+		PipelineExec:       exec,
+		PipelineStageRoles: cfg.RoleBinds.Pipeline.StageRoles,
+		PlanParserRoleID:   strings.TrimSpace(cfg.RoleBinds.PlanParser.Role),
+		Hub:                hub,
 	})
 
 	serverErrCh := make(chan error, 1)
@@ -673,6 +671,17 @@ func selectSecretaryAgentPlugin(agents map[string]core.AgentPlugin) (core.AgentP
 	}
 	sort.Strings(names)
 	return agents[names[0]], nil
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func parseServerPort(args []string) (int, error) {

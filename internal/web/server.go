@@ -45,6 +45,8 @@ type Config struct {
 	PlanManager            PlanManager
 	ChatAssistant          ChatAssistant
 	PipelineExec           PipelineExecutor
+	PipelineStageRoles     map[string]string
+	PlanParserRoleID       string
 	WebhookReplayer        WebhookDeliveryReplayer
 	Hub                    *Hub
 	ProjectRepoProvisioner ProjectRepoProvisioner
@@ -94,7 +96,7 @@ func NewServer(cfg Config) *Server {
 
 	r.Get("/health", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
-	webhookReplayer := registerWebhookRoutes(r, cfg.Store, cfg.PipelineExec, strings.TrimSpace(cfg.WebhookSecret))
+	webhookReplayer := registerWebhookRoutes(r, cfg.Store, cfg.PipelineExec, strings.TrimSpace(cfg.WebhookSecret), cfg.PipelineStageRoles)
 	if cfg.WebhookReplayer != nil {
 		webhookReplayer = cfg.WebhookReplayer
 	}
@@ -104,9 +106,9 @@ func NewServer(cfg Config) *Server {
 		}
 		r.Get("/stats", handleStats)
 		registerProjectRoutes(r, cfg.Store, hub, projectRepoProvisioner)
-		registerPipelineRoutes(r, cfg.Store, cfg.PipelineExec)
+		registerPipelineRoutes(r, cfg.Store, cfg.PipelineExec, cfg.PipelineStageRoles)
 		registerChatRoutes(r, cfg.Store, cfg.ChatAssistant)
-		registerPlanRoutes(r, cfg.Store, cfg.PlanManager)
+		registerPlanRoutes(r, cfg.Store, cfg.PlanManager, cfg.PlanParserRoleID)
 		registerTaskRoutes(r, cfg.Store)
 		registerAdminOpsRoutes(r, cfg.Store, cfg.BearerToken, webhookReplayer)
 		r.Get("/ws", hub.HandleWS)

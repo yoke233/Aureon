@@ -107,6 +107,7 @@ describe("BoardView helpers", () => {
         plan_id: "p1",
         plan_name: "Plan",
         status: "running",
+        raw_status: "running",
         pipeline_id: "",
       },
     ];
@@ -325,6 +326,29 @@ describe("BoardView", () => {
     const issueLink = screen.getByTestId("board-github-issue-icon");
     expect(issueLink.getAttribute("href")).toBe("https://github.com/acme/ai-workflow/issues/201");
     expect(issueLink.textContent).toContain("GH #201");
+  });
+
+  it("blocked_by_failure 和 skipped 任务显示对应标签", async () => {
+    const apiClient = createMockApiClient();
+    vi.mocked(apiClient.listPlans).mockResolvedValue({
+      items: [
+        buildPlan([
+          buildTask("task-blocked", "Task blocked", "blocked_by_failure"),
+          buildTask("task-skipped", "Task skipped", "skipped"),
+        ]),
+      ],
+      total: 1,
+      offset: 0,
+    });
+
+    render(<BoardView apiClient={apiClient} projectId="proj-1" refreshToken={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Task blocked")).toBeTruthy();
+    });
+
+    expect(screen.getByText("blocked")).toBeTruthy();
+    expect(screen.getByText("skipped")).toBeTruthy();
   });
 
   it("拖拽到目标列会触发对应 task action API", async () => {

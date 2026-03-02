@@ -2,12 +2,15 @@ package secretary
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/user/ai-workflow/internal/acpclient"
 	"github.com/user/ai-workflow/internal/core"
 )
 
@@ -72,6 +75,34 @@ type nopWriteCloser struct{}
 func (nopWriteCloser) Write(data []byte) (int, error) { return len(data), nil }
 
 func (nopWriteCloser) Close() error { return nil }
+
+type stubSecretarySessionClient struct {
+	loadReqs []acpclient.LoadSessionRequest
+	newReqs  []acpclient.NewSessionRequest
+	calls    []string
+	loadResp acpclient.SessionInfo
+	loadErr  error
+	newResp  acpclient.SessionInfo
+	newErr   error
+}
+
+func (c *stubSecretarySessionClient) LoadSession(_ context.Context, req acpclient.LoadSessionRequest) (acpclient.SessionInfo, error) {
+	c.calls = append(c.calls, "load")
+	c.loadReqs = append(c.loadReqs, req)
+	if c.loadErr != nil {
+		return acpclient.SessionInfo{}, c.loadErr
+	}
+	return c.loadResp, nil
+}
+
+func (c *stubSecretarySessionClient) NewSession(_ context.Context, req acpclient.NewSessionRequest) (acpclient.SessionInfo, error) {
+	c.calls = append(c.calls, "new")
+	c.newReqs = append(c.newReqs, req)
+	if c.newErr != nil {
+		return acpclient.SessionInfo{}, c.newErr
+	}
+	return c.newResp, nil
+}
 
 func TestAgentDecomposeBuildsPromptAndParsesTaskPlan(t *testing.T) {
 	waitCalled := false
@@ -187,6 +218,233 @@ func TestAgentDecomposeBuildsPromptAndParsesTaskPlan(t *testing.T) {
 	}
 }
 
+func TestPlanParserUsesRoleBinding(t *testing.T) {
+	agent := &mockAgent{}
+	templatePath := filepath.Join("..", "..", "configs", "prompts", "secretary.tmpl")
+	driver, err := NewAgentWithTemplatePath(agent, nil, templatePath)
+	if err != nil {
+		t.Fatalf("new secretary agent: %v", err)
+	}
+
+	defaultReq := Request{
+		Conversation: "请拆解当前任务",
+		WorkDir:      "D:/project/ai-workflow",
+	}
+	if _, err := driver.BuildCommand(defaultReq); err != nil {
+		t.Fatalf("build command with default role: %v", err)
+	}
+	if len(agent.opts) != 1 {
+		t.Fatalf("expected 1 exec opts, got %d", len(agent.opts))
+	}
+	assertRoleID(t, agent.opts[0].AppendContext, "plan_parser")
+
+	overrideReq := defaultReq
+	overrideReq.Role = "custom_role"
+	if _, err := driver.BuildCommand(overrideReq); err != nil {
+		t.Fatalf("build command with custom role: %v", err)
+	}
+	if len(agent.opts) != 2 {
+		t.Fatalf("expected 2 exec opts, got %d", len(agent.opts))
+	}
+	assertRoleID(t, agent.opts[1].AppendContext, "custom_role")
+}
+
+func TestSecretaryUsesBoundRole(t *testing.T) {
+	resolver := acpclient.NewRoleResolver(
+		[]acpclient.AgentProfile{
+			{
+				ID: "codex",
+				CapabilitiesMax: acpclient.ClientCapabilities{
+					FSRead:   true,
+					FSWrite:  true,
+					Terminal: true,
+				},
+			},
+		},
+		[]acpclient.RoleProfile{
+			{
+				ID:      "secretary_custom",
+				AgentID: "codex",
+				Capabilities: acpclient.ClientCapabilities{
+					FSRead:   true,
+					FSWrite:  true,
+					Terminal: true,
+				},
+				SessionPolicy: acpclient.SessionPolicy{
+					Reuse:             true,
+					PreferLoadSession: true,
+				},
+				MCPTools: []string{"query_plans"},
+			},
+		},
+	)
+	client := &stubSecretarySessionClient{
+		loadErr: errors.New("session not found"),
+		newResp: acpclient.SessionInfo{SessionID: "sid-new"},
+	}
+
+	session, roleID, err := startSecretarySession(
+		context.Background(),
+		client,
+		resolver,
+		"",
+		"secretary_custom",
+		"sid-old",
+		"D:/project/ai-workflow",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("startSecretarySession() error = %v", err)
+	}
+	if roleID != "secretary_custom" {
+		t.Fatalf("role id = %q, want %q", roleID, "secretary_custom")
+	}
+	if session.SessionID != "sid-new" {
+		t.Fatalf("session id = %q, want %q", session.SessionID, "sid-new")
+	}
+	if !reflect.DeepEqual(client.calls, []string{"load", "new"}) {
+		t.Fatalf("call order = %#v, want load->new fallback", client.calls)
+	}
+	if len(client.loadReqs) != 1 {
+		t.Fatalf("LoadSession calls = %d, want 1", len(client.loadReqs))
+	}
+	if len(client.newReqs) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(client.newReqs))
+	}
+	if got := client.loadReqs[0].Metadata["role_id"]; got != "secretary_custom" {
+		t.Fatalf("load metadata role_id = %q, want %q", got, "secretary_custom")
+	}
+	if got := client.newReqs[0].Metadata["role_id"]; got != "secretary_custom" {
+		t.Fatalf("new metadata role_id = %q, want %q", got, "secretary_custom")
+	}
+	if len(client.newReqs[0].MCPServers) != 1 {
+		t.Fatalf("new session mcp servers = %d, want 1 from role config", len(client.newReqs[0].MCPServers))
+	}
+	if got := client.newReqs[0].MCPServers[0].Env["AI_WORKFLOW_MCP_TOOL"]; got != "query_plans" {
+		t.Fatalf("new session mcp tool = %q, want %q", got, "query_plans")
+	}
+}
+
+func TestStartSecretarySessionSkipsLoadWhenReuseDisabled(t *testing.T) {
+	resolver := acpclient.NewRoleResolver(
+		[]acpclient.AgentProfile{
+			{
+				ID: "codex",
+				CapabilitiesMax: acpclient.ClientCapabilities{
+					FSRead:   true,
+					FSWrite:  true,
+					Terminal: true,
+				},
+			},
+		},
+		[]acpclient.RoleProfile{
+			{
+				ID:      "secretary_custom",
+				AgentID: "codex",
+				Capabilities: acpclient.ClientCapabilities{
+					FSRead:   true,
+					FSWrite:  true,
+					Terminal: true,
+				},
+				SessionPolicy: acpclient.SessionPolicy{
+					Reuse:             false,
+					PreferLoadSession: true,
+				},
+			},
+		},
+	)
+	client := &stubSecretarySessionClient{
+		loadResp: acpclient.SessionInfo{SessionID: "sid-loaded"},
+		newResp:  acpclient.SessionInfo{SessionID: "sid-new"},
+	}
+
+	session, roleID, err := startSecretarySession(
+		context.Background(),
+		client,
+		resolver,
+		"",
+		"secretary_custom",
+		"sid-old",
+		"D:/project/ai-workflow",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("startSecretarySession() error = %v", err)
+	}
+	if roleID != "secretary_custom" {
+		t.Fatalf("role id = %q, want %q", roleID, "secretary_custom")
+	}
+	if session.SessionID != "sid-new" {
+		t.Fatalf("session id = %q, want %q", session.SessionID, "sid-new")
+	}
+	if len(client.loadReqs) != 0 {
+		t.Fatalf("LoadSession calls = %d, want 0", len(client.loadReqs))
+	}
+	if len(client.newReqs) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(client.newReqs))
+	}
+}
+
+func TestStartSecretarySessionSkipsLoadWhenPreferLoadDisabled(t *testing.T) {
+	resolver := acpclient.NewRoleResolver(
+		[]acpclient.AgentProfile{
+			{
+				ID: "codex",
+				CapabilitiesMax: acpclient.ClientCapabilities{
+					FSRead:   true,
+					FSWrite:  true,
+					Terminal: true,
+				},
+			},
+		},
+		[]acpclient.RoleProfile{
+			{
+				ID:      "secretary_custom",
+				AgentID: "codex",
+				Capabilities: acpclient.ClientCapabilities{
+					FSRead:   true,
+					FSWrite:  true,
+					Terminal: true,
+				},
+				SessionPolicy: acpclient.SessionPolicy{
+					Reuse:             true,
+					PreferLoadSession: false,
+				},
+			},
+		},
+	)
+	client := &stubSecretarySessionClient{
+		loadResp: acpclient.SessionInfo{SessionID: "sid-loaded"},
+		newResp:  acpclient.SessionInfo{SessionID: "sid-new"},
+	}
+
+	session, roleID, err := startSecretarySession(
+		context.Background(),
+		client,
+		resolver,
+		"",
+		"secretary_custom",
+		"sid-old",
+		"D:/project/ai-workflow",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("startSecretarySession() error = %v", err)
+	}
+	if roleID != "secretary_custom" {
+		t.Fatalf("role id = %q, want %q", roleID, "secretary_custom")
+	}
+	if session.SessionID != "sid-new" {
+		t.Fatalf("session id = %q, want %q", session.SessionID, "sid-new")
+	}
+	if len(client.loadReqs) != 0 {
+		t.Fatalf("LoadSession calls = %d, want 0", len(client.loadReqs))
+	}
+	if len(client.newReqs) != 1 {
+		t.Fatalf("NewSession calls = %d, want 1", len(client.newReqs))
+	}
+}
+
 func TestParseTaskPlanRejectsInvalidTemplate(t *testing.T) {
 	_, err := ParseTaskPlan(`{
   "name": "invalid-plan",
@@ -277,5 +535,22 @@ func TestToTaskItem_MapsStructuredFields(t *testing.T) {
 	}
 	if len(item.Constraints) != 1 || item.Constraints[0] != "no breaking changes" {
 		t.Fatalf("constraints mapping failed: %#v", item.Constraints)
+	}
+}
+
+func assertRoleID(t *testing.T, appendContext, wantRole string) {
+	t.Helper()
+
+	if strings.TrimSpace(appendContext) == "" {
+		t.Fatal("append context should not be empty")
+	}
+
+	payload := map[string]string{}
+	if err := json.Unmarshal([]byte(appendContext), &payload); err != nil {
+		t.Fatalf("append context should be json: %v", err)
+	}
+
+	if payload["role_id"] != wantRole {
+		t.Fatalf("unexpected role_id, got %q want %q", payload["role_id"], wantRole)
 	}
 }

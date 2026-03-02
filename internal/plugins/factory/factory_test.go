@@ -3,12 +3,30 @@ package factory
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/user/ai-workflow/internal/config"
 	"github.com/user/ai-workflow/internal/core"
 )
+
+func TestFactoryNoCoreCommunicationSlotDependency(t *testing.T) {
+	content, err := os.ReadFile("factory.go")
+	if err != nil {
+		t.Fatalf("read factory.go: %v", err)
+	}
+
+	src := string(content)
+	for _, legacy := range []string{
+		"core.SlotAgent",
+		"core.SlotRuntime",
+	} {
+		if strings.Contains(src, legacy) {
+			t.Fatalf("legacy reference still exists in factory: %s", legacy)
+		}
+	}
+}
 
 func TestFactoryBuildKnownPlugin(t *testing.T) {
 	cfg := config.Defaults()
@@ -58,6 +76,91 @@ func TestFactoryBuildKnownPlugin(t *testing.T) {
 	}
 	if set.Spec == nil {
 		t.Fatal("expected spec plugin to be initialized")
+	}
+	if set.Workspace == nil {
+		t.Fatal("expected workspace plugin to be initialized")
+	}
+	if set.Workspace.Name() != "workspace-worktree" {
+		t.Fatalf("expected workspace plugin name workspace-worktree, got %q", set.Workspace.Name())
+	}
+	if set.RoleResolver == nil {
+		t.Fatal("expected role resolver to be initialized")
+	}
+}
+
+func TestFactoryBuildsRoleResolver(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Store.Path = ":memory:"
+
+	set, err := BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig returned error: %v", err)
+	}
+	defer set.Store.Close()
+
+	if set.RoleResolver == nil {
+		t.Fatal("expected bootstrap set role resolver")
+	}
+	agent, role, err := set.RoleResolver.Resolve("worker")
+	if err != nil {
+		t.Fatalf("resolve worker failed: %v", err)
+	}
+	if agent.ID == "" || role.ID != "worker" {
+		t.Fatalf("unexpected resolver output agent=%q role=%q", agent.ID, role.ID)
+	}
+}
+
+func TestFactoryBuildsRoleResolver_TrimmedNamesResolve(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Store.Path = ":memory:"
+	cfg.Roles = []config.RoleConfig{
+		{
+			Name:  " worker ",
+			Agent: " codex ",
+			Capabilities: config.CapabilitiesConfig{
+				FSRead:   true,
+				FSWrite:  true,
+				Terminal: true,
+			},
+		},
+	}
+	cfg.RoleBinds = config.RoleBindings{
+		Secretary: config.SingleRoleBinding{
+			Role: "worker",
+		},
+		Pipeline: config.PipelineRoleBindings{
+			StageRoles: map[string]string{
+				"implement": "worker",
+			},
+		},
+		ReviewOrchestrator: config.ReviewRoleBindings{
+			Reviewers: map[string]string{
+				"completeness": "worker",
+				"dependency":   "worker",
+				"feasibility":  "worker",
+			},
+			Aggregator: "worker",
+		},
+		PlanParser: config.SingleRoleBinding{
+			Role: "worker",
+		},
+	}
+
+	set, err := BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig returned error: %v", err)
+	}
+	defer set.Store.Close()
+
+	agent, role, err := set.RoleResolver.Resolve("worker")
+	if err != nil {
+		t.Fatalf("resolve trimmed worker failed: %v", err)
+	}
+	if agent.ID != "codex" {
+		t.Fatalf("expected resolved agent codex, got %q", agent.ID)
+	}
+	if role.ID != "worker" {
+		t.Fatalf("expected resolved role worker, got %q", role.ID)
 	}
 }
 
@@ -119,6 +222,62 @@ func TestFactoryBuildUnknownAgentPlugin(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown plugin") {
 		t.Fatalf("expected unknown plugin error, got %v", err)
+	}
+}
+
+func TestFactoryBuildRoleAgentMustBeExecutable(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Store.Path = ":memory:"
+	cfg.Agents.Profiles = []config.AgentProfileConfig{
+		{
+			Name:          "ghost",
+			LaunchCommand: "ghost-agent",
+			CapabilitiesMax: config.CapabilitiesConfig{
+				FSRead:   true,
+				FSWrite:  true,
+				Terminal: true,
+			},
+		},
+	}
+	cfg.Roles = []config.RoleConfig{
+		{
+			Name:  "worker",
+			Agent: "ghost",
+			Capabilities: config.CapabilitiesConfig{
+				FSRead:   true,
+				FSWrite:  true,
+				Terminal: true,
+			},
+		},
+	}
+	cfg.RoleBinds = config.RoleBindings{
+		Secretary: config.SingleRoleBinding{
+			Role: "worker",
+		},
+		Pipeline: config.PipelineRoleBindings{
+			StageRoles: map[string]string{
+				"implement": "worker",
+			},
+		},
+		ReviewOrchestrator: config.ReviewRoleBindings{
+			Reviewers: map[string]string{
+				"completeness": "worker",
+				"dependency":   "worker",
+				"feasibility":  "worker",
+			},
+			Aggregator: "worker",
+		},
+		PlanParser: config.SingleRoleBinding{
+			Role: "worker",
+		},
+	}
+
+	_, err := BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected BuildFromConfig to fail when role resolves to non-executable agent plugin")
+	}
+	if !strings.Contains(err.Error(), "no executable agent plugin is configured") {
+		t.Fatalf("expected executable agent plugin error, got %v", err)
 	}
 }
 

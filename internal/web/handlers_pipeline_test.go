@@ -107,6 +107,72 @@ func TestCreatePipelineThenGetPipelineByProjectAndGlobal(t *testing.T) {
 	}
 }
 
+func TestCreatePipeline_StageRoleBindingsApplied(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-pipe-role-bindings",
+		Name:     "project-pipe-role-bindings",
+		RepoPath: filepath.Join(t.TempDir(), "repo-pipe-role-bindings"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+
+	srv := NewServer(Config{
+		Store: store,
+		PipelineStageRoles: map[string]string{
+			"requirements": "worker",
+			"implement":    "worker",
+			"code_review":  "reviewer",
+		},
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	createBody := map[string]any{
+		"name":        "pipeline-role",
+		"description": "pipeline role bindings",
+		"template":    "quick",
+	}
+	rawBody, err := json.Marshal(createBody)
+	if err != nil {
+		t.Fatalf("marshal create pipeline body: %v", err)
+	}
+
+	createResp, err := http.Post(
+		ts.URL+"/api/v1/projects/proj-pipe-role-bindings/pipelines",
+		"application/json",
+		bytes.NewReader(rawBody),
+	)
+	if err != nil {
+		t.Fatalf("POST /api/v1/projects/{pid}/pipelines: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", createResp.StatusCode)
+	}
+
+	var created core.Pipeline
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created pipeline: %v", err)
+	}
+
+	roleByStage := make(map[core.StageID]string, len(created.Stages))
+	for _, stage := range created.Stages {
+		roleByStage[stage.Name] = stage.Role
+	}
+
+	if got := roleByStage[core.StageRequirements]; got != "worker" {
+		t.Fatalf("expected requirements role worker, got %q", got)
+	}
+	if got := roleByStage[core.StageImplement]; got != "worker" {
+		t.Fatalf("expected implement role worker, got %q", got)
+	}
+	if got := roleByStage[core.StageCodeReview]; got != "reviewer" {
+		t.Fatalf("expected code_review role reviewer, got %q", got)
+	}
+}
+
 func TestGetPipelineCheckpoints(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
@@ -275,7 +341,6 @@ func TestApplyPipelineActionChangeRoleUsesRoleField(t *testing.T) {
 		CurrentStage: core.StageImplement,
 		Stages: []core.StageConfig{
 			{Name: core.StageImplement, Agent: "codex"},
-			{Name: core.StageCodeReview, Agent: "claude"},
 		},
 		Artifacts:       map[string]string{},
 		Config:          map[string]any{},
@@ -297,14 +362,12 @@ func TestApplyPipelineActionChangeRoleUsesRoleField(t *testing.T) {
 			if action.Role != "reviewer" {
 				t.Fatalf("expected role reviewer, got %q", action.Role)
 			}
-			if action.Stage != core.StageImplement {
-				t.Fatalf("expected stage implement, got %s", action.Stage)
-			}
 			loaded, err := store.GetPipeline(action.PipelineID)
 			if err != nil {
 				return err
 			}
-			loaded.Stages[0].Agent = action.Role
+			loaded.Stages[0].Role = action.Role
+			loaded.Status = core.StatusRunning
 			loaded.UpdatedAt = time.Now()
 			return store.SavePipeline(loaded)
 		},
@@ -320,26 +383,28 @@ func TestApplyPipelineActionChangeRoleUsesRoleField(t *testing.T) {
 	resp, err := http.Post(
 		ts.URL+"/api/v1/projects/proj-pipe-change-role/pipelines/pipe-change-role-1/action",
 		"application/json",
-		bytes.NewBufferString(`{"action":"change_role","stage":"implement","role":"reviewer","message":"switch role"}`),
+		bytes.NewBufferString(`{"action":"change_role","role":"reviewer"}`),
 	)
 	if err != nil {
 		t.Fatalf("POST pipeline action change_role: %v", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 	if !execCalled {
-		t.Fatal("expected pipeline action to delegate to executor")
+		t.Fatal("expected pipeline action to delegate change_role to executor")
 	}
 
 	updated, err := store.GetPipeline("pipe-change-role-1")
 	if err != nil {
 		t.Fatalf("reload pipeline: %v", err)
 	}
-	if updated.Stages[0].Agent != "reviewer" {
-		t.Fatalf("expected stage role to be updated to reviewer, got %q", updated.Stages[0].Agent)
+	if got := updated.Stages[0].Role; got != "reviewer" {
+		t.Fatalf("expected stage role reviewer, got %q", got)
+	}
+	if got := updated.Stages[0].Agent; got != "codex" {
+		t.Fatalf("expected stage agent unchanged codex, got %q", got)
 	}
 }
 

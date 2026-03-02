@@ -501,6 +501,7 @@ const PlanView = ({ apiClient, wsClient, projectId, refreshToken }: PlanViewProp
             {activePlan ? (
               <p className="mt-1 text-xs text-slate-600">
                 当前计划：{activePlan.name || activePlan.id} · status={activePlan.status}
+                {activePlan.review_round > 0 ? ` · 审查轮次=${activePlan.review_round}` : ""}
                 {activePlan.wait_reason ? ` · wait_reason=${activePlan.wait_reason}` : ""}
               </p>
             ) : (

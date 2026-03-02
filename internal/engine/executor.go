@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/user/ai-workflow/internal/acpclient"
 	"github.com/user/ai-workflow/internal/core"
 	"github.com/user/ai-workflow/internal/eventbus"
 	gitops "github.com/user/ai-workflow/internal/git"
@@ -21,11 +20,14 @@ import (
 )
 
 type Executor struct {
-	store   core.Store
-	bus     *eventbus.Bus
-	agents  map[string]core.AgentPlugin
-	runtime core.RuntimePlugin
-	logger  *slog.Logger
+	store        core.Store
+	bus          *eventbus.Bus
+	agents       map[string]core.AgentPlugin
+	roleResolver *acpclient.RoleResolver
+	stageRoles   map[core.StageID]string
+	runtime      core.RuntimePlugin
+	workspace    core.WorkspacePlugin
+	logger       *slog.Logger
 
 	sessionMu     sync.Mutex
 	activeSession map[string]string
@@ -49,6 +51,32 @@ func NewExecutor(
 	}
 }
 
+func (e *Executor) SetRoleResolver(resolver *acpclient.RoleResolver) {
+	e.roleResolver = resolver
+}
+
+func (e *Executor) SetWorkspace(workspace core.WorkspacePlugin) {
+	e.workspace = workspace
+}
+
+func (e *Executor) SetPipelineStageRoles(stageRoles map[string]string) {
+	if len(stageRoles) == 0 {
+		e.stageRoles = nil
+		return
+	}
+
+	normalized := make(map[core.StageID]string, len(stageRoles))
+	for rawStage, rawRole := range stageRoles {
+		stage := core.StageID(strings.TrimSpace(rawStage))
+		role := strings.TrimSpace(rawRole)
+		if stage == "" || role == "" {
+			continue
+		}
+		normalized[stage] = role
+	}
+	e.stageRoles = normalized
+}
+
 func (e *Executor) CreatePipeline(projectID, name, description, template string) (*core.Pipeline, error) {
 	stageIDs, ok := Templates[template]
 	if !ok {
@@ -58,6 +86,9 @@ func (e *Executor) CreatePipeline(projectID, name, description, template string)
 	stages := make([]core.StageConfig, len(stageIDs))
 	for i, sid := range stageIDs {
 		stages[i] = defaultStageConfig(sid)
+		if role, ok := e.stageRoles[sid]; ok {
+			stages[i].Role = role
+		}
 	}
 
 	p := &core.Pipeline{
@@ -169,12 +200,17 @@ func (e *Executor) run(ctx context.Context, pipelineID string, allowAlreadyRunni
 		stageSucceeded := false
 		stageSkipped := false
 		for attempt := 0; ; attempt++ {
+			agentUsed := ""
+			if resolvedAgent, resolveErr := e.resolveStageAgentName(&stage); resolveErr == nil {
+				agentUsed = resolvedAgent
+			}
+
 			cp := &core.Checkpoint{
 				PipelineID: p.ID,
 				StageName:  stage.Name,
 				Status:     core.CheckpointInProgress,
 				StartedAt:  time.Now(),
-				AgentUsed:  stage.Agent,
+				AgentUsed:  agentUsed,
 				RetryCount: attempt,
 			}
 			if err := e.store.SaveCheckpoint(cp); err != nil {
@@ -272,7 +308,7 @@ func (e *Executor) run(ctx context.Context, pipelineID string, allowAlreadyRunni
 					Status:     core.CheckpointSkipped,
 					StartedAt:  time.Now(),
 					FinishedAt: time.Now(),
-					AgentUsed:  stage.Agent,
+					AgentUsed:  agentUsed,
 					RetryCount: attempt,
 					Error:      err.Error(),
 				}
@@ -485,9 +521,9 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 		return fmt.Errorf("worktree path is empty for agent stage %s", stage.Name)
 	}
 
-	agent, ok := e.agents[stage.Agent]
-	if !ok {
-		return fmt.Errorf("agent %q not found", stage.Agent)
+	agentName, agent, err := e.resolveStageAgent(stage)
+	if err != nil {
+		return err
 	}
 
 	promptStage := stage.PromptTemplate
@@ -552,7 +588,7 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 			Type:       core.EventAgentOutput,
 			PipelineID: p.ID,
 			Stage:      stage.Name,
-			Agent:      stage.Agent,
+			Agent:      agentName,
 			Data: map[string]string{
 				"content": evt.Content,
 				"type":    evt.Type,
@@ -565,6 +601,55 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 		return fmt.Errorf("wait session: %w", err)
 	}
 	return nil
+}
+
+func (e *Executor) resolveStageAgentName(stage *core.StageConfig) (string, error) {
+	if stage == nil {
+		return "", errors.New("stage config is nil")
+	}
+	if !stageRequiresRole(stage.Name) {
+		return "", nil
+	}
+
+	roleName := strings.TrimSpace(stage.Role)
+	if roleName == "" {
+		return "", fmt.Errorf("stage role is required for stage %q", stage.Name)
+	}
+	if e.roleResolver == nil {
+		return "", fmt.Errorf("stage role resolver is not configured for stage %q (role=%q)", stage.Name, roleName)
+	}
+
+	resolvedAgent, _, err := e.roleResolver.Resolve(roleName)
+	if err != nil {
+		return "", fmt.Errorf("stage role not resolved for stage %q (role=%q): %w", stage.Name, roleName, err)
+	}
+	agentName := strings.TrimSpace(resolvedAgent.ID)
+	if agentName == "" {
+		return "", fmt.Errorf("stage role not resolved for stage %q (role=%q): resolved empty agent id", stage.Name, roleName)
+	}
+	return agentName, nil
+}
+
+func (e *Executor) resolveStageAgent(stage *core.StageConfig) (string, core.AgentPlugin, error) {
+	agentName, err := e.resolveStageAgentName(stage)
+	if err != nil {
+		return "", nil, err
+	}
+
+	agent, ok := e.agents[agentName]
+	if !ok {
+		return "", nil, fmt.Errorf("stage role not resolved for stage %q (role=%q): agent plugin %q not found", stage.Name, strings.TrimSpace(stage.Role), agentName)
+	}
+	return agentName, agent, nil
+}
+
+func stageRequiresRole(stage core.StageID) bool {
+	switch stage {
+	case core.StageWorktreeSetup, core.StageMerge, core.StageCleanup:
+		return false
+	default:
+		return true
+	}
 }
 
 func buildPromptExecutionContext(p *core.Pipeline, stage core.StageID) (string, error) {
@@ -583,37 +668,27 @@ func buildPromptExecutionContext(p *core.Pipeline, stage core.StageID) (string, 
 }
 
 func (e *Executor) runWorktreeSetup(project *core.Project, p *core.Pipeline) error {
-	if project.RepoPath == "" {
-		return errors.New("project repo path is empty")
-	}
-	runner := gitops.NewRunner(project.RepoPath)
-
 	if p.Config == nil {
 		p.Config = map[string]any{}
 	}
-	if p.BranchName == "" {
-		p.BranchName = "ai-flow/" + p.ID
-	}
-	if p.WorktreePath == "" {
-		p.WorktreePath = filepath.Join(project.RepoPath, ".worktrees", p.ID)
-	}
-	if err := os.MkdirAll(filepath.Dir(p.WorktreePath), 0o755); err != nil {
-		return err
+	if e.workspace == nil {
+		return errors.New("workspace plugin is not configured")
 	}
 
-	if _, err := os.Stat(p.WorktreePath); errors.Is(err, os.ErrNotExist) {
-		if err := runner.WorktreeAdd(p.WorktreePath, p.BranchName); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-
-	baseBranch, err := runner.CurrentBranch()
+	result, err := e.workspace.Setup(context.Background(), core.WorkspaceSetupRequest{
+		RepoPath:     project.RepoPath,
+		PipelineID:   p.ID,
+		BranchName:   p.BranchName,
+		WorktreePath: p.WorktreePath,
+	})
 	if err != nil {
 		return err
 	}
-	p.Config["base_branch"] = baseBranch
+	p.BranchName = result.BranchName
+	p.WorktreePath = result.WorktreePath
+	if result.BaseBranch != "" {
+		p.Config["base_branch"] = result.BaseBranch
+	}
 
 	return e.store.SavePipeline(p)
 }
@@ -647,8 +722,13 @@ func (e *Executor) runCleanup(project *core.Project, p *core.Pipeline) error {
 	if p.WorktreePath == "" {
 		return nil
 	}
-	runner := gitops.NewRunner(project.RepoPath)
-	return runner.WorktreeRemove(p.WorktreePath)
+	if e.workspace == nil {
+		return errors.New("workspace plugin is not configured")
+	}
+	return e.workspace.Cleanup(context.Background(), core.WorkspaceCleanupRequest{
+		RepoPath:     project.RepoPath,
+		WorktreePath: p.WorktreePath,
+	})
 }
 
 func defaultStageConfig(id core.StageID) core.StageConfig {
@@ -660,11 +740,11 @@ func defaultStageConfig(id core.StageID) core.StageConfig {
 	}
 	switch id {
 	case core.StageRequirements, core.StageCodeReview:
-		cfg.Agent = "codex"
+		cfg.Agent = ""
 	case core.StageImplement, core.StageFixup:
-		cfg.Agent = "codex"
+		cfg.Agent = ""
 	case core.StageE2ETest:
-		cfg.Agent = "codex"
+		cfg.Agent = ""
 		cfg.Timeout = 15 * time.Minute
 	case core.StageWorktreeSetup, core.StageMerge, core.StageCleanup:
 		cfg.Agent = ""

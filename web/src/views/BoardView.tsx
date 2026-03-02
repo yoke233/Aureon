@@ -16,6 +16,7 @@ export interface BoardTask {
   plan_name: string;
   title: string;
   status: BoardStatus;
+  raw_status: string;
   pipeline_id: string;
   github_issue_number?: number;
   github_issue_url?: string;
@@ -167,6 +168,7 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
             plan_name: plan.name || plan.id,
             title: task.title,
             status: toBoardStatus(task.status),
+            raw_status: task.status,
             pipeline_id: task.pipeline_id,
             github_issue_number: task.github?.issue_number,
             github_issue_url: task.github?.issue_url,
@@ -369,6 +371,15 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
                     }}
                   >
                     <p className="font-semibold">{task.title}</p>
+                    {task.raw_status === "blocked_by_failure" ? (
+                      <span className="mt-1 inline-block rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-medium text-rose-700">
+                        blocked
+                      </span>
+                    ) : task.raw_status === "skipped" ? (
+                      <span className="mt-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                        skipped
+                      </span>
+                    ) : null}
                     <p className="mt-1 opacity-80">plan={task.plan_name}</p>
                     {task.pipeline_id ? (
                       <p className="mt-1 opacity-80">pipeline={task.pipeline_id}</p>

@@ -192,7 +192,7 @@ func TestDeleteChatSession(t *testing.T) {
 	}
 }
 
-func TestCreateChatSessionTriggersSecretaryDraftWhenPlanManagerConfigured(t *testing.T) {
+func TestCreateChatSessionRejectsAutoCreatePlanParam(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
 		ID:       "proj-chat-plan-draft",
@@ -205,31 +205,9 @@ func TestCreateChatSessionTriggersSecretaryDraftWhenPlanManagerConfigured(t *tes
 
 	createDraftCalled := false
 	planManager := &testPlanManager{
-		createDraftFn: func(_ context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error) {
+		createDraftFn: func(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
 			createDraftCalled = true
-			plan := &core.TaskPlan{
-				ID:         core.NewTaskPlanID(),
-				ProjectID:  input.ProjectID,
-				SessionID:  input.SessionID,
-				Name:       "auto-created-from-chat",
-				Status:     core.PlanDraft,
-				WaitReason: core.WaitNone,
-				FailPolicy: core.FailBlock,
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-auto-chat-1",
-						PlanID:      "",
-						Title:       "拆解任务",
-						Description: "由 chat 自动触发拆解",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			}
-			if err := store.CreateTaskPlan(plan); err != nil {
-				return nil, err
-			}
-			return store.GetTaskPlan(plan.ID)
+			return nil, nil
 		},
 	}
 
@@ -254,34 +232,11 @@ func TestCreateChatSessionTriggersSecretaryDraftWhenPlanManagerConfigured(t *tes
 		t.Fatalf("POST /api/v1/projects/{pid}/chat: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
-
-	var created struct {
-		SessionID string `json:"session_id"`
-		Reply     string `json:"reply"`
-		PlanID    string `json:"plan_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create chat response: %v", err)
-	}
-	if created.SessionID == "" {
-		t.Fatal("expected non-empty session_id")
-	}
-	if created.PlanID == "" {
-		t.Fatal("expected non-empty plan_id when plan manager is configured")
-	}
-	if !createDraftCalled {
-		t.Fatal("expected chat create to delegate decomposition to plan manager")
-	}
-
-	plan, err := store.GetTaskPlan(created.PlanID)
-	if err != nil {
-		t.Fatalf("load created plan: %v", err)
-	}
-	if plan.SessionID != created.SessionID {
-		t.Fatalf("plan session id = %s, want %s", plan.SessionID, created.SessionID)
+	if createDraftCalled {
+		t.Fatal("expected no plan manager calls from /chat")
 	}
 }
 
@@ -332,11 +287,8 @@ func TestCreateChatSessionDoesNotAutoCreatePlanByDefault(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		t.Fatalf("decode create chat response: %v", err)
 	}
-	if created.PlanID != "" {
-		t.Fatalf("expected empty plan_id by default, got %s", created.PlanID)
-	}
 	if createDraftCalled {
-		t.Fatal("expected no auto draft creation when auto_create_plan is not set")
+		t.Fatal("expected no plan manager calls from /chat")
 	}
 }
 

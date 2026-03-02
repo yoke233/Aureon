@@ -41,11 +41,20 @@ func TestCodexChatAssistantReplyBuildsNewSessionCommand(t *testing.T) {
 	if !strings.Contains(joined, "-C D:/repo/demo") {
 		t.Fatalf("expected -C workdir arg, got %v", call.args)
 	}
-	if !strings.Contains(joined, "exec hello") {
+	if !strings.Contains(joined, "-a never") {
+		t.Fatalf("expected global -a never, got %v", call.args)
+	}
+	if !strings.Contains(joined, "exec --json") {
 		t.Fatalf("expected exec prompt, got %v", call.args)
 	}
 	if !strings.Contains(joined, "--json") {
 		t.Fatalf("expected --json arg, got %v", call.args)
+	}
+	if !strings.Contains(joined, "--disable shell_tool") {
+		t.Fatalf("expected --disable shell_tool arg, got %v", call.args)
+	}
+	if !strings.Contains(joined, " hello ") && !strings.HasSuffix(joined, " hello") {
+		t.Fatalf("expected message in args, got %v", call.args)
 	}
 }
 
@@ -66,7 +75,13 @@ func TestCodexChatAssistantReplyUsesResumeForExistingSession(t *testing.T) {
 		t.Fatalf("expected fallback thread id %q, got %q", "thread-old", got.AgentSessionID)
 	}
 	args := strings.Join(runner.calls[0].args, " ")
-	if !strings.Contains(args, "exec resume thread-old next question") {
+	if !strings.Contains(args, "-a never exec resume") {
+		t.Fatalf("expected global -a never exec resume, got %v", runner.calls[0].args)
+	}
+	if !strings.Contains(args, " thread-old ") {
+		t.Fatalf("expected session id in resume args, got %v", runner.calls[0].args)
+	}
+	if !strings.Contains(args, " next question") {
 		t.Fatalf("expected resume call, got %v", runner.calls[0].args)
 	}
 }

@@ -567,13 +567,13 @@ func runServer(ctx context.Context, args []string) error {
 	chatProvider := strings.ToLower(strings.TrimSpace(os.Getenv("AI_WORKFLOW_CHAT_PROVIDER")))
 	var chatAssistant web.ChatAssistant
 	switch chatProvider {
-	case "", "claude":
-		chatAssistant = web.NewClaudeChatAssistant(claudeBinary)
-	case "codex":
+	case "", "codex":
 		chatAssistant = web.NewCodexChatAssistant(codexBinary, codexModel, codexReasoning)
-	default:
-		fmt.Printf("Unknown AI_WORKFLOW_CHAT_PROVIDER=%q, fallback to claude\n", chatProvider)
+	case "claude":
 		chatAssistant = web.NewClaudeChatAssistant(claudeBinary)
+	default:
+		fmt.Printf("Unknown AI_WORKFLOW_CHAT_PROVIDER=%q, fallback to codex\n", chatProvider)
+		chatAssistant = web.NewCodexChatAssistant(codexBinary, codexModel, codexReasoning)
 	}
 	sub := bus.Subscribe()
 	bridgeDone := make(chan struct{})

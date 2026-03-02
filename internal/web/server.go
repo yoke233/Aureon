@@ -105,7 +105,7 @@ func NewServer(cfg Config) *Server {
 		r.Get("/stats", handleStats)
 		registerProjectRoutes(r, cfg.Store, hub, projectRepoProvisioner)
 		registerPipelineRoutes(r, cfg.Store, cfg.PipelineExec)
-		registerChatRoutes(r, cfg.Store, cfg.PlanManager, cfg.ChatAssistant)
+		registerChatRoutes(r, cfg.Store, cfg.ChatAssistant)
 		registerPlanRoutes(r, cfg.Store, cfg.PlanManager)
 		registerTaskRoutes(r, cfg.Store)
 		registerAdminOpsRoutes(r, cfg.Store, cfg.BearerToken, webhookReplayer)

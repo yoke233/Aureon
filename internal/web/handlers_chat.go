@@ -9,12 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/secretary"
 )
 
 type chatHandlers struct {
 	store       core.Store
-	planManager PlanManager
 	assistant   ChatAssistant
 }
 
@@ -23,21 +21,18 @@ type chatSessionDeleter interface {
 }
 
 type createChatSessionRequest struct {
-	Message        string `json:"message"`
-	SessionID      string `json:"session_id,omitempty"`
-	AutoCreatePlan bool   `json:"auto_create_plan,omitempty"`
+	Message   string `json:"message"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 type createChatSessionResponse struct {
 	SessionID string `json:"session_id"`
 	Reply     string `json:"reply"`
-	PlanID    string `json:"plan_id,omitempty"`
 }
 
-func registerChatRoutes(r chi.Router, store core.Store, planManager PlanManager, assistant ChatAssistant) {
+func registerChatRoutes(r chi.Router, store core.Store, assistant ChatAssistant) {
 	h := &chatHandlers{
 		store:       store,
-		planManager: planManager,
 		assistant:   assistant,
 	}
 	r.Post("/projects/{projectID}/chat", h.createSession)
@@ -150,32 +145,9 @@ func (h *chatHandlers) createSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	createdPlanID := ""
-	if isNewSession && req.AutoCreatePlan && h.planManager != nil {
-		createReq := secretary.Request{
-			Conversation: summarizeChatMessages(session.Messages),
-			ProjectName:  strings.TrimSpace(project.Name),
-			RepoPath:     strings.TrimSpace(project.RepoPath),
-			WorkDir:      strings.TrimSpace(project.RepoPath),
-		}
-		if createReq.WorkDir == "" {
-			createReq.WorkDir = "."
-		}
-		createdPlan, planErr := h.planManager.CreateDraft(r.Context(), secretary.CreateDraftInput{
-			ProjectID:  projectID,
-			SessionID:  session.ID,
-			FailPolicy: core.FailBlock,
-			Request:    createReq,
-		})
-		if planErr == nil && createdPlan != nil {
-			createdPlanID = strings.TrimSpace(createdPlan.ID)
-		}
-	}
-
 	writeJSON(w, http.StatusOK, createChatSessionResponse{
 		SessionID: session.ID,
 		Reply:     reply,
-		PlanID:    createdPlanID,
 	})
 }
 

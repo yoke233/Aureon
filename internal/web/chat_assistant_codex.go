@@ -63,17 +63,17 @@ func (a *CodexChatAssistant) Reply(ctx context.Context, req ChatAssistantRequest
 		return ChatAssistantResponse{}, errors.New("chat assistant runner is not configured")
 	}
 
-	args := make([]string, 0, 16)
+	// Note: `-a` is a global flag (must appear before `exec`).
+	args := make([]string, 0, 24)
 	if strings.TrimSpace(req.WorkDir) != "" {
 		args = append(args, "-C", strings.TrimSpace(req.WorkDir))
 	}
-	args = append(args, "exec")
+	args = append(args, "-a", "never", "exec")
 	if strings.TrimSpace(req.AgentSessionID) != "" {
-		args = append(args, "resume", strings.TrimSpace(req.AgentSessionID), message)
+		args = append(args, "resume", "--json", "--color", "never", "--disable", "shell_tool", strings.TrimSpace(req.AgentSessionID), message)
 	} else {
-		args = append(args, message)
+		args = append(args, "--json", "--color", "never", "--disable", "shell_tool", message)
 	}
-	args = append(args, "--json", "--sandbox", "workspace-write", "-a", "never")
 	if a.model != "" {
 		args = append(args, "-m", a.model)
 	}

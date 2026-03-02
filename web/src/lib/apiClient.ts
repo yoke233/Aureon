@@ -387,8 +387,6 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
         method: "POST",
         body,
       }),
-    listPipelines: async (projectId, pagination) => {
-      const response = await request<ListPipelinesResponse>({
     createProjectCreateRequest: (body) =>
       request<CreateProjectCreateRequestResponse, CreateProjectCreateRequest>({
         path: "/projects/create-requests",

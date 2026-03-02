@@ -803,43 +803,26 @@ func loadPlanSourceFiles(repoPath string, filePaths []string) ([]string, map[str
 
 func resolvePlanSourceFilePath(repoRoot string, rawPath string) (string, string, error) {
 	trimmed := strings.TrimSpace(rawPath)
-	if trimmed == "" {
-		return "", "", &planFilesValidationError{
-			Message: "file_paths contains empty path",
-			Code:    "FILE_PATH_REQUIRED",
-		}
-	}
-
-	cleanRelative := filepath.Clean(trimmed)
-	if cleanRelative == "." {
-		return "", "", &planFilesValidationError{
-			Message: "file_paths contains empty path",
-			Code:    "FILE_PATH_REQUIRED",
-		}
-	}
-	if filepath.IsAbs(cleanRelative) || filepath.VolumeName(cleanRelative) != "" {
-		return "", "", &planFilesValidationError{
-			Message: fmt.Sprintf("invalid file path %q", trimmed),
-			Code:    "INVALID_FILE_PATH",
-		}
-	}
-
-	absPath := filepath.Join(repoRoot, cleanRelative)
-	rel, err := filepath.Rel(repoRoot, absPath)
+	absPath, normalizedPath, err := validateRelativePath(repoRoot, trimmed)
 	if err != nil {
+		if errors.Is(err, errRelativePathRequired) {
+			return "", "", &planFilesValidationError{
+				Message: "file_paths contains empty path",
+				Code:    "FILE_PATH_REQUIRED",
+			}
+		}
 		return "", "", &planFilesValidationError{
 			Message: fmt.Sprintf("invalid file path %q", trimmed),
 			Code:    "INVALID_FILE_PATH",
 		}
 	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if normalizedPath == "." {
 		return "", "", &planFilesValidationError{
-			Message: fmt.Sprintf("invalid file path %q", trimmed),
-			Code:    "INVALID_FILE_PATH",
+			Message: "file_paths contains empty path",
+			Code:    "FILE_PATH_REQUIRED",
 		}
 	}
-
-	return absPath, filepath.ToSlash(rel), nil
+	return absPath, normalizedPath, nil
 }
 
 func buildPlanFromFilesResponse(plan *core.TaskPlan, sourceFiles []string, fileContents map[string]string) map[string]any {

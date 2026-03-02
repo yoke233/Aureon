@@ -23,6 +23,9 @@ import type {
   PlanActionRequest,
   PlanActionResponse,
   PlanDagResponse,
+  RepoDiffResponse,
+  RepoStatusResponse,
+  RepoTreeResponse,
   SubmitPlanReviewResponse,
   TaskActionRequest,
   TaskActionResponse,
@@ -298,6 +301,9 @@ export interface ApiClient {
     projectId: string,
     pipelineId: string,
   ): Promise<GetPipelineCheckpointsResponse>;
+  getRepoTree(projectId: string, dir?: string): Promise<RepoTreeResponse>;
+  getRepoStatus(projectId: string): Promise<RepoStatusResponse>;
+  getRepoDiff(projectId: string, filePath: string): Promise<RepoDiffResponse>;
   applyPipelineAction(
     projectId: string,
     pipelineId: string,
@@ -486,6 +492,24 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
     getPipelineCheckpoints: (projectId, pipelineId) =>
       request<GetPipelineCheckpointsResponse>({
         path: `/projects/${projectId}/pipelines/${pipelineId}/checkpoints`,
+      }),
+    getRepoTree: (projectId, dir) =>
+      request<RepoTreeResponse>({
+        path: `/projects/${projectId}/repo/tree`,
+        query: {
+          dir: dir?.trim() ? dir : undefined,
+        },
+      }),
+    getRepoStatus: (projectId) =>
+      request<RepoStatusResponse>({
+        path: `/projects/${projectId}/repo/status`,
+      }),
+    getRepoDiff: (projectId, filePath) =>
+      request<RepoDiffResponse>({
+        path: `/projects/${projectId}/repo/diff`,
+        query: {
+          file: filePath,
+        },
       }),
     applyPipelineAction: (projectId, pipelineId, body) =>
       request<PipelineActionResponse, PipelineActionRequest>({

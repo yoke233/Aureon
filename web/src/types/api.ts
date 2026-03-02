@@ -68,6 +68,27 @@ export interface CreatePlanFromFilesRequest {
   file_paths: string[];
 }
 
+export interface FileEntry {
+  path: string;
+  name: string;
+  type: "file" | "dir";
+  git_status: string;
+}
+
+export interface RepoTreeResponse {
+  dir: string;
+  items: FileEntry[];
+}
+
+export interface RepoStatusResponse {
+  items: FileEntry[];
+}
+
+export interface RepoDiffResponse {
+  file_path: string;
+  diff: string;
+}
+
 export interface SubmitPlanReviewResponse {
   status: TaskPlanStatus | string;
 }

@@ -411,4 +411,63 @@ describe("apiClient", () => {
     expect(plan.tasks[0]?.acceptance).toEqual([]);
     expect(plan.tasks[0]?.constraints).toEqual([]);
   });
+
+  it("仓库树/状态/diff 接口命中正确路由并透传查询参数", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            dir: "",
+            items: [],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            file_path: "src/main.ts",
+            diff: "diff --git a/src/main.ts b/src/main.ts",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({
+      baseUrl: "http://localhost:8080/api/v1",
+    });
+
+    await client.getRepoTree("proj-1", "src");
+    await client.getRepoStatus("proj-1");
+    await client.getRepoDiff("proj-1", "src/main.ts");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://localhost:8080/api/v1/projects/proj-1/repo/tree?dir=src",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "http://localhost:8080/api/v1/projects/proj-1/repo/status",
+    );
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "http://localhost:8080/api/v1/projects/proj-1/repo/diff?file=src%2Fmain.ts",
+    );
+  });
 });

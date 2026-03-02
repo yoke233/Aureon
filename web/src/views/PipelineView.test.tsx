@@ -223,6 +223,55 @@ describe("PipelineView", () => {
     expect(apiClient.listPipelines).toHaveBeenCalledTimes(2);
   });
 
+  it("checkpoint 区展示 agent_used 字段", async () => {
+    const apiClient = createMockApiClient();
+    render(<PipelineView apiClient={apiClient} projectId="proj-1" refreshToken={0} />);
+
+    await waitFor(() => {
+      expect(apiClient.getPipelineCheckpoints).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText(/agent=claude/)).toBeTruthy();
+  });
+
+  it("change_role 按钮在无角色名时 disabled，有值时提交含 role 字段", async () => {
+    const apiClient = createMockApiClient();
+    render(<PipelineView apiClient={apiClient} projectId="proj-1" refreshToken={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Pipeline pipe-1")).toBeTruthy();
+    });
+
+    const changeRoleBtn = screen.getByRole("button", { name: "Change Role" });
+    expect((changeRoleBtn as HTMLButtonElement).disabled).toBe(true);
+
+    const roleInput = screen.getByPlaceholderText(/目标角色名/);
+    fireEvent.change(roleInput, { target: { value: "codex" } });
+    expect((changeRoleBtn as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(changeRoleBtn);
+    await waitFor(() => {
+      expect(apiClient.applyPipelineAction).toHaveBeenCalledWith("proj-1", "pipe-1", {
+        action: "change_role",
+        role: "codex",
+        stage: "implement",
+      });
+    });
+  });
+
+  it("Pause 仅在 running 时启用, Resume 仅在 paused 时启用", async () => {
+    const apiClient = createMockApiClient();
+    render(<PipelineView apiClient={apiClient} projectId="proj-1" refreshToken={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Pipeline pipe-1")).toBeTruthy();
+    });
+
+    expect((screen.getByRole("button", { name: "Pause" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Resume" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Rerun" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("显示 GitHub issue/pr 链接与状态徽标", async () => {
     const apiClient = createMockApiClient();
     vi.mocked(apiClient.listPipelines).mockResolvedValue({

@@ -88,6 +88,7 @@ const PipelineView = ({ apiClient, projectId, refreshToken }: PipelineViewProps)
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
+  const [changeRoleValue, setChangeRoleValue] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -187,6 +188,18 @@ const PipelineView = ({ apiClient, projectId, refreshToken }: PipelineViewProps)
   );
   const progress = selectedPipeline ? getPipelineProgress(selectedPipeline) : null;
 
+  const currentStageAgent = useMemo(() => {
+    if (!selectedPipeline) return null;
+    const cp = checkpoints.find(
+      (c) => c.stage_name === selectedPipeline.current_stage,
+    );
+    return cp?.agent_used || null;
+  }, [selectedPipeline, checkpoints]);
+
+  const isTerminal = selectedPipeline
+    ? ["done", "failed", "aborted"].includes(selectedPipeline.status)
+    : true;
+
   const handlePipelineAction = async (
     action: PipelineActionRequest["action"],
   ) => {
@@ -203,6 +216,12 @@ const PipelineView = ({ apiClient, projectId, refreshToken }: PipelineViewProps)
       if (action === "reject") {
         body.stage = selectedPipeline.current_stage || undefined;
         body.message = trimmedMessage || "人工驳回，请调整后重试。";
+      } else if (action === "change_role") {
+        body.role = changeRoleValue.trim();
+        body.stage = selectedPipeline.current_stage || undefined;
+        if (trimmedMessage) {
+          body.message = trimmedMessage;
+        }
       } else if (trimmedMessage) {
         body.message = trimmedMessage;
       }
@@ -308,8 +327,9 @@ const PipelineView = ({ apiClient, projectId, refreshToken }: PipelineViewProps)
               />
             </div>
             <p className="mt-2 text-xs text-slate-600">
-              stage={selectedPipeline.current_stage || "-"} · 进度 {progress.stageText} ·{" "}
-              {progress.percentage}%
+              stage={selectedPipeline.current_stage || "-"}
+              {currentStageAgent ? ` · agent=${currentStageAgent}` : ""} · 进度{" "}
+              {progress.stageText} · {progress.percentage}%
             </p>
           </>
         )}
@@ -380,7 +400,7 @@ const PipelineView = ({ apiClient, projectId, refreshToken }: PipelineViewProps)
                   className="rounded border border-slate-200 px-2 py-1"
                 >
                   <span className="font-medium">{checkpoint.stage_name}</span> ·{" "}
-                  <span>{checkpoint.status}</span> · retry={checkpoint.retry_count}
+                  <span>{checkpoint.status}</span> · agent={checkpoint.agent_used || "-"} · retry={checkpoint.retry_count}
                 </li>
               ))}
             </ul>
@@ -391,7 +411,7 @@ const PipelineView = ({ apiClient, projectId, refreshToken }: PipelineViewProps)
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="text-sm font-semibold">人工动作</h3>
         <p className="mt-1 text-xs text-slate-500">
-          最小可用：Approve/Reject/Skip/Abort，调用 Pipeline Action API。
+          Pipeline Action API：审批、流程控制与角色切换。
         </p>
         <label htmlFor="pipeline-action-message" className="mt-2 block text-xs text-slate-700">
           动作备注（可选）
@@ -445,6 +465,69 @@ const PipelineView = ({ apiClient, projectId, refreshToken }: PipelineViewProps)
             }}
           >
             Abort
+          </button>
+        </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <button
+            type="button"
+            className="rounded-md border border-sky-300 px-3 py-2 text-sm text-sky-700 disabled:opacity-50"
+            disabled={!selectedPipeline || actionLoading || selectedPipeline?.status !== "running"}
+            onClick={() => {
+              void handlePipelineAction("pause");
+            }}
+          >
+            Pause
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-sky-300 px-3 py-2 text-sm text-sky-700 disabled:opacity-50"
+            disabled={!selectedPipeline || actionLoading || selectedPipeline?.status !== "paused"}
+            onClick={() => {
+              void handlePipelineAction("resume");
+            }}
+          >
+            Resume
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-indigo-300 px-3 py-2 text-sm text-indigo-700 disabled:opacity-50"
+            disabled={
+              !selectedPipeline ||
+              actionLoading ||
+              (selectedPipeline?.status !== "failed" && selectedPipeline?.status !== "done")
+            }
+            onClick={() => {
+              void handlePipelineAction("rerun");
+            }}
+          >
+            Rerun
+          </button>
+        </div>
+        <div className="mt-2 flex gap-2">
+          <input
+            id="pipeline-change-role"
+            className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            placeholder="目标角色名（如 claude, codex）"
+            value={changeRoleValue}
+            onChange={(event) => {
+              setChangeRoleValue(event.target.value);
+            }}
+            disabled={!selectedPipeline || actionLoading || isTerminal}
+          />
+          <button
+            type="button"
+            className="rounded-md border border-violet-300 px-3 py-2 text-sm text-violet-700 disabled:opacity-50"
+            disabled={
+              !selectedPipeline ||
+              actionLoading ||
+              isTerminal ||
+              changeRoleValue.trim().length === 0
+            }
+            onClick={() => {
+              void handlePipelineAction("change_role");
+            }}
+          >
+            Change Role
           </button>
         </div>
         {actionNotice ? (

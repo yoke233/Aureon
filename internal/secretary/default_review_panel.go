@@ -14,10 +14,10 @@ const (
 	defaultFeasibilityReviewerName  = "feasibility"
 )
 
-// NewDefaultReviewPanel builds a runnable review panel with rule-based reviewers.
+// NewDefaultReviewOrchestrator builds a runnable review orchestrator with rule-based reviewers.
 // This keeps P2 production path working without requiring external AI backends.
-func NewDefaultReviewPanel(store ReviewStore) *ReviewPanel {
-	return &ReviewPanel{
+func NewDefaultReviewOrchestrator(store ReviewStore) *ReviewOrchestrator {
+	return &ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
 			newCompletenessReviewer(),

@@ -166,9 +166,9 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 		if secretary.ReviewGatePlugin != nil {
 			cfg.Secretary.ReviewGatePlugin = *secretary.ReviewGatePlugin
 		}
-		if panel := secretary.ReviewPanel; panel != nil {
+		if panel := secretary.ReviewOrchestrator; panel != nil {
 			if panel.MaxRounds != nil {
-				cfg.Secretary.ReviewPanel.MaxRounds = *panel.MaxRounds
+				cfg.Secretary.ReviewOrchestrator.MaxRounds = *panel.MaxRounds
 			}
 		}
 		if dag := secretary.DAGScheduler; dag != nil {

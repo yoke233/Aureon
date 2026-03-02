@@ -25,7 +25,7 @@ type runState struct {
 	terminalErr error
 }
 
-// AIReviewGate runs secretary.ReviewPanel asynchronously and exposes polling/cancel APIs.
+// AIReviewGate runs secretary.ReviewOrchestrator asynchronously and exposes polling/cancel APIs.
 type AIReviewGate struct {
 	store core.Store
 	panel reviewPanel
@@ -104,7 +104,7 @@ func (g *AIReviewGate) Submit(ctx context.Context, plan *core.TaskPlan) (string,
 		return "", errors.New("review-ai-panel submit: plan is nil")
 	}
 	if g.panel == nil {
-		return "", errors.New("review-ai-panel submit: review panel is nil")
+		return "", errors.New("review-ai-panel submit: review orchestrator is nil")
 	}
 
 	planID := strings.TrimSpace(plan.ID)

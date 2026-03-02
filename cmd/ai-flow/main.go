@@ -114,7 +114,7 @@ Usage:
   ai-flow pipeline start <pipeline-id>
   ai-flow pipeline status <pipeline-id>
   ai-flow pipeline list [project-id]
-  ai-flow pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_agent|abort|pause|resume> [--stage <stage>] [--agent <agent>] [--message <text>]
+  ai-flow pipeline action <pipeline-id> <approve|reject|modify|skip|rerun|change_role|abort|pause|resume> [--stage <stage>] [--role <role>] [--message <text>]
   ai-flow scheduler run
   ai-flow scheduler once
   ai-flow github replay --delivery-id <id>

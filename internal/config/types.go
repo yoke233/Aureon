@@ -60,12 +60,12 @@ type SchedulerConfig struct {
 }
 
 type SecretaryConfig struct {
-	ReviewGatePlugin string             `yaml:"review_gate_plugin"`
-	ReviewPanel      ReviewPanelConfig  `yaml:"review_panel"`
-	DAGScheduler     DAGSchedulerConfig `yaml:"dag_scheduler"`
+	ReviewGatePlugin   string                   `yaml:"review_gate_plugin"`
+	ReviewOrchestrator ReviewOrchestratorConfig `yaml:"review_orchestrator"`
+	DAGScheduler       DAGSchedulerConfig       `yaml:"dag_scheduler"`
 }
 
-type ReviewPanelConfig struct {
+type ReviewOrchestratorConfig struct {
 	MaxRounds int `yaml:"max_rounds"`
 }
 
@@ -167,12 +167,12 @@ type SchedulerLayer struct {
 }
 
 type SecretaryLayer struct {
-	ReviewGatePlugin *string            `yaml:"review_gate_plugin"`
-	ReviewPanel      *ReviewPanelLayer  `yaml:"review_panel"`
-	DAGScheduler     *DAGSchedulerLayer `yaml:"dag_scheduler"`
+	ReviewGatePlugin   *string                  `yaml:"review_gate_plugin"`
+	ReviewOrchestrator *ReviewOrchestratorLayer `yaml:"review_orchestrator"`
+	DAGScheduler       *DAGSchedulerLayer       `yaml:"dag_scheduler"`
 }
 
-type ReviewPanelLayer struct {
+type ReviewOrchestratorLayer struct {
 	MaxRounds *int `yaml:"max_rounds"`
 }
 

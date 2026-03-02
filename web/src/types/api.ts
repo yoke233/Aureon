@@ -103,13 +103,13 @@ export interface PipelineActionRequest {
     | "modify"
     | "skip"
     | "rerun"
-    | "change_agent"
+    | "change_role"
     | "abort"
     | "pause"
     | "resume";
   stage?: string;
   message?: string;
-  agent?: string;
+  role?: string;
 }
 
 export interface PipelineActionResponse {

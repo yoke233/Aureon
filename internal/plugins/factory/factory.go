@@ -176,7 +176,7 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 	}
 	reviewGateRaw, err := reviewGateModule.Factory(map[string]any{
 		"store":      storePlugin.Store(),
-		"max_rounds": effective.Secretary.ReviewPanel.MaxRounds,
+		"max_rounds": effective.Secretary.ReviewOrchestrator.MaxRounds,
 		"github":     effective.GitHub,
 	})
 	if err != nil {
@@ -334,7 +334,7 @@ func newDefaultRegistry() (*core.Registry, error) {
 					return nil, fmt.Errorf("%s requires valid store dependency", defaultReviewGatePlugin)
 				}
 
-				panel := secretary.NewDefaultReviewPanel(store)
+				panel := secretary.NewDefaultReviewOrchestrator(store)
 				if maxRounds, ok := cfg["max_rounds"].(int); ok && maxRounds > 0 {
 					panel.MaxRounds = maxRounds
 				}

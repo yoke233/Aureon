@@ -112,14 +112,14 @@ type Regenerator interface {
 	Regenerate(ctx context.Context, req RegenerationRequest) (*core.TaskPlan, error)
 }
 
-type ReviewPanel struct {
+type ReviewOrchestrator struct {
 	Store      ReviewStore
 	Reviewers  []Reviewer
 	Aggregator Aggregator
 	MaxRounds  int
 }
 
-func (p *ReviewPanel) Run(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*ReviewResult, error) {
+func (p *ReviewOrchestrator) Run(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*ReviewResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -227,10 +227,10 @@ func (p *ReviewPanel) Run(ctx context.Context, plan *core.TaskPlan, input Review
 		}
 	}
 
-	return nil, errors.New("review panel reached unreachable state")
+	return nil, errors.New("review orchestrator reached unreachable state")
 }
 
-func (p *ReviewPanel) HandleHumanReject(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
+func (p *ReviewOrchestrator) HandleHumanReject(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -238,7 +238,7 @@ func (p *ReviewPanel) HandleHumanReject(ctx context.Context, plan *core.TaskPlan
 		return nil, err
 	}
 	if p == nil {
-		return nil, errors.New("review panel is nil")
+		return nil, errors.New("review orchestrator is nil")
 	}
 	if p.Store == nil {
 		return nil, errors.New("review store is required")
@@ -320,9 +320,9 @@ func (f HumanFeedback) Validate() error {
 	return nil
 }
 
-func (p *ReviewPanel) validateForRun(plan *core.TaskPlan) error {
+func (p *ReviewOrchestrator) validateForRun(plan *core.TaskPlan) error {
 	if p == nil {
-		return errors.New("review panel is nil")
+		return errors.New("review orchestrator is nil")
 	}
 	if p.Store == nil {
 		return errors.New("review store is required")
@@ -334,7 +334,7 @@ func (p *ReviewPanel) validateForRun(plan *core.TaskPlan) error {
 		return errors.New("task plan id is required")
 	}
 	if len(p.Reviewers) != 3 {
-		return fmt.Errorf("review panel requires exactly 3 reviewers, got %d", len(p.Reviewers))
+		return fmt.Errorf("review orchestrator requires exactly 3 reviewers, got %d", len(p.Reviewers))
 	}
 	for i, reviewer := range p.Reviewers {
 		if reviewer == nil {
@@ -369,14 +369,14 @@ func validateStructuredTasks(contractVersion string, tasks []core.TaskItem) erro
 	return nil
 }
 
-func (p *ReviewPanel) effectiveMaxRounds() int {
+func (p *ReviewOrchestrator) effectiveMaxRounds() int {
 	if p == nil || p.MaxRounds <= 0 {
 		return defaultReviewMaxRounds
 	}
 	return p.MaxRounds
 }
 
-func (p *ReviewPanel) runReviewersParallel(ctx context.Context, plan *core.TaskPlan, round int, input ReviewInput) ([]core.ReviewVerdict, error) {
+func (p *ReviewOrchestrator) runReviewersParallel(ctx context.Context, plan *core.TaskPlan, round int, input ReviewInput) ([]core.ReviewVerdict, error) {
 	type reviewResult struct {
 		index   int
 		verdict core.ReviewVerdict
@@ -426,7 +426,7 @@ func (p *ReviewPanel) runReviewersParallel(ctx context.Context, plan *core.TaskP
 	return verdicts, nil
 }
 
-func (p *ReviewPanel) persistReviewerRecords(planID string, round int, verdicts []core.ReviewVerdict) error {
+func (p *ReviewOrchestrator) persistReviewerRecords(planID string, round int, verdicts []core.ReviewVerdict) error {
 	for _, verdict := range verdicts {
 		score := verdict.Score
 		record := &core.ReviewRecord{
@@ -444,7 +444,7 @@ func (p *ReviewPanel) persistReviewerRecords(planID string, round int, verdicts 
 	return nil
 }
 
-func (p *ReviewPanel) persistAggregatorRecord(planID string, round int, decision AggregatorDecision, verdicts []core.ReviewVerdict) error {
+func (p *ReviewOrchestrator) persistAggregatorRecord(planID string, round int, decision AggregatorDecision, verdicts []core.ReviewVerdict) error {
 	normalizedDecision := normalizeDecision(decision.Decision)
 	record := &core.ReviewRecord{
 		PlanID:   planID,

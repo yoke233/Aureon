@@ -7,9 +7,9 @@ import (
 	"github.com/user/ai-workflow/internal/core"
 )
 
-func TestNewDefaultReviewPanelApproveFlow(t *testing.T) {
+func TestNewDefaultReviewOrchestratorApproveFlow(t *testing.T) {
 	store := newMockReviewStore()
-	panel := NewDefaultReviewPanel(store)
+	panel := NewDefaultReviewOrchestrator(store)
 
 	plan := &core.TaskPlan{
 		ID:         "plan-default-review-approve",
@@ -44,9 +44,9 @@ func TestNewDefaultReviewPanelApproveFlow(t *testing.T) {
 	}
 }
 
-func TestNewDefaultReviewPanelEscalateFlow(t *testing.T) {
+func TestNewDefaultReviewOrchestratorEscalateFlow(t *testing.T) {
 	store := newMockReviewStore()
-	panel := NewDefaultReviewPanel(store)
+	panel := NewDefaultReviewOrchestrator(store)
 
 	plan := &core.TaskPlan{
 		ID:         "plan-default-review-escalate",

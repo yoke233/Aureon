@@ -82,6 +82,10 @@ const fillLocalPathForm = (name: string, repoPath: string): void => {
   });
 };
 
+const openCreatePanel = (): void => {
+  fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+};
+
 describe("ProjectAdminPanel", () => {
   afterEach(() => {
     cleanup();
@@ -102,6 +106,8 @@ describe("ProjectAdminPanel", () => {
       />,
     );
 
+    expect(screen.queryByLabelText("项目来源")).toBeNull();
+    openCreatePanel();
     expect(screen.getByLabelText("项目来源")).toBeTruthy();
     expect(screen.getByLabelText("仓库路径")).toBeTruthy();
     expect(screen.queryByLabelText("Remote URL")).toBeNull();
@@ -118,6 +124,9 @@ describe("ProjectAdminPanel", () => {
     expect(screen.queryByLabelText("仓库路径")).toBeNull();
     expect(screen.getByLabelText("Remote URL")).toBeTruthy();
     expect(screen.getByLabelText("Git Ref（可选）")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭创建项目" }));
+    expect(screen.queryByLabelText("项目来源")).toBeNull();
   });
 
   it("可通过 WS 事件更新创建进度并在成功后回调", async () => {
@@ -137,8 +146,9 @@ describe("ProjectAdminPanel", () => {
       />,
     );
 
+    openCreatePanel();
     fillLocalPathForm("Alpha", "D:/repo/alpha");
-    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交创建请求" }));
 
     await waitFor(() => {
       expect(apiClient.createProjectCreateRequest).toHaveBeenCalledWith({
@@ -195,8 +205,9 @@ describe("ProjectAdminPanel", () => {
       />,
     );
 
+    openCreatePanel();
     fillLocalPathForm("Beta", "D:/repo/beta");
-    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交创建请求" }));
 
     await waitFor(() => {
       expect(apiClient.createProjectCreateRequest).toHaveBeenCalledTimes(1);
@@ -247,8 +258,9 @@ describe("ProjectAdminPanel", () => {
       />,
     );
 
+    openCreatePanel();
     fillLocalPathForm("Gamma", "D:/repo/gamma");
-    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交创建请求" }));
 
     await waitFor(() => {
       expect(apiClient.createProjectCreateRequest).toHaveBeenCalledTimes(1);

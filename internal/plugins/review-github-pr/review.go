@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	ghapi "github.com/google/go-github/v68/github"
-	"github.com/user/ai-workflow/internal/core"
-	githubsvc "github.com/user/ai-workflow/internal/github"
+	"github.com/yoke233/ai-workflow/internal/core"
+	githubsvc "github.com/yoke233/ai-workflow/internal/github"
 )
 
 const reviewerName = "github_pr"

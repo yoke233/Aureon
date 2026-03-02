@@ -10,7 +10,7 @@ import (
 
 	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
 	ghapi "github.com/google/go-github/v68/github"
-	"github.com/user/ai-workflow/internal/config"
+	"github.com/yoke233/ai-workflow/internal/config"
 	"golang.org/x/oauth2"
 )
 

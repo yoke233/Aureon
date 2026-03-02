@@ -27,9 +27,10 @@ type MCPServerConfig struct {
 }
 
 type LoadSessionRequest struct {
-	SessionID string
-	CWD       string
-	Metadata  map[string]string
+	SessionID  string
+	CWD        string
+	MCPServers []MCPServerConfig
+	Metadata   map[string]string
 }
 
 type SessionInfo struct {
@@ -61,28 +62,31 @@ type CancelRequest struct {
 }
 
 type SessionUpdate struct {
-	SessionID string `json:"sessionId"`
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	Status    string `json:"status,omitempty"`
+	SessionID      string `json:"sessionId"`
+	Type           string `json:"type"`
+	Text           string `json:"text,omitempty"`
+	Status         string `json:"status,omitempty"`
+	RawUpdateJSON  string `json:"rawUpdateJson,omitempty"`
+	RawContentJSON string `json:"rawContentJson,omitempty"`
 }
 
 type NewSessionParams struct {
 	CWD        string            `json:"cwd"`
-	MCPServers []MCPServerConfig `json:"mcpServers,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
+	MCPServers []MCPServerConfig `json:"mcpServers"`
+	Metadata   map[string]string `json:"_meta,omitempty"`
 }
 
 type LoadSessionParams struct {
-	SessionID string            `json:"sessionId"`
-	CWD       string            `json:"cwd,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	SessionID  string            `json:"sessionId"`
+	CWD        string            `json:"cwd"`
+	MCPServers []MCPServerConfig `json:"mcpServers"`
+	Metadata   map[string]string `json:"_meta,omitempty"`
 }
 
 type PromptParams struct {
 	SessionID string            `json:"sessionId"`
 	Prompt    []PromptContent   `json:"prompt"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	Metadata  map[string]string `json:"_meta,omitempty"`
 }
 
 type PromptContent struct {
@@ -96,18 +100,27 @@ type CancelParams struct {
 }
 
 func (r NewSessionRequest) ToParams() NewSessionParams {
+	servers := r.MCPServers
+	if servers == nil {
+		servers = []MCPServerConfig{}
+	}
 	return NewSessionParams{
 		CWD:        r.CWD,
-		MCPServers: r.MCPServers,
+		MCPServers: servers,
 		Metadata:   r.Metadata,
 	}
 }
 
 func (r LoadSessionRequest) ToParams() LoadSessionParams {
+	servers := r.MCPServers
+	if servers == nil {
+		servers = []MCPServerConfig{}
+	}
 	return LoadSessionParams{
-		SessionID: r.SessionID,
-		CWD:       r.CWD,
-		Metadata:  r.Metadata,
+		SessionID:  r.SessionID,
+		CWD:        r.CWD,
+		MCPServers: servers,
+		Metadata:   r.Metadata,
 	}
 }
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 func RenderPipelineList(pipelines []core.Pipeline, cursor int, styleStatus map[string]func(string) string) string {

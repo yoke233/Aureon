@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/user/ai-workflow/internal/core"
-	gitops "github.com/user/ai-workflow/internal/git"
+	"github.com/yoke233/ai-workflow/internal/core"
+	gitops "github.com/yoke233/ai-workflow/internal/git"
 )
 
 type repoHandlers struct {

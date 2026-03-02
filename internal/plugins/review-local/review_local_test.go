@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/user/ai-workflow/internal/core"
-	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+	"github.com/yoke233/ai-workflow/internal/core"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 )
 
 func TestLocalReviewGate_NameInitClose(t *testing.T) {

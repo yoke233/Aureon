@@ -3,9 +3,9 @@ package reviewgithubpr
 import (
 	"fmt"
 
-	"github.com/user/ai-workflow/internal/config"
-	"github.com/user/ai-workflow/internal/core"
-	githubsvc "github.com/user/ai-workflow/internal/github"
+	"github.com/yoke233/ai-workflow/internal/config"
+	"github.com/yoke233/ai-workflow/internal/core"
+	githubsvc "github.com/yoke233/ai-workflow/internal/github"
 )
 
 func Module() core.PluginModule {

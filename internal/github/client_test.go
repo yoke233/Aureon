@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/ai-workflow/internal/config"
+	"github.com/yoke233/ai-workflow/internal/config"
 )
 
 func TestNewGitHubClient_PAT_Success(t *testing.T) {

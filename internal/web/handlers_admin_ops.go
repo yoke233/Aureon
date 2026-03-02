@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/user/ai-workflow/internal/core"
-	ghwebhook "github.com/user/ai-workflow/internal/github"
-	"github.com/user/ai-workflow/internal/observability"
+	"github.com/yoke233/ai-workflow/internal/core"
+	ghwebhook "github.com/yoke233/ai-workflow/internal/github"
+	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
 type adminOpsHandlers struct {

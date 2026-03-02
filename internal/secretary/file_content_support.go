@@ -3,7 +3,7 @@ package secretary
 import (
 	"strings"
 
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 const waitReasonParseFailed = core.WaitParseFailed

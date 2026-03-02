@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/user/ai-workflow/internal/observability"
+	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
 // ContextExtractor extracts context-level structured fields.

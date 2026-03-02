@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/eventbus"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/eventbus"
 )
 
 func TestWebhookDispatcher_IssueEvents_SerializedByIssueNumber(t *testing.T) {

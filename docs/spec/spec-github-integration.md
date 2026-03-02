@@ -12,8 +12,8 @@ GitHub 集成通过两个插件槽位接入系统，不侵入核心逻辑：
 
 | 插件槽位 | GitHub 实现 | 默认实现（无 GitHub） | 职责 |
 |---------|------------|---------------------|------|
-| Tracker | `tracker-github` | `tracker-local`（空实现） | 将 TaskItem 同步为 GitHub Issue + Label 管理 |
-| ReviewGate | `review-github-pr` | `review-ai-panel`（Multi-Agent 审核） | 将 TaskPlan 审核通过 GitHub PR 进行 |
+| Tracker | `tracker-github` | `tracker-local`（空实现） | 将内部 Issue 同步为 GitHub Issue + Label 管理 |
+| ReviewGate | `review-github-pr` | `review-ai-panel`（两阶段 AI 审核） | 将 Issue 审核通过 GitHub PR 进行 |
 
 > 注：`tracker-linear` 作为 Tracker 扩展实现属于 P4 范围，见 [spec-overview.md](spec-overview.md) 的插件槽位与路线图；本文件聚焦 GitHub 场景，不展开 Linear 细节。
 
@@ -25,13 +25,13 @@ GitHub 集成通过两个插件槽位接入系统，不侵入核心逻辑：
 
 | 功能 | 无 GitHub | 有 GitHub |
 |------|----------|----------|
-| 任务存储 | SQLite `task_items` 表 | SQLite + 同步为 GitHub Issue |
+| Issue 存储 | SQLite `issues` 表 | SQLite + 同步为 GitHub Issue |
 | 依赖管理 | DAG Scheduler 本地管理 | 本地管理 + Label 镜像（`depends-on-#N`、`ready`、`blocked`） |
-| 审核方式 | Multi-Agent AI 审核 | 可选：AI 审核 或 GitHub PR 审核 |
+| 审核方式 | 两阶段 AI 审核 | 可选：AI 审核 或 GitHub PR 审核 |
 | 状态可视化 | Workbench Board View | Workbench + GitHub Issue 标签 |
 | Pipeline 触发 | DAG Scheduler 自动创建 | DAG Scheduler 或 GitHub Issue 事件触发 |
 
-**GitHub Issue 和 Label 是 TaskItem 状态的镜像，不是 source of truth。** DAG Scheduler 在本地完成所有调度决策后，通过 Tracker 插件（`tracker-github`）将状态同步到 GitHub。
+**GitHub Issue 和 Label 是内部 Issue 状态的镜像，不是 source of truth。** DAG Scheduler 在本地完成所有调度决策后，通过 Tracker 插件（`tracker-github`）将状态同步到 GitHub。
 
 ## 一、Webhook 监听
 
@@ -93,7 +93,7 @@ GitHub Issue 可以在两种模式下触发执行：
 外部创建的 GitHub Issue（人工创建或其他工具创建），直接映射为单个 Pipeline。适合简单任务。
 
 **模式 B — Tracker 同步的 Issue（经过 Secretary Layer）：**
-由 `tracker-github` 插件从 TaskItem 同步创建的 Issue。TaskItem 来源于用户在 Chat 中指示 Secretary 生成计划文件后，经用户勾选、Plan Parser 解析得到的结构化任务。这类 Issue 的生命周期由 DAG Scheduler 管理，GitHub 上的状态变更会通过 Webhook 回传给 Scheduler。详见 [spec-secretary-layer.md](spec-secretary-layer.md)。
+由 `tracker-github` 插件从内部 Issue 同步创建的 GitHub Issue。内部 Issue 来源于用户在 Chat 中指示 Secretary 生成计划文件后，经两阶段 AI 审核（Per-Issue 审核 + Cross-Issue 依赖分析）通过的需求。这类 Issue 的生命周期由 DAG Scheduler 管理，GitHub 上的状态变更会通过 Webhook 回传给 Scheduler。详见 [spec-secretary-layer.md](spec-secretary-layer.md)。
 
 ### 模式 A 的触发条件
 
@@ -422,7 +422,7 @@ github:
 
 ## 八、tracker-github 插件实现
 
-`tracker-github` 是 Tracker 接口的 GitHub 实现，负责将 TaskItem 状态镜像到 GitHub Issue：
+`tracker-github` 是 Tracker 接口的 GitHub 实现，负责将内部 Issue 状态镜像到 GitHub Issue：
 
 ```go
 // tracker-github 实现 Tracker 接口
@@ -432,22 +432,22 @@ type GitHubTracker struct {
     repo   string
 }
 
-func (t *GitHubTracker) CreateTask(ctx context.Context, item *TaskItem) (string, error) {
+func (t *GitHubTracker) CreateIssue(ctx context.Context, issue *Issue) (string, error) {
     // 创建 GitHub Issue
-    // Issue title = item.Title
-    // Issue body = item.Description
-    // Labels = item.Labels + 依赖标签 (depends-on-#N) + 状态标签 (ready/blocked)
-    // 返回 Issue number 作为 externalID
+    // Issue title = issue.Title
+    // Issue body = issue.Body + 附件摘要
+    // Labels = issue.Labels + 依赖标签 (depends-on-#N) + 状态标签 (ready/blocked)
+    // 返回 GitHub Issue number 作为 ExternalID
 }
 
-func (t *GitHubTracker) UpdateStatus(ctx context.Context, externalID string, status TaskItemStatus) error {
+func (t *GitHubTracker) UpdateStatus(ctx context.Context, externalID string, status IssueStatus) error {
     // 更新 Issue 标签：移除旧状态标签，添加新状态标签
-    // done → 关闭 Issue
+    // done → 关闭 GitHub Issue
     // failed → 添加 "failed" 标签
 }
 
-func (t *GitHubTracker) SyncDependencies(ctx context.Context, item *TaskItem, allItems []TaskItem) error {
-    // 为 Issue 添加 depends-on-#N 标签（N = 上游 Issue number）
+func (t *GitHubTracker) SyncDependencies(ctx context.Context, issue *Issue, allIssues []*Issue) error {
+    // 为 GitHub Issue 添加 depends-on-#N 标签（N = 上游 GitHub Issue number）
     // 无依赖 → 添加 "ready" 标签
     // 有未完成依赖 → 添加 "blocked" 标签
 }
@@ -462,7 +462,7 @@ status: in-progress         ← 执行中
 status: done                ← 完成
 status: failed              ← 失败
 depends-on-#123             ← 依赖 Issue #123
-plan: {plan-id}             ← 所属 TaskPlan
+session: {session-id}       ← 所属会话批次
 template: standard          ← 使用的 Pipeline 模板
 ```
 
@@ -472,7 +472,7 @@ GitHub 集成完全关闭时（默认）：
 
 - 所有功能通过 Workbench / TUI 完成
 - Tracker 使用 `tracker-local`（空实现），不同步到外部系统
-- ReviewGate 使用 `review-ai-panel`（Multi-Agent 审核）
+- ReviewGate 使用 `review-ai-panel`（两阶段 AI 审核）
 - 执行日志和结果保存在本地 SQLite Store
 
 GitHub 集成启用但不可达时：

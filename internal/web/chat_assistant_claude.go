@@ -12,6 +12,8 @@ type ChatAssistantRequest struct {
 	Role           string
 	WorkDir        string
 	AgentSessionID string
+	ProjectID      string
+	ChatSessionID  string
 }
 
 // ChatAssistantResponse contains assistant content and provider session identity.
@@ -23,6 +25,10 @@ type ChatAssistantResponse struct {
 // ChatAssistant provides multi-turn chat completion for /chat APIs.
 type ChatAssistant interface {
 	Reply(ctx context.Context, req ChatAssistantRequest) (ChatAssistantResponse, error)
+}
+
+type ChatAssistantCanceler interface {
+	CancelChat(chatSessionID string) error
 }
 
 // ClaudeChatAssistant starts ACP sessions through role-driven resolver and returns one reply turn.

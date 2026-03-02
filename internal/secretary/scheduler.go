@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/engine"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/engine"
 )
 
 type eventSubscriber interface {

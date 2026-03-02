@@ -20,6 +20,11 @@ const (
 	// Secretary lifecycle events.
 	EventSecretaryThinking     EventType = "secretary_thinking"
 	EventSecretaryFilesChanged EventType = "secretary_files_changed"
+	EventChatRunStarted        EventType = "chat_run_started"
+	EventChatRunUpdate         EventType = "chat_run_update"
+	EventChatRunCompleted      EventType = "chat_run_completed"
+	EventChatRunFailed         EventType = "chat_run_failed"
+	EventChatRunCancelled      EventType = "chat_run_cancelled"
 	EventPlanCreated           EventType = "plan_created"
 	EventPlanReviewing         EventType = "plan_reviewing"
 	EventReviewAgentDone       EventType = "review_agent_done"

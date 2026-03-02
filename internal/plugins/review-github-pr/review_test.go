@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	ghapi "github.com/google/go-github/v68/github"
-	"github.com/user/ai-workflow/internal/core"
-	ghsvc "github.com/user/ai-workflow/internal/github"
-	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+	"github.com/yoke233/ai-workflow/internal/core"
+	ghsvc "github.com/yoke233/ai-workflow/internal/github"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 )
 
 func TestGitHubPRReview_Submit_CreatesReviewPR(t *testing.T) {

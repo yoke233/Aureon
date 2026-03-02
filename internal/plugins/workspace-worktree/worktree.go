@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/ai-workflow/internal/core"
-	gitops "github.com/user/ai-workflow/internal/git"
+	"github.com/yoke233/ai-workflow/internal/core"
+	gitops "github.com/yoke233/ai-workflow/internal/git"
 )
 
 type WorktreePlugin struct{}

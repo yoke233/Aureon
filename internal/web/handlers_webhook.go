@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/engine"
-	"github.com/user/ai-workflow/internal/eventbus"
-	ghwebhook "github.com/user/ai-workflow/internal/github"
-	"github.com/user/ai-workflow/internal/observability"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/engine"
+	"github.com/yoke233/ai-workflow/internal/eventbus"
+	ghwebhook "github.com/yoke233/ai-workflow/internal/github"
+	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
 type webhookHandlers struct {

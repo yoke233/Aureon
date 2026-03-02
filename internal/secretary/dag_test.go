@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestDAGBuildValidateReadyNodes(t *testing.T) {

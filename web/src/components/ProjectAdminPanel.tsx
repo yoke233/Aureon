@@ -104,6 +104,7 @@ const ProjectAdminPanel = ({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [failureMessage, setFailureMessage] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
 
   const activeRequestIdRef = useRef<string | null>(null);
   const doneNotifiedRef = useRef(false);
@@ -331,117 +332,143 @@ const ProjectAdminPanel = ({
 
   return (
     <section className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <h2 className="text-sm font-semibold text-slate-900">创建项目</h2>
-      <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="create-source-type" className="text-xs font-medium text-slate-700">
-            项目来源
-          </label>
-          <select
-            id="create-source-type"
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={sourceType}
-            onChange={(event) => {
-              setSourceType(event.target.value as ProjectSourceType);
-              setFailureMessage(null);
-            }}
-            disabled={isBusy}
-          >
-            <option value="local_path">本地已有仓库（local_path）</option>
-            <option value="local_new">创建本地新仓库（local_new）</option>
-            <option value="github_clone">从 GitHub 克隆（github_clone）</option>
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label htmlFor="create-project-name" className="text-xs font-medium text-slate-700">
-            项目名称
-          </label>
-          <input
-            id="create-project-name"
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value);
-              setFailureMessage(null);
-            }}
-            placeholder="例如：demo-project"
-            disabled={isBusy}
-          />
-        </div>
-
-        {sourceType === "local_path" ? (
-          <div className="flex flex-col gap-1 md:col-span-2">
-            <label htmlFor="create-repo-path" className="text-xs font-medium text-slate-700">
-              仓库路径
-            </label>
-            <input
-              id="create-repo-path"
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-              value={repoPath}
-              onChange={(event) => {
-                setRepoPath(event.target.value);
-                setFailureMessage(null);
-              }}
-              placeholder="例如：D:/repo/demo-project"
-              disabled={isBusy}
-            />
-          </div>
-        ) : null}
-
-        {sourceType === "github_clone" ? (
-          <>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="create-remote-url" className="text-xs font-medium text-slate-700">
-                Remote URL
-              </label>
-              <input
-                id="create-remote-url"
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                value={remoteUrl}
-                onChange={(event) => {
-                  setRemoteUrl(event.target.value);
-                  setFailureMessage(null);
-                }}
-                placeholder="例如：https://github.com/octocat/hello-world.git 或 git@github.com:octocat/hello-world.git"
-                disabled={isBusy}
-              />
-            </div>
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label htmlFor="create-github-ref" className="text-xs font-medium text-slate-700">
-                Git Ref（可选）
-              </label>
-              <input
-                id="create-github-ref"
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                value={ref}
-                onChange={(event) => {
-                  setRef(event.target.value);
-                  setFailureMessage(null);
-                }}
-                placeholder="例如：main / v1.2.0 / 8f2a3bc"
-                disabled={isBusy}
-              />
-            </div>
-          </>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-3 md:col-span-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-900">项目管理</h2>
+        {createPanelOpen ? (
           <button
-            type="submit"
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!canSubmit}
+            type="button"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            onClick={() => {
+              setCreatePanelOpen(false);
+            }}
+          >
+            关闭创建项目
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800"
+            onClick={() => {
+              setCreatePanelOpen(true);
+            }}
           >
             创建项目
           </button>
-          {requestId ? (
-            <span className="text-xs text-slate-600">请求 ID: {requestId}</span>
+        )}
+      </div>
+
+      {createPanelOpen ? (
+        <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="create-source-type" className="text-xs font-medium text-slate-700">
+              项目来源
+            </label>
+            <select
+              id="create-source-type"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={sourceType}
+              onChange={(event) => {
+                setSourceType(event.target.value as ProjectSourceType);
+                setFailureMessage(null);
+              }}
+              disabled={isBusy}
+            >
+              <option value="local_path">本地已有仓库（local_path）</option>
+              <option value="local_new">创建本地新仓库（local_new）</option>
+              <option value="github_clone">从 GitHub 克隆（github_clone）</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor="create-project-name" className="text-xs font-medium text-slate-700">
+              项目名称
+            </label>
+            <input
+              id="create-project-name"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                setFailureMessage(null);
+              }}
+              placeholder="例如：demo-project"
+              disabled={isBusy}
+            />
+          </div>
+
+          {sourceType === "local_path" ? (
+            <div className="flex flex-col gap-1 md:col-span-2">
+              <label htmlFor="create-repo-path" className="text-xs font-medium text-slate-700">
+                仓库路径
+              </label>
+              <input
+                id="create-repo-path"
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                value={repoPath}
+                onChange={(event) => {
+                  setRepoPath(event.target.value);
+                  setFailureMessage(null);
+                }}
+                placeholder="例如：D:/repo/demo-project"
+                disabled={isBusy}
+              />
+            </div>
           ) : null}
-          {phase === "pending" ? (
-            <span className="text-xs text-slate-600">等待中（WS: {wsStatus}）</span>
+
+          {sourceType === "github_clone" ? (
+            <>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="create-remote-url" className="text-xs font-medium text-slate-700">
+                  Remote URL
+                </label>
+                <input
+                  id="create-remote-url"
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={remoteUrl}
+                  onChange={(event) => {
+                    setRemoteUrl(event.target.value);
+                    setFailureMessage(null);
+                  }}
+                  placeholder="例如：https://github.com/octocat/hello-world.git 或 git@github.com:octocat/hello-world.git"
+                  disabled={isBusy}
+                />
+              </div>
+              <div className="flex flex-col gap-1 md:col-span-2">
+                <label htmlFor="create-github-ref" className="text-xs font-medium text-slate-700">
+                  Git Ref（可选）
+                </label>
+                <input
+                  id="create-github-ref"
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  value={ref}
+                  onChange={(event) => {
+                    setRef(event.target.value);
+                    setFailureMessage(null);
+                  }}
+                  placeholder="例如：main / v1.2.0 / 8f2a3bc"
+                  disabled={isBusy}
+                />
+              </div>
+            </>
           ) : null}
-        </div>
-      </form>
+
+          <div className="flex flex-wrap items-center gap-3 md:col-span-2">
+            <button
+              type="submit"
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!canSubmit}
+            >
+              提交创建请求
+            </button>
+            {requestId ? (
+              <span className="text-xs text-slate-600">请求 ID: {requestId}</span>
+            ) : null}
+            {phase === "pending" ? (
+              <span className="text-xs text-slate-600">等待中（WS: {wsStatus}）</span>
+            ) : null}
+          </div>
+        </form>
+      ) : null}
 
       {statusMessage ? (
         <p className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">

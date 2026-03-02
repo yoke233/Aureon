@@ -49,12 +49,9 @@ type RoleBindings struct {
     Pipeline struct {
         StageRoles map[string]string // stage -> role_id
     }
-    ReviewOrchestrator struct {
-        Reviewers  map[string]string // completeness/dependency/feasibility -> role_id
-        Aggregator string            // role_id
-    }
-    PlanParser struct {
-        Role string
+    DemandReview struct {
+        Reviewer string // demand_reviewer role_id
+        Analyzer string // dependency_analyzer role_id
     }
 }
 ```
@@ -64,7 +61,7 @@ type RoleBindings struct {
 - `role.capabilities` 必须是 `agent.capabilities_max` 的子集
 - Session 池 key 必须包含 `role_id`，禁止不同角色共享同一 session
 - 任意角色复用失败时，统一回退链路：`LoadSession -> NewSession`
-- 角色默认可预置：`secretary`、`worker`、`reviewer`、`aggregator`、`plan_parser`
+- 角色默认可预置：`secretary`、`worker`、`reviewer`、`demand_reviewer`、`dependency_analyzer`
 
 ## 二、ACP Client 设计
 
@@ -180,8 +177,8 @@ AcquireSession -> Prompt -> 处理 session/update -> stopReason=end_turn -> Rele
 | `secretary` | 复用 + 优先 LoadSession | 支持多轮对话与项目重开恢复 |
 | `worker` | 复用 | 减少 implement/fixup 上下文重建 |
 | `reviewer` | 复用 + reset_prompt | 保持审查连续性并降低漂移 |
-| `aggregator` | 复用 + reset_prompt | 保持多轮聚合上下文 |
-| `plan_parser` | 一次性 | 单一转换任务，结束即回收 |
+| `demand_reviewer` | 一次性 | Per-Issue 独立审查，结束即回收 |
+| `dependency_analyzer` | 一次性 | Cross-Issue 依赖分析，结束即回收 |
 
 ## 六、权限模型
 
@@ -201,8 +198,7 @@ AcquireSession -> Prompt -> 处理 session/update -> stopReason=end_turn -> Rele
 
 - Pipeline Stage：按 `role_bindings.pipeline.stage_roles` 取 `role_id` 执行 ACP Prompt
 - Secretary：按 `role_bindings.secretary.role` 启动持久会话
-- Review Orchestrator：reviewers/aggregator 均按 `role_bindings.review_orchestrator` 执行
-- Plan Parser：按 `role_bindings.plan_parser.role` 执行一次性调用
+- Demand Review：reviewer/analyzer 均按 `role_bindings.demand_review` 执行一次性调用
 
 以上调用方统一只依赖 `role_id`，由 RoleResolver 解算到 `AgentProfile + RoleProfile`。
 
@@ -218,16 +214,13 @@ AcquireSession -> Prompt -> 处理 session/update -> stopReason=end_turn -> Rele
 - `configs/prompts/fixup.tmpl`
 - `configs/prompts/e2e_test.tmpl`
 - `configs/prompts/secretary_system.tmpl`
-- `configs/prompts/plan_parser.tmpl`
-- `configs/prompts/review_completeness.tmpl`
-- `configs/prompts/review_dependency.tmpl`
-- `configs/prompts/review_feasibility.tmpl`
-- `configs/prompts/review_aggregator.tmpl`
+- `configs/prompts/demand_review.tmpl`
+- `configs/prompts/dependency_analysis.tmpl`
 
 ## 九、验收标准
 
 - `internal/acpclient` 提供完整 API：`New/Initialize/NewSession/LoadSession/Prompt/Cancel/Close`
 - 配置层完整支持 `agents + roles + role_bindings`
-- Pipeline、Secretary、Review Orchestrator、Plan Parser 均按 `role_id` 调用 ACP
+- Pipeline、Secretary、Demand Review 均按 `role_id` 调用 ACP
 - 文件变更事实来源为 `HandleWriteFile`，不依赖 stdout 推断
 - 全链路具备 `LoadSession -> NewSession` 恢复能力

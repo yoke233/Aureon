@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/ai-workflow/internal/observability"
+	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
 func TestLogger_InjectsContextAttrs(t *testing.T) {

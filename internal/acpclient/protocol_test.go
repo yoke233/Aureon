@@ -1,6 +1,10 @@
 package acpclient
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestPromptRequestMetadataIncludesRole(t *testing.T) {
 	req := PromptRequest{
@@ -30,5 +34,36 @@ func TestNewSessionRequestToParamsPreservesMCPServers(t *testing.T) {
 	}
 	if params.MCPServers[0].Name != "query" {
 		t.Fatalf("expected mcp server name query, got %q", params.MCPServers[0].Name)
+	}
+}
+
+func TestNewSessionRequestToParamsAlwaysIncludesMCPServersField(t *testing.T) {
+	req := NewSessionRequest{
+		CWD: "D:/project/ai-workflow",
+	}
+	params := req.ToParams()
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params failed: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"mcpServers":[]`) {
+		t.Fatalf("expected mcpServers empty array, got %s", text)
+	}
+}
+
+func TestLoadSessionRequestToParamsAlwaysIncludesMCPServersField(t *testing.T) {
+	req := LoadSessionRequest{
+		SessionID: "sid-1",
+		CWD:       "D:/project/ai-workflow",
+	}
+	params := req.ToParams()
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params failed: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"mcpServers":[]`) {
+		t.Fatalf("expected mcpServers empty array, got %s", text)
 	}
 }

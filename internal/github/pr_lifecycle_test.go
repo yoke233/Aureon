@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/ai-workflow/internal/core"
-	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+	"github.com/yoke233/ai-workflow/internal/core"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 )
 
 func TestPRLifecycle_ImplementComplete_CreatesDraftPR(t *testing.T) {

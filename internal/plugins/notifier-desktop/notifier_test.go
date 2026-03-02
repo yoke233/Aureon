@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestDesktopNotifier_NameInitClose(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	ghapi "github.com/google/go-github/v68/github"
-	"github.com/user/ai-workflow/internal/core"
-	ghsvc "github.com/user/ai-workflow/internal/github"
-	scmlocalgit "github.com/user/ai-workflow/internal/plugins/scm-local-git"
+	"github.com/yoke233/ai-workflow/internal/core"
+	ghsvc "github.com/yoke233/ai-workflow/internal/github"
+	scmlocalgit "github.com/yoke233/ai-workflow/internal/plugins/scm-local-git"
 )
 
 var _ core.SCM = (*GitHubSCM)(nil)

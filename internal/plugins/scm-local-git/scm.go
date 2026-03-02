@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/user/ai-workflow/internal/core"
-	gitops "github.com/user/ai-workflow/internal/git"
+	"github.com/yoke233/ai-workflow/internal/core"
+	gitops "github.com/yoke233/ai-workflow/internal/git"
 )
 
 var _ core.SCM = (*LocalGitSCM)(nil)

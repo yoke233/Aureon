@@ -116,6 +116,7 @@ func (s *server) handlePrompt(msg envelope) error {
 			Text string `json:"text"`
 		} `json:"prompt"`
 		Metadata map[string]string `json:"metadata"`
+		Meta     map[string]string `json:"_meta"`
 	}
 	if err := json.Unmarshal(msg.Params, &req); err != nil {
 		return s.replyError(msg.ID, -32602, "invalid prompt params")
@@ -132,6 +133,9 @@ func (s *server) handlePrompt(msg envelope) error {
 	}
 
 	role := req.Metadata["role_id"]
+	if role == "" {
+		role = req.Meta["role_id"]
+	}
 	text := "FAKE_REPLY"
 	if role != "" {
 		text = text + " role=" + role

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/engine"
-	"github.com/user/ai-workflow/internal/eventbus"
-	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/engine"
+	"github.com/yoke233/ai-workflow/internal/eventbus"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 )
 
 func TestE2E_GitHub_ScenarioA_IssueOpened_PipelineCreate_StatusSync(t *testing.T) {

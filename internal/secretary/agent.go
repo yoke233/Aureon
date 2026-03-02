@@ -15,8 +15,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/user/ai-workflow/internal/acpclient"
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/acpclient"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 const (
@@ -636,20 +636,20 @@ func startSecretarySession(
 	metadata := map[string]string{
 		"role_id": roleID,
 	}
+	effectiveMCPServers := append([]acpclient.MCPServerConfig(nil), mcpServers...)
+	if len(effectiveMCPServers) == 0 {
+		effectiveMCPServers = MCPToolsFromRoleConfig(resolvedRole)
+	}
 	if sessionID := strings.TrimSpace(persistedSessionID); shouldLoadPersistedSecretarySession(resolvedRole.SessionPolicy, sessionID) {
 		loaded, err := client.LoadSession(ctx, acpclient.LoadSessionRequest{
-			SessionID: sessionID,
-			CWD:       trimmedCWD,
-			Metadata:  metadata,
+			SessionID:  sessionID,
+			CWD:        trimmedCWD,
+			MCPServers: effectiveMCPServers,
+			Metadata:   metadata,
 		})
 		if err == nil && strings.TrimSpace(loaded.SessionID) != "" {
 			return loaded, roleID, nil
 		}
-	}
-
-	effectiveMCPServers := append([]acpclient.MCPServerConfig(nil), mcpServers...)
-	if len(effectiveMCPServers) == 0 {
-		effectiveMCPServers = MCPToolsFromRoleConfig(resolvedRole)
 	}
 
 	session, err := client.NewSession(ctx, acpclient.NewSessionRequest{

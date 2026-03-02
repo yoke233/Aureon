@@ -3,7 +3,7 @@ package secretary
 import (
 	"testing"
 
-	"github.com/user/ai-workflow/internal/acpclient"
+	"github.com/yoke233/ai-workflow/internal/acpclient"
 )
 
 func TestMCPToolsFromRoleConfig(t *testing.T) {

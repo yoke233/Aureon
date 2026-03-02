@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/user/ai-workflow/internal/acpclient"
+	"github.com/yoke233/ai-workflow/internal/acpclient"
 )
 
 func TestShouldLoadPersistedChatSession(t *testing.T) {

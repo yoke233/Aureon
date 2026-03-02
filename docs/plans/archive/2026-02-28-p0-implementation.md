@@ -23,7 +23,7 @@
 
 **Step 1: Initialize Go module**
 
-Run: `cd D:/project/ai-workflow && go mod init github.com/user/ai-workflow`
+Run: `cd D:/project/ai-workflow && go mod init github.com/yoke233/ai-workflow`
 Expected: `go.mod` created with Go 1.22+
 
 **Step 2: Create directory skeleton**
@@ -371,7 +371,7 @@ import (
     "testing"
     "time"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestBusPubSub(t *testing.T) {
@@ -431,7 +431,7 @@ package eventbus
 import (
     "sync"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 type Bus struct {
@@ -812,7 +812,7 @@ package storesqlite
 import (
     "testing"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestProjectCRUD(t *testing.T) {
@@ -995,7 +995,7 @@ import (
     "encoding/json"
     "fmt"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
     _ "modernc.org/sqlite"
 )
 
@@ -1502,7 +1502,7 @@ import (
     "testing"
     "time"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestBuildCommand(t *testing.T) {
@@ -1568,7 +1568,7 @@ import (
     "io"
     "strings"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 type ClaudeAgent struct {
@@ -1617,7 +1617,7 @@ import (
     "io"
     "time"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 func newScanner(r io.Reader) *bufio.Scanner {
@@ -1710,7 +1710,7 @@ import (
     "strings"
     "testing"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestBuildCommand(t *testing.T) {
@@ -1753,7 +1753,7 @@ import (
     "context"
     "io"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 type CodexAgent struct {
@@ -1805,7 +1805,7 @@ import (
     "io"
     "time"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 type CodexStreamParser struct {
@@ -1863,7 +1863,7 @@ import (
     "io"
     "testing"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestCreateAndWait(t *testing.T) {
@@ -1904,7 +1904,7 @@ import (
     "os/exec"
     "sync/atomic"
 
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 type ProcessRuntime struct {
@@ -1991,7 +1991,7 @@ git commit -m "feat: add process runtime plugin — os/exec based session manage
 // internal/engine/templates.go
 package engine
 
-import "github.com/user/ai-workflow/internal/core"
+import "github.com/yoke233/ai-workflow/internal/core"
 
 var Templates = map[string][]core.StageID{
     "full": {
@@ -2095,8 +2095,8 @@ import (
     "log/slog"
     "time"
 
-    "github.com/user/ai-workflow/internal/core"
-    "github.com/user/ai-workflow/internal/eventbus"
+    "github.com/yoke233/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/eventbus"
 )
 
 type Executor struct {
@@ -2348,13 +2348,13 @@ import (
     "os"
     "text/tabwriter"
 
-    "github.com/user/ai-workflow/internal/core"
-    "github.com/user/ai-workflow/internal/engine"
-    "github.com/user/ai-workflow/internal/eventbus"
-    agentclaude "github.com/user/ai-workflow/internal/plugins/agent-claude"
-    agentcodex "github.com/user/ai-workflow/internal/plugins/agent-codex"
-    runtimeprocess "github.com/user/ai-workflow/internal/plugins/runtime-process"
-    storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
+    "github.com/yoke233/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/engine"
+    "github.com/yoke233/ai-workflow/internal/eventbus"
+    agentclaude "github.com/yoke233/ai-workflow/internal/plugins/agent-claude"
+    agentcodex "github.com/yoke233/ai-workflow/internal/plugins/agent-codex"
+    runtimeprocess "github.com/yoke233/ai-workflow/internal/plugins/runtime-process"
+    storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 )
 
 func bootstrap() (*engine.Executor, core.Store, error) {
@@ -2606,7 +2606,7 @@ import (
     "strings"
 
     tea "github.com/charmbracelet/bubbletea"
-    "github.com/user/ai-workflow/internal/core"
+    "github.com/yoke233/ai-workflow/internal/core"
 )
 
 type Model struct {

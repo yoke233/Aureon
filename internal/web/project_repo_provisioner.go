@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	workspaceclone "github.com/user/ai-workflow/internal/plugins/workspace-clone"
+	workspaceclone "github.com/yoke233/ai-workflow/internal/plugins/workspace-clone"
 )
 
 const (

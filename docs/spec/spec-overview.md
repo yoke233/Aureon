@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-一个用 Go 编写的**智能任务分解与并行执行平台**，通过 ACP（Agent Client Protocol）统一 Secretary 与执行 Agent 的通信。用户通过 Web Workbench 与 Secretary Agent 进行多轮对话，Secretary 作为持久交互式 Agent（工作目录即项目目录，拥有文件读写权限）理解需求并探索代码。当需求明确后，用户指示 Secretary 在项目中生成计划文件（格式自由），经用户勾选后提交为结构化 TaskPlan，再由 Multi-Agent 审核委员会自动审核纠错，DAG Scheduler 管理依赖关系并行调度多个 Pipeline 执行。每个子任务由 Claude Code、Codex CLI 等 AI 编码工具（均通过 ACP 协议驱动）独立完成。提供 Web Workbench 作为主操作界面（含全局 Admin 管理视图），GitHub 集成作为可选增强。
+一个用 Go 编写的**智能需求调度与并行执行平台**，通过 ACP（Agent Client Protocol）统一 Secretary 与执行 Agent 的通信。用户通过 Web Workbench 与 Secretary Agent 进行多轮对话，Secretary 作为持久交互式 Agent（工作目录即项目目录，拥有文件读写权限）理解需求并探索代码。当需求明确后，用户指示 Secretary 在项目中生成计划文件（格式自由），经用户分组勾选后批量提交为 Issue（1 Issue = 1 需求单，可关联多个 plan 文件），由两阶段 AI 审核（Per-Issue 审查 + 跨 Issue 依赖分析）自动审核，DAG Scheduler 管理 Issue 间依赖关系并行调度 Pipeline 执行。每个 Issue 由 Claude Code、Codex CLI 等 AI 编码工具（均通过 ACP 协议驱动）独立完成——ACP 客户端自身处理内部并行执行。提供 Web Workbench 作为主操作界面（含全局 Admin 管理视图），GitHub 集成作为可选增强。
 
 ## 要解决的问题
 
@@ -12,10 +12,11 @@
 - 小 bug 和大 feature 走同样的重流程，效率浪费
 - 上下文（需求、spec、review 结果）散落在不同的终端会话中，无法追溯
 - 多项目切换时要记住每个项目的路径和配置差异
-- 复杂需求只能串行处理，无法将独立子任务并行分配给多个 AI Agent
-- 任务拆解质量靠人脑把关，缺乏自动审核纠错机制
+- 多个独立需求只能串行处理，无法并行分配给多个 AI Agent
+- 需求审核靠人脑把关，缺乏自动审核和依赖分析机制
 - 项目导入缺乏便捷方式，需要手动管理本地路径和 git clone
 - 执行全过程缺乏审计追溯，操作记录分散
+- 需求变更缺乏版本化管理，无法追溯变更历史
 - GitHub Issue/PR 联动是可选需求而非必需，但缺乏灵活的集成方式
 
 ## 整体架构
@@ -34,21 +35,17 @@
 │  │ 工作目录=项目目录 │ 文件读写权限 │ Agent 可切换            │   │
 │  │ 多轮对话 │ 生成计划文件(格式自由) │ 查询工具(进度/状态)    │   │
 │  └──────────────────────┬──────────────────────────────────┘   │
-│                         │ 用户勾选文件 → 创建 Plan              │
+│                         │ 用户分组勾选文件 → 创建 Issue          │
 │  ┌──────────────────────▼──────────────────────────────────┐   │
-│  │ Plan Parser (AI 解析文件 → 结构化 TaskPlan + TaskItems)   │   │
-│  └──────────────────────┬──────────────────────────────────┘   │
-│                         │                                      │
-│  ┌──────────────────────▼──────────────────────────────────┐   │
-│  │          Multi-Agent Review Orchestrator                   │   │
-│  │   completeness │ dependency │ feasibility │ aggregator    │   │
+│  │          Two-Phase AI Review                              │   │
+│  │   Phase 1: Per-Issue Review (并行审查)                     │   │
+│  │   Phase 2: Cross-Issue Dependency Analysis (依赖分析)      │   │
 │  └───────────────────────────┬──────────────────────────────┘   │
-│                              │ 审核通过 → 每个 TaskItem          │
-│  ┌───────────────┐  ┌───────▼───────┐  创建一个 Pipeline       │
-│  │  TaskPlan     │  │  DAG          │                          │
-│  │  Manager      │  │  Scheduler    │                          │
-│  │ (CRUD+状态)   │  │ (依赖并行调度) │                          │
-│  └───────────────┘  └───────────────┘                          │
+│                              │ 审核通过 → 每个 Issue              │
+│                     ┌────────▼────────┐  创建一个 Pipeline       │
+│                     │  DAG Scheduler  │                          │
+│                     │ (Issue 依赖调度) │                          │
+│                     └─────────────────┘                          │
 └──────────────────────────────┼─────────────────────────────────┘
                                │
 ┌──────────────────────────────▼─────────────────────────────────┐
@@ -106,12 +103,12 @@
 | Notifier | 人工通知渠道 | desktop | slack, webhook |
 | Store | 状态持久化 | sqlite | postgres（远程） |
 | Terminal | Agent 输出的实时渲染适配器 | web (WebSocket) | tui (Bubble Tea) |
-| **ReviewGate** | **TaskPlan 审核机制** | **ai-panel（Multi-Agent 审核委员会）** | **local-approval, github-pr** |
-| **Tracker** | **子任务外部系统同步** | **local-db（纯本地，空实现）** | **github-issue, linear** |
+| **ReviewGate** | **Issue 审核机制** | **ai-panel（两阶段 AI 审核）** | **local-approval, github-pr** |
+| **Tracker** | **Issue 外部系统同步** | **local-db（纯本地，空实现）** | **github-issue, linear** |
 
 > **Terminal 插件**只负责将 Agent 的流式输出适配到不同渲染目标（WebSocket / TUI 终端），不包含完整的 UI 框架逻辑。Web Workbench 和 TUI 是独立的接入层。
 >
-> **ReviewGate 和 Tracker** 是 Secretary Layer 引入的两个新插件槽位。ReviewGate 负责 TaskPlan 的审核机制（默认使用 Multi-Agent 自动审核）；Tracker 负责将子任务状态镜像到外部系统（默认纯本地，GitHub Issue 为可选增强）。
+> **ReviewGate 和 Tracker** 是 Secretary Layer 引入的两个插件槽位。ReviewGate 负责 Issue 的审核机制（默认使用两阶段 AI 审核：Per-Issue Review + Cross-Issue Dependency Analysis）；Tracker 负责将 Issue 状态镜像到外部系统（默认纯本地，GitHub Issue 为可选增强）。命名与 GitHub 对齐，内部 Issue 和 GitHub Issue 同名，Tracker 实现几乎是字段直接映射。
 
 每个插件实现一个 Go interface + 注册函数。Plugin 之间通过 Event Bus 解耦。
 
@@ -140,14 +137,16 @@ type Plugin interface {
 - **默认实现够用，不强制扩展** — P0 阶段只需 process + worktree + sqlite，不需要 tmux/docker
 - **换任何一个插件不影响其他插件** — 换 SCM 插件不需要改 Pipeline Engine
 - **配置驱动** — YAML 中声明使用哪个插件，启动时动态加载
-- **本地优先，外部增强** — 核心功能（任务拆解、审核、调度、执行）完全在本地 SQLite + Git 上运行，GitHub/Linear 等外部系统是可选的状态镜像
+- **本地优先，外部增强** — 核心功能（需求管理、审核、调度、执行）完全在本地 SQLite + Git 上运行，GitHub/Linear 等外部系统是可选的状态镜像
 - **ACP 协议统一通信** — 所有 Agent 交互通过 ACP（JSON-RPC 2.0 over stdio），模型实现与调用方解耦
 - **Agent/Role 解耦配置** — `agents` 只定义启动参数与能力上限，`roles` 定义行为策略，`role_bindings` 负责把业务调用映射到角色
 - **Bootstrap 统一接入 ACP Client** — 启动阶段按 `agents + roles + role_bindings` 构建 RoleResolver，不再维护 runtime 段
-- **1 TaskItem = 1 Pipeline** — 每个子任务对应一个独立 Pipeline，执行器只管自己的 Pipeline，依赖调度交给 DAG Scheduler
-- **审核默认自动** — Multi-Agent 审核委员会自动审核纠错，人工是兜底而非默认
-- **Secretary 是持久 Agent** — Secretary 不是一次性 LLM 调用，而是一个持久运行的交互式 Agent session，拥有项目文件读写权限，对话不自动生成 Plan
-- **计划文件驱动** — TaskPlan 的来源是 Secretary 生成的项目文件（格式自由），由用户勾选后经 AI 解析为结构化任务，而非 Secretary 直接输出 JSON
+- **1 Issue = 1 Pipeline** — 每个需求对应一个独立 Pipeline，Agent 内部处理并行执行，系统只管理 Issue 间依赖调度
+- **审核默认自动，最小化人工** — 两阶段 AI 审核自动审查 + 自动分析依赖，score 达标时自动批准，仅在冲突或低分时要求人工确认
+- **Secretary 是持久 Agent** — Secretary 不是一次性 LLM 调用，而是一个持久运行的交互式 Agent session，拥有项目文件读写权限，对话不自动创建 Issue
+- **Issue 驱动** — Issue 的来源是 Secretary 生成的计划文件（格式自由），由用户勾选后直接作为 Pipeline 输入 spec，不经过 AI 结构化拆解
+- **GitHub 命名对齐** — 核心实体命名（Issue, State, Label, Milestone）与 GitHub 对齐，降低用户认知成本，简化 GitHub 集成时的概念映射
+- **需求可追溯** — 每个 Issue 的 plan 文件内容快照保存，支持版本化变更管理
 - **全链路可审计** — 每个操作（对话、文件生成、审批、执行、人工操作）均记录审计日志
 - **P0 接口先行，实现从简** — P0 阶段定义 Go interface（Store, ReviewGate 等）约束设计质量，但只实现一个 concrete 实现（process + worktree + sqlite），直接 `New()` 构造，不引入 factory 注册和动态加载。P1 再引入 factory + 配置驱动。
 
@@ -181,7 +180,7 @@ ai-workflow/
 │   │   ├── project.go          # Project 实体
 │   │   ├── pipeline.go         # Pipeline 实体 + 状态定义
 │   │   ├── stage.go            # Stage 定义 + Template
-│   │   ├── taskplan.go         # TaskPlan + TaskItem 实体
+│   │   ├── issue.go            # Issue 实体 + 状态定义
 │   │   ├── events.go           # 事件类型定义
 │   │   ├── store.go            # Store 接口
 │   │   └── plugin.go           # Plugin 接口 + 槽位定义 + 注册表
@@ -193,22 +192,22 @@ ai-workflow/
 │   │   ├── reactions.go        # Reactions 事件响应引擎
 │   │   └── infer.go            # 模板自动推断
 │   │
-│   ├── secretary/              # Secretary Layer（任务拆解 + 审核 + DAG 调度）
-│   │   ├── agent.go            # Secretary Agent（对话 → 任务拆解）
-│   │   ├── taskplan.go         # TaskPlan 管理
-│   │   ├── review.go           # Multi-Agent 审核流程编排
-│   │   ├── scheduler.go        # DAG Scheduler（依赖并行调度）
+│   ├── secretary/              # Secretary Layer（Issue 管理 + 审核 + DAG 调度）
+│   │   ├── agent.go            # Secretary Agent（对话 + 查询工具）
+│   │   ├── manager.go          # Issue 管理（CRUD + 状态）
+│   │   ├── review.go           # 两阶段 AI 审核编排
+│   │   ├── scheduler.go        # DAG Scheduler（Issue 依赖并行调度）
 │   │   └── dag.go              # DAG 数据结构 + 校验
 │   │
-│   ├── acpclient/                # ACP Client — 统一 Agent 通信
-│   │   ├── client.go             # ACPClient 主结构
-│   │   ├── handler.go            # Client 侧回调 Handler
-│   │   └── protocol.go           # JSON-RPC 消息定义
+│   ├── acpclient/              # ACP Client — 统一 Agent 通信
+│   │   ├── client.go           # ACPClient 主结构
+│   │   ├── handler.go          # Client 侧回调 Handler
+│   │   └── protocol.go         # JSON-RPC 消息定义
 │   │
 │   ├── plugins/                # 所有插件实现
 │   │   ├── workspace-worktree/ # Workspace 插件：git worktree
 │   │   ├── scm-github/         # SCM 插件：GitHub PR/分支
-│   │   ├── review-ai-panel/    # ReviewGate 插件：Multi-Agent 审核委员会
+│   │   ├── review-ai-panel/    # ReviewGate 插件：两阶段 AI 审核
 │   │   ├── review-local/       # ReviewGate 插件：本地人工审批
 │   │   ├── tracker-local/      # Tracker 插件：本地（空实现）
 │   │   ├── tracker-github/     # Tracker 插件：GitHub Issue
@@ -235,7 +234,7 @@ ai-workflow/
 │   │   ├── handlers_project.go # 项目 API
 │   │   ├── handlers_pipeline.go# Pipeline API
 │   │   ├── handlers_chat.go    # Chat API
-│   │   ├── handlers_plan.go    # TaskPlan API
+│   │   ├── handlers_issue.go   # Issue API
 │   │   └── ws.go               # WebSocket 管理
 │   │
 │   └── tui/                    # TUI 层（轻量备选）
@@ -243,17 +242,17 @@ ai-workflow/
 │       ├── views/
 │       └── styles.go
 │
-├── web/dashboard/              # 前端源码（编译后 embed）
+├── web/                        # 前端源码（编译后 embed）
 │   ├── src/
 │   │   ├── views/
 │   │   │   ├── ChatView.tsx    # 对话视图
-│   │   │   ├── PlanView.tsx    # 计划视图 + DAG 可视化
+│   │   │   ├── IssuesView.tsx  # Issue 列表 + DAG 可视化
 │   │   │   ├── BoardView.tsx   # 看板视图
 │   │   │   └── PipelineView.tsx# Pipeline 详情
 │   │   ├── components/
 │   │   │   ├── DAGGraph.tsx    # React Flow DAG 组件
-│   │   │   ├── TaskCard.tsx    # 任务卡片
-│   │   │   ├── ReviewOrchestratorPanel.tsx # 审核编排面板
+│   │   │   ├── IssueCard.tsx   # Issue 卡片
+│   │   │   ├── ReviewPanel.tsx # 审核结果面板
 │   │   │   └── ChatMessage.tsx # 聊天消息气泡
 │   │   ├── stores/
 │   │   │   └── useStore.ts     # Zustand 状态管理
@@ -270,11 +269,8 @@ ai-workflow/
 │       ├── fixup.tmpl
 │       ├── e2e_test.tmpl
 │       ├── secretary_system.tmpl
-│       ├── plan_parser.tmpl
-│       ├── review_completeness.tmpl
-│       ├── review_dependency.tmpl
-│       ├── review_feasibility.tmpl
-│       └── review_aggregator.tmpl
+│       ├── demand_review.tmpl
+│       └── dependency_analysis.tmpl
 │
 ├── go.mod
 └── go.sum
@@ -304,41 +300,46 @@ ai-workflow/
    ├── 写入路径由 Secretary 决定（推荐 .ai-workflow/plans/）
    └── 前端收到文件变更通知，展示新增/修改的文件列表
 
-5. 用户在前端勾选文件 → 提交创建 Plan
-   ├── 后端调用 AI（Plan Parser）解析选中文件为结构化 TaskPlan + TaskItems
-   └── TaskPlan 记录源文件路径列表（source_files），写入 Store，状态 draft
+5. 用户在前端分组勾选文件 → 批量创建 Issue
+   ├── 每组文件 = 1 个 Issue（一个 Issue 可关联多个 plan 文件）
+   ├── 快照 plan 文件内容到 issue_attachments 表（留痕）
+   └── 所有 Issue 状态 draft
 
-6. Multi-Agent Review Orchestrator 自动审核
-   ├── 完整性 Agent + 依赖性 Agent + 可行性 Agent 并行审核
-   ├── Aggregator 综合研判 → approve / fix / escalate
-   └── fix 时自动修正并重新审核（最多 N 轮）
+6. 两阶段 AI 审核（auto_review=true 时自动触发）
+   ├── Phase 1: Per-Issue Review（N 个 Issue 并行审查）
+   │   └── 每个 Issue 独立评估：质量、可行性、建议模板、自动生成 title/summary
+   ├── Phase 2: Cross-Issue Dependency Analysis（1 次调用）
+   │   └── 分析所有 Issue 间的依赖关系、冲突检测、优先级建议
+   └── Auto-approve: 全部 pass + 无冲突 → 自动批准
+       有问题 → 前端展示，等人工确认
 
-7. DAG Scheduler 接管已审核的 TaskPlan
-   ├── 构建依赖图，找出无依赖的 TaskItem → 标记 ready
-   ├── 为每个 ready 的 TaskItem 创建 Pipeline（1:1）
-   └── 并行启动多个 Pipeline
+7. DAG Scheduler 接管审核通过的 Issue
+   ├── 写入依赖 DAG（AI 分析结果或人工指定）
+   ├── 有依赖的 Issue → queued，无依赖 → ready
+   └── 为每个 ready 的 Issue 创建 Pipeline（1:1）
 
 8. Pipeline Engine 逐阶段执行每个 Pipeline（现有逻辑不变）
-   ├── 通过 ACP Client 调用 Agent
+   ├── 通过 ACP Client 调用 Agent（plan 文件内容注入 prompt）
+   ├── Agent 内部处理并行执行
    ├── 流式输出经 Event Bus 广播到 Workbench
    ├── 遇到人工检查点 → 暂停等待
    └── 完成 → 更新 Store + 通知 DAG Scheduler
 
-9. DAG Scheduler 推进后续任务
-   ├── Pipeline 完成 → 标记 TaskItem done → 检查下游依赖
-   ├── 下游所有上游 done → 创建并启动下游 Pipeline
-   └── 所有 TaskItem done → TaskPlan done
+9. DAG Scheduler 推进后续 Issue
+   ├── Pipeline 完成 → Issue done (closed) → 检查下游依赖
+   ├── 下游所有上游 done → 标记 ready → 创建并启动 Pipeline
+   └── 所有 Issue done → 批次完成
 
 10. 收尾
-    ├── Git: 每个子任务一个 worktree + 分支 + 合并
-    ├── GitHub: PR + Issue 状态同步（可选）
-    └── Store: 完整执行记录 + 对话历史 + 审核记录 + 审计日志
+    ├── Git: 每个 Issue 一个 worktree + 分支 + 合并
+    ├── GitHub: Issue 状态同步 + PR（可选）
+    └── Store: 完整执行记录 + 对话历史 + 审核记录 + 变更历史 + 审计日志
 
 全程审计日志：每个步骤（对话、文件生成、审批、执行、人工操作）
 均记录到 audit_log 表，支持按项目/操作类型/时间范围查询。
 
 直接模式（跳过 Secretary Layer）：
-用户也可以直接创建单个 Pipeline，不经过任务拆解。
+用户也可以直接创建单个 Pipeline，不经过 Issue 流程。
 此时 Secretary Layer 不参与。
 ```
 
@@ -349,10 +350,10 @@ ai-workflow/
 | P0 ✅ | ACP Client（Agent 通信） + Pipeline Engine + CLI/TUI | 本地单任务自动化工具 |
 | P1 ✅ | 多项目调度 + 配置驱动工厂 + 崩溃恢复 | Scheduler + Registry + 三级配置 + Reactions V1 |
 | P2-Foundation | 插件接口 + API 基础设施 | ReviewGate/Tracker/SCM/Notifier 接口 + local 默认实现 + REST/WS |
-| P2a | Secretary Agent + TaskPlan + DAG Scheduler | 对话 → 任务拆解 → 依赖并行执行（纯后端） |
-| P2b | Multi-Agent Review Orchestrator | AI 强门禁审核（3 Reviewer + Aggregator，max_rounds=2） |
-| P2c | Workbench UI (Web) | Chat + Plan + Board + Pipeline 四视图，Web 为主界面 |
-| P3 | GitHub 集成（**可选增强**） | github-issue Tracker + github-pr ReviewGate + Webhook |
-| P4 | 高级定制 + MCP 扩展 + 通知 | 自定义 Template + Slack/Webhook 通知 |
+| P2a | Secretary Agent + Issue 管理 + DAG Scheduler | 对话 → Issue 创建 → 依赖并行执行（纯后端） |
+| P2b | Two-Phase AI Review | AI 审核（Per-Issue Review + Dependency Analysis，auto-approve） |
+| P2c | Workbench UI (Web) | Chat + Issues + Board + Pipeline 四视图，Web 为主界面 |
+| P3 | GitHub 集成（**可选增强**） | tracker-github（Issue 同步） + scm-github（PR） + Webhook |
+| P4 | 高级定制 + MCP 扩展 + 通知 | 自定义 Template + Slack/Webhook 通知 + 优先级调度 |
 
-> **关键变化**：GitHub 从 P2 推迟到 P3，变为可选增强而非必需。P2 专注于让 Secretary Layer（任务拆解 + 审核 + DAG 调度）+ Workbench UI 在纯本地跑通。详见 [spec-secretary-layer.md](spec-secretary-layer.md)。
+> **关键设计**：1 Issue = 1 Pipeline。ACP 客户端自身处理内部并行执行，系统不再将需求拆解为子任务。DAG Scheduler 管理 Issue 间依赖，不管理 Issue 内部并行。详见 [spec-secretary-layer.md](spec-secretary-layer.md)。

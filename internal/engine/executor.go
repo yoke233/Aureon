@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/ai-workflow/internal/acpclient"
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/eventbus"
-	gitops "github.com/user/ai-workflow/internal/git"
-	"github.com/user/ai-workflow/internal/observability"
+	"github.com/yoke233/ai-workflow/internal/acpclient"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/eventbus"
+	gitops "github.com/yoke233/ai-workflow/internal/git"
+	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
 type Executor struct {

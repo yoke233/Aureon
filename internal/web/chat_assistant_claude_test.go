@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/user/ai-workflow/internal/acpclient"
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/acpclient"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestClaudeChatAssistantReplyUsesLoadSessionThenPrompt(t *testing.T) {
@@ -393,6 +393,10 @@ func (c *stubACPClient) Close(_ context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.closeErr
+}
+
+func (c *stubACPClient) Cancel(_ context.Context, _ acpclient.CancelRequest) error {
+	return nil
 }
 
 type recordingEventPublisher struct {

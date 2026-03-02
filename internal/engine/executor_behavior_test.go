@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/ai-workflow/internal/acpclient"
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/eventbus"
-	runtimeprocess "github.com/user/ai-workflow/internal/plugins/runtime-process"
-	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
-	workspaceworktree "github.com/user/ai-workflow/internal/plugins/workspace-worktree"
+	"github.com/yoke233/ai-workflow/internal/acpclient"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/eventbus"
+	runtimeprocess "github.com/yoke233/ai-workflow/internal/plugins/runtime-process"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
+	workspaceworktree "github.com/yoke233/ai-workflow/internal/plugins/workspace-worktree"
 )
 
 type fakeAgent struct {

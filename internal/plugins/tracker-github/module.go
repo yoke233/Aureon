@@ -1,8 +1,8 @@
 package trackergithub
 
 import (
-	"github.com/user/ai-workflow/internal/config"
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/config"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 func Module() core.PluginModule {

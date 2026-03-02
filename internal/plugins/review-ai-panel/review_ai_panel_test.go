@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/ai-workflow/internal/core"
-	storesqlite "github.com/user/ai-workflow/internal/plugins/store-sqlite"
-	"github.com/user/ai-workflow/internal/secretary"
+	"github.com/yoke233/ai-workflow/internal/core"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
+	"github.com/yoke233/ai-workflow/internal/secretary"
 )
 
 func TestAIReviewGate_UnknownReview(t *testing.T) {

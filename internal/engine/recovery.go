@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 const recoveryInterruptedCheckpointError = "recovered: previous in_progress checkpoint interrupted by crash"

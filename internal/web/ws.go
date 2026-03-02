@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 const (
@@ -133,7 +133,21 @@ func (h *Hub) BroadcastCoreEvent(evt core.Event) {
 	}
 	if len(evt.Data) > 0 {
 		for k, v := range evt.Data {
-			data[k] = v
+			switch k {
+			case "acp_content_json":
+				continue
+			case "acp_update_json":
+				trimmed := strings.TrimSpace(v)
+				if trimmed == "" {
+					continue
+				}
+				var acpPayload any
+				if err := json.Unmarshal([]byte(trimmed), &acpPayload); err == nil {
+					data["acp"] = acpPayload
+				}
+			default:
+				data[k] = v
+			}
 		}
 	}
 	if evt.Error != "" {

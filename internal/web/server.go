@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/secretary"
-	webassets "github.com/user/ai-workflow/web"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/secretary"
+	webassets "github.com/yoke233/ai-workflow/web"
 )
 
 // PlanManager defines the task-plan orchestration APIs required by plan handlers.
@@ -45,6 +45,7 @@ type Config struct {
 	Store                  core.Store
 	PlanManager            PlanManager
 	ChatAssistant          ChatAssistant
+	EventPublisher         chatEventPublisher
 	PipelineExec           PipelineExecutor
 	PipelineStageRoles     map[string]string
 	PlanParserRoleID       string
@@ -109,7 +110,7 @@ func NewServer(cfg Config) *Server {
 		registerProjectRoutes(r, cfg.Store, hub, projectRepoProvisioner)
 		registerRepoRoutes(r, cfg.Store)
 		registerPipelineRoutes(r, cfg.Store, cfg.PipelineExec, cfg.PipelineStageRoles)
-		registerChatRoutes(r, cfg.Store, cfg.ChatAssistant)
+		registerChatRoutes(r, cfg.Store, cfg.ChatAssistant, cfg.EventPublisher)
 		registerPlanRoutes(r, cfg.Store, cfg.PlanManager, cfg.PlanParserRoleID)
 		registerTaskRoutes(r, cfg.Store)
 		registerAdminOpsRoutes(r, cfg.Store, cfg.BearerToken, webhookReplayer)

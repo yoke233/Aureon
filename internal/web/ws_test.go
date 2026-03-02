@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/user/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 func TestWSRequiresAuthWhenEnabled(t *testing.T) {
@@ -262,6 +262,71 @@ func TestWSBroadcastCoreEventFallsBackPlanIDFromData(t *testing.T) {
 	}
 	if got.Data["task_id"] != "task-fallback-1" {
 		t.Fatalf("expected task_id=task-fallback-1, got %+v", got.Data)
+	}
+}
+
+func TestWSBroadcastCoreEventParsesACPUpdateJSON(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitForConnections(hub, 1, time.Second) {
+		t.Fatal("ws connection did not register in hub")
+	}
+
+	rawUpdate := `{"type":"agent_message","text":"hello","nested":{"x":1}}`
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventStageStart,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id":       "chat-session-1",
+			"agent_session_id": "agent-session-1",
+			"acp_update_json":  rawUpdate,
+			"acp_content_json": `{"should":"drop"}`,
+			"keep":             "value",
+		},
+	})
+
+	got := readWSMessage(t, conn, 2*time.Second)
+	if got.Type != string(core.EventStageStart) {
+		t.Fatalf("expected %q, got %q", core.EventStageStart, got.Type)
+	}
+
+	if _, ok := got.Data["acp_update_json"]; ok {
+		t.Fatalf("expected acp_update_json removed, got data=%+v", got.Data)
+	}
+	if _, ok := got.Data["acp_content_json"]; ok {
+		t.Fatalf("expected acp_content_json removed, got data=%+v", got.Data)
+	}
+	if got.Data["keep"] != "value" {
+		t.Fatalf("expected keep=value, got data=%+v", got.Data)
+	}
+
+	acpPayload, ok := got.Data["acp"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected data.acp object, got %#v", got.Data["acp"])
+	}
+	if acpPayload["type"] != "agent_message" {
+		t.Fatalf("expected data.acp.type=agent_message, got %#v", acpPayload["type"])
+	}
+	if acpPayload["text"] != "hello" {
+		t.Fatalf("expected data.acp.text=hello, got %#v", acpPayload["text"])
+	}
+	nested, ok := acpPayload["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested object, got %#v", acpPayload["nested"])
+	}
+	if nested["x"] != float64(1) {
+		t.Fatalf("expected nested.x=1, got %#v", nested["x"])
 	}
 }
 

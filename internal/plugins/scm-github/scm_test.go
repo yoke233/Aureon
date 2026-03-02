@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	ghapi "github.com/google/go-github/v68/github"
-	"github.com/user/ai-workflow/internal/core"
-	ghsvc "github.com/user/ai-workflow/internal/github"
+	"github.com/yoke233/ai-workflow/internal/core"
+	ghsvc "github.com/yoke233/ai-workflow/internal/github"
 )
 
 func TestGitHubSCM_CreatePR_DraftSuccess(t *testing.T) {

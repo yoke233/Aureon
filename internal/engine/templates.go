@@ -1,6 +1,6 @@
 package engine
 
-import "github.com/user/ai-workflow/internal/core"
+import "github.com/yoke233/ai-workflow/internal/core"
 
 var Templates = map[string][]core.StageID{
 	"full": {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/user/ai-workflow/internal/core"
-	"github.com/user/ai-workflow/internal/observability"
+	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
 func (e *Executor) ApplyAction(ctx context.Context, action core.PipelineAction) error {

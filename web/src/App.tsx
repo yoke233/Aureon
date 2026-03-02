@@ -52,7 +52,7 @@ interface ViewProps {
 const renderView = ({ apiClient, wsClient, projectId, refreshToken }: ViewProps, view: AppView) => {
   switch (view) {
     case "chat":
-      return <ChatView apiClient={apiClient} projectId={projectId} />;
+      return <ChatView apiClient={apiClient} wsClient={wsClient} projectId={projectId} />;
     case "plan":
       return (
         <PlanView

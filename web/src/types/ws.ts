@@ -7,6 +7,48 @@ export interface WsEnvelope<TPayload = unknown> {
   payload?: TPayload;
 }
 
+export type ChatEventType =
+  | "chat_run_started"
+  | "chat_run_update"
+  | "chat_run_completed"
+  | "chat_run_failed"
+  | "chat_run_cancelled";
+
+export interface ACPSessionUpdate {
+  sessionUpdate?: string;
+  content?: {
+    type?: string;
+    text?: string;
+    [key: string]: unknown;
+  };
+  toolCallId?: string;
+  title?: string;
+  kind?: string;
+  status?: string;
+  entries?: Array<{
+    content?: string;
+    priority?: string;
+    status?: string;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+}
+
+export interface ChatEventPayload {
+  session_id?: string;
+  role?: string;
+  agent_session_id?: string;
+  reply?: string;
+  error?: string;
+  acp?: ACPSessionUpdate;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
+export interface ChatEventEnvelope extends WsEnvelope<ChatEventPayload> {
+  type: ChatEventType;
+}
+
 export type ProjectCreateEventType =
   | "project_create_started"
   | "project_create_progress"

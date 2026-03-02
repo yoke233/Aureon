@@ -3,8 +3,8 @@ package scmgithub
 import (
 	"fmt"
 
-	"github.com/user/ai-workflow/internal/core"
-	ghsvc "github.com/user/ai-workflow/internal/github"
+	"github.com/yoke233/ai-workflow/internal/core"
+	ghsvc "github.com/yoke233/ai-workflow/internal/github"
 )
 
 func Module() core.PluginModule {

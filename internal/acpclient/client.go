@@ -116,6 +116,11 @@ func (c *Client) Initialize(ctx context.Context, caps ClientCapabilities) error 
 
 func (c *Client) NewSession(ctx context.Context, req NewSessionRequest) (SessionInfo, error) {
 	raw, err := c.transport.Call(ctx, "session/new", req.ToParams())
+	if err != nil && len(req.Metadata) > 0 && isInvalidParamsRPCError(err) {
+		reqWithoutMetadata := req
+		reqWithoutMetadata.Metadata = nil
+		raw, err = c.transport.Call(ctx, "session/new", reqWithoutMetadata.ToParams())
+	}
 	if err != nil {
 		return SessionInfo{}, err
 	}
@@ -131,6 +136,11 @@ func (c *Client) NewSession(ctx context.Context, req NewSessionRequest) (Session
 
 func (c *Client) LoadSession(ctx context.Context, req LoadSessionRequest) (SessionInfo, error) {
 	raw, err := c.transport.Call(ctx, "session/load", req.ToParams())
+	if err != nil && len(req.Metadata) > 0 && isInvalidParamsRPCError(err) {
+		reqWithoutMetadata := req
+		reqWithoutMetadata.Metadata = nil
+		raw, err = c.transport.Call(ctx, "session/load", reqWithoutMetadata.ToParams())
+	}
 	if err != nil {
 		return SessionInfo{}, err
 	}
@@ -152,6 +162,11 @@ func (c *Client) Prompt(ctx context.Context, req PromptRequest) (*PromptResult, 
 	defer c.stopCollect(req.SessionID)
 
 	raw, err := c.transport.Call(ctx, "session/prompt", req.ToParams())
+	if err != nil && len(req.Metadata) > 0 && isInvalidParamsRPCError(err) {
+		reqWithoutMetadata := req
+		reqWithoutMetadata.Metadata = nil
+		raw, err = c.transport.Call(ctx, "session/prompt", reqWithoutMetadata.ToParams())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -278,32 +293,43 @@ func (c *Client) handleNotification(ctx context.Context, method string, params j
 		Text string `json:"text"`
 	}
 	type payload struct {
-		SessionID string `json:"sessionId"`
-		Update    struct {
-			SessionUpdate string          `json:"sessionUpdate"`
-			Content       json.RawMessage `json:"content"`
-			Status        string          `json:"status"`
-		} `json:"update"`
+		SessionID string          `json:"sessionId"`
+		Update    json.RawMessage `json:"update"`
+	}
+	type updatePayload struct {
+		SessionUpdate string          `json:"sessionUpdate"`
+		Content       json.RawMessage `json:"content"`
+		Status        string          `json:"status"`
 	}
 
 	var in payload
 	if err := json.Unmarshal(params, &in); err != nil {
 		return
 	}
+	if len(in.Update) == 0 {
+		return
+	}
+
+	var updatePayloadData updatePayload
+	if err := json.Unmarshal(in.Update, &updatePayloadData); err != nil {
+		return
+	}
 
 	var text string
-	if len(in.Update.Content) > 0 {
+	if len(updatePayloadData.Content) > 0 {
 		var cblock contentBlock
-		if err := json.Unmarshal(in.Update.Content, &cblock); err == nil && cblock.Type == "text" {
+		if err := json.Unmarshal(updatePayloadData.Content, &cblock); err == nil && cblock.Type == "text" {
 			text = cblock.Text
 		}
 	}
 
 	update := SessionUpdate{
-		SessionID: in.SessionID,
-		Type:      in.Update.SessionUpdate,
-		Text:      text,
-		Status:    in.Update.Status,
+		SessionID:      in.SessionID,
+		Type:           updatePayloadData.SessionUpdate,
+		Text:           text,
+		Status:         updatePayloadData.Status,
+		RawUpdateJSON:  strings.TrimSpace(string(in.Update)),
+		RawContentJSON: strings.TrimSpace(string(updatePayloadData.Content)),
 	}
 	if c.eventHandler != nil {
 		_ = c.eventHandler.HandleSessionUpdate(ctx, update)
@@ -352,6 +378,14 @@ func mergeEnv(extra map[string]string) []string {
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+func isInvalidParamsRPCError(err error) bool {
+	var rpcErr *rpcError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	return rpcErr != nil && rpcErr.Code == -32602
 }
 
 func isProcessExit(err error) bool {

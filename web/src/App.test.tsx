@@ -211,13 +211,14 @@ describe("App", () => {
       expect(mocks.listProjects).toHaveBeenCalledTimes(1);
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
     fireEvent.change(screen.getByLabelText("项目名称"), {
       target: { value: "Gamma" },
     });
     fireEvent.change(screen.getByLabelText("仓库路径"), {
       target: { value: "D:/repo/gamma" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交创建请求" }));
 
     await waitFor(() => {
       expect(mocks.createProjectCreateRequest).toHaveBeenCalledWith({
@@ -254,13 +255,14 @@ describe("App", () => {
       expect(mocks.listProjects).toHaveBeenCalledTimes(1);
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
     fireEvent.change(screen.getByLabelText("项目名称"), {
       target: { value: "Broken" },
     });
     fireEvent.change(screen.getByLabelText("仓库路径"), {
       target: { value: "D:/repo/broken" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交创建请求" }));
 
     await waitFor(() => {
       expect(mocks.createProjectCreateRequest).toHaveBeenCalledTimes(1);
@@ -289,6 +291,7 @@ describe("App", () => {
       expect(mocks.listProjects).toHaveBeenCalledTimes(1);
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
     fireEvent.change(screen.getByLabelText("项目来源"), {
       target: { value: "local_new" },
     });

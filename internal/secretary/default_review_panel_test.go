@@ -12,168 +12,136 @@ import (
 func TestNewDefaultReviewOrchestratorApproveFlow(t *testing.T) {
 	store := newMockReviewStore()
 	panel := NewDefaultReviewOrchestrator(store)
-
-	plan := &core.TaskPlan{
-		ID:         "plan-default-review-approve",
-		ProjectID:  "proj-1",
-		Name:       "demo",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-		Tasks: []core.TaskItem{
-			{
-				ID:          "task-1",
-				PlanID:      "plan-default-review-approve",
-				Title:       "task one",
-				Description: "task one description",
-				Template:    "standard",
-			},
+	panel.Reviewer = stubDemandReviewer{
+		fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 96}, nil
 		},
 	}
 
-	result, err := panel.Run(context.Background(), plan, ReviewInput{})
+	issues := []*core.Issue{
+		newReviewTestIssue("issue-default-review-approve"),
+	}
+	result, err := panel.Run(context.Background(), issues)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if result.Decision != DecisionApprove {
 		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
 	}
-	if result.Plan.Status != core.PlanWaitingHuman {
-		t.Fatalf("status = %q, want %q", result.Plan.Status, core.PlanWaitingHuman)
+	if result.Status != core.ReviewStatusApproved {
+		t.Fatalf("status = %q, want %q", result.Status, core.ReviewStatusApproved)
 	}
-	if result.Plan.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("wait_reason = %q, want %q", result.Plan.WaitReason, core.WaitFinalApproval)
+	if !result.AutoApproved {
+		t.Fatal("auto_approved = false, want true")
+	}
+	if len(result.Verdicts) != 1 {
+		t.Fatalf("verdict count = %d, want 1", len(result.Verdicts))
+	}
+	if _, ok := result.Verdicts[issues[0].ID]; !ok {
+		t.Fatalf("verdict missing issue id %q", issues[0].ID)
 	}
 }
 
 func TestNewDefaultReviewOrchestratorEscalateFlow(t *testing.T) {
 	store := newMockReviewStore()
 	panel := NewDefaultReviewOrchestrator(store)
-
-	plan := &core.TaskPlan{
-		ID:         "plan-default-review-escalate",
-		ProjectID:  "proj-1",
-		Name:       "demo",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-		Tasks: []core.TaskItem{
-			{
-				ID:          "task-1",
-				PlanID:      "plan-default-review-escalate",
-				Title:       "task one",
-				Description: "task one description",
-				Template:    "custom-template",
-			},
+	panel.Reviewer = stubDemandReviewer{
+		fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 93}, nil
+		},
+	}
+	panel.Analyzer = stubDependencyAnalyzer{
+		fn: func(_ context.Context, issues []*core.Issue) (*DependencyAnalysis, error) {
+			return &DependencyAnalysis{
+				Conflicts: []ConflictInfo{
+					{
+						IssueIDs: []string{issues[0].ID, issues[1].ID},
+						Resource: "shared-env",
+					},
+				},
+			}, nil
 		},
 	}
 
-	result, err := panel.Run(context.Background(), plan, ReviewInput{})
+	issues := []*core.Issue{
+		newReviewTestIssue("issue-default-review-escalate-1"),
+		newReviewTestIssue("issue-default-review-escalate-2"),
+	}
+	result, err := panel.Run(context.Background(), issues)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if result.Decision != DecisionEscalate {
 		t.Fatalf("decision = %q, want %q", result.Decision, DecisionEscalate)
 	}
-	if result.Plan.Status != core.PlanWaitingHuman {
-		t.Fatalf("status = %q, want %q", result.Plan.Status, core.PlanWaitingHuman)
+	if result.Status != core.ReviewStatusRejected {
+		t.Fatalf("status = %q, want %q", result.Status, core.ReviewStatusRejected)
 	}
-	if result.Plan.WaitReason != core.WaitFeedbackReq {
-		t.Fatalf("wait_reason = %q, want %q", result.Plan.WaitReason, core.WaitFeedbackReq)
+	if result.AutoApproved {
+		t.Fatal("auto_approved = true, want false")
+	}
+	if result.DAG == nil || len(result.DAG.Conflicts) != 1 {
+		t.Fatalf("dag conflicts = %d, want 1", len(result.DAG.Conflicts))
 	}
 }
 
-func TestNewDefaultReviewOrchestratorFileBasedApproveFlow(t *testing.T) {
+func TestNewDefaultReviewOrchestratorThresholdTriggersFixFlow(t *testing.T) {
 	store := newMockReviewStore()
 	panel := NewDefaultReviewOrchestrator(store)
-
-	plan := &core.TaskPlan{
-		ID:         "plan-default-review-file-based-approve",
-		ProjectID:  "proj-1",
-		Name:       "demo-file-based",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-		Tasks:      nil,
-	}
-
-	result, err := panel.Run(context.Background(), plan, ReviewInput{
-		PlanFileContents: map[string]string{
-			"docs/spec.md": "# Spec\n\nImplement feature from files",
+	panel.Reviewer = stubDemandReviewer{
+		fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 72}, nil
 		},
-	})
+	}
+	panel.AutoApproveThreshold = 80
+
+	issues := []*core.Issue{
+		newReviewTestIssue("issue-default-review-threshold"),
+	}
+	result, err := panel.Run(context.Background(), issues)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.Decision != DecisionApprove {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
+	if result.Decision != DecisionFix {
+		t.Fatalf("decision = %q, want %q", result.Decision, DecisionFix)
 	}
-	if result.Plan.Status != core.PlanWaitingHuman {
-		t.Fatalf("status = %q, want %q", result.Plan.Status, core.PlanWaitingHuman)
+	if result.Status != core.ReviewStatusChangesRequested {
+		t.Fatalf("status = %q, want %q", result.Status, core.ReviewStatusChangesRequested)
 	}
-	if result.Plan.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("wait_reason = %q, want %q", result.Plan.WaitReason, core.WaitFinalApproval)
+	if result.AutoApproved {
+		t.Fatal("auto_approved = true, want false")
 	}
 }
 
-func TestNewDefaultReviewOrchestratorFileBasedRequiresNonEmptyContents(t *testing.T) {
+func TestNewDefaultReviewOrchestratorRequiresNonNilIssueEntries(t *testing.T) {
 	store := newMockReviewStore()
 	panel := NewDefaultReviewOrchestrator(store)
+	panel.Reviewer = stubDemandReviewer{}
 
-	plan := &core.TaskPlan{
-		ID:         "plan-default-review-file-based-empty-content",
-		ProjectID:  "proj-1",
-		Name:       "demo-file-based-empty-content",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-		Tasks:      nil,
+	_, err := panel.Run(context.Background(), []*core.Issue{nil})
+	if err == nil {
+		t.Fatal("Run() error = nil, want non-nil")
 	}
-
-	result, err := panel.Run(context.Background(), plan, ReviewInput{
-		PlanFileContents: map[string]string{
-			"docs/spec.md": "   ",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Decision != DecisionEscalate {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionEscalate)
-	}
-	if !strings.Contains(result.Reason, "file") {
-		t.Fatalf("reason = %q, want contains %q", result.Reason, "file")
-	}
-	if result.Plan.WaitReason != core.WaitFeedbackReq {
-		t.Fatalf("wait_reason = %q, want %q", result.Plan.WaitReason, core.WaitFeedbackReq)
+	if !strings.Contains(err.Error(), "issue[0] is nil") {
+		t.Fatalf("error = %q, want contains %q", err.Error(), "issue[0] is nil")
 	}
 }
 
-func TestNewDefaultReviewOrchestratorFileBasedRequiresFileMap(t *testing.T) {
+func TestNewDefaultReviewOrchestratorRejectsDuplicateIssueIDs(t *testing.T) {
 	store := newMockReviewStore()
 	panel := NewDefaultReviewOrchestrator(store)
+	panel.Reviewer = stubDemandReviewer{}
 
-	plan := &core.TaskPlan{
-		ID:         "plan-default-review-file-based-empty-map",
-		ProjectID:  "proj-1",
-		Name:       "demo-file-based-empty-map",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-		Tasks:      nil,
+	issues := []*core.Issue{
+		newReviewTestIssue("issue-default-review-dup"),
+		newReviewTestIssue("issue-default-review-dup"),
 	}
-
-	result, err := panel.Run(context.Background(), plan, ReviewInput{
-		PlanFileContents: map[string]string{},
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+	_, err := panel.Run(context.Background(), issues)
+	if err == nil {
+		t.Fatal("Run() error = nil, want non-nil")
 	}
-	if result.Decision != DecisionEscalate {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionEscalate)
-	}
-	if !strings.Contains(result.Reason, "file") {
-		t.Fatalf("reason = %q, want contains %q", result.Reason, "file")
+	if !strings.Contains(err.Error(), "duplicate issue id") {
+		t.Fatalf("error = %q, want contains %q", err.Error(), "duplicate issue id")
 	}
 }
 

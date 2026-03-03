@@ -6,20 +6,19 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/yoke233/ai-workflow/internal/core"
 	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 )
 
-func TestManager_StartCallsRecoverExecutingPlans(t *testing.T) {
+func TestManager_StartCallsRecoverExecutingIssues(t *testing.T) {
 	t.Parallel()
 
 	store := newManagerTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	scheduler := &fakeManagerScheduler{}
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, scheduler)
+	manager, err := NewManager(store, nil, nil, scheduler)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -32,1273 +31,610 @@ func TestManager_StartCallsRecoverExecutingPlans(t *testing.T) {
 		t.Fatal("scheduler.Start should be called")
 	}
 	if !scheduler.recoverCalled {
-		t.Fatal("scheduler.RecoverExecutingPlans should be called")
+		t.Fatal("scheduler.RecoverExecutingIssues should be called")
 	}
 }
 
-func TestManager_CreateDraftSubmitReviewApproveFlow(t *testing.T) {
+func TestManager_CreateIssuesPersistsDraftWithDefaults(t *testing.T) {
 	t.Parallel()
 
 	store := newManagerTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
-	project := mustCreateManagerProject(t, store, "proj-manager-flow")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "draft-login-plan",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-flow-1",
-						Title:       "拆分认证模块任务",
-						Description: "分析认证模块并生成执行任务",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			},
-		},
+	project := mustCreateManagerProject(t, store, "proj-manager-create")
+	const sessionID = "sess-manager-create"
+	if err := store.CreateChatSession(&core.ChatSession{
+		ID:        sessionID,
+		ProjectID: project.ID,
+		Messages:  []core.ChatMessage{},
+	}); err != nil {
+		t.Fatalf("CreateChatSession() error = %v", err)
 	}
 
-	review := &fakeManagerReviewOrchestrator{
-		runFn: func(_ context.Context, plan *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-			out := cloneManagerTestPlan(plan)
-			out.Status = core.PlanWaitingHuman
-			out.WaitReason = core.WaitFinalApproval
-			out.ReviewRound = 1
-			out.Tasks = []core.TaskItem{
-				{
-					ID:          "task-flow-2",
-					PlanID:      plan.ID,
-					Title:       "补全回归测试",
-					Description: "补充登录流程回归测试并更新依赖",
-					Template:    "standard",
-					Status:      core.ItemPending,
-				},
-			}
-			return &ReviewResult{
-				Plan:     out,
-				Decision: DecisionApprove,
-				Round:    1,
-			}, nil
-		},
-	}
-
-	scheduler := &fakeManagerScheduler{store: store}
-	manager, err := NewManager(store, agent, review, scheduler)
+	manager, err := NewManager(store, nil, nil, &fakeManagerScheduler{})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	draft, err := manager.CreateDraft(context.Background(), CreateDraftInput{
+	created, err := manager.CreateIssues(context.Background(), CreateIssuesInput{
 		ProjectID: project.ID,
-		Request: Request{
-			Conversation: "给认证系统增加可审计的登录流程",
-			ProjectName:  "manager-flow",
-			TechStack:    "go",
-			RepoPath:     project.RepoPath,
+		SessionID: sessionID,
+		Issues: []CreateIssueSpec{
+			{
+				ID:        "issue-manager-create",
+				Title:     "Fill release regression steps",
+				Body:      "Ensure full regression checklist before release.",
+				Labels:    []string{"release", "qa"},
+				DependsOn: []string{" issue-prep ", "issue-prep", ""},
+				Blocks:    []string{"issue-deploy", "issue-deploy"},
+				Priority:  3,
+			},
 		},
 	})
 	if err != nil {
-		t.Fatalf("CreateDraft() error = %v", err)
+		t.Fatalf("CreateIssues() error = %v", err)
 	}
-	if draft.Status != core.PlanDraft {
-		t.Fatalf("draft status = %q, want %q", draft.Status, core.PlanDraft)
-	}
-	if _, err := store.GetTaskItem("task-flow-1"); err != nil {
-		t.Fatalf("task-flow-1 should be persisted after CreateDraft, got error = %v", err)
+	if len(created) != 1 {
+		t.Fatalf("CreateIssues() returned %d issues, want 1", len(created))
 	}
 
-	reviewed, err := manager.SubmitReview(context.Background(), draft.ID, ReviewInput{
-		Conversation:   "给认证系统增加可审计的登录流程",
-		ProjectContext: "manager flow test",
-	})
-	if err != nil {
-		t.Fatalf("SubmitReview() error = %v", err)
+	issue := created[0]
+	if issue.Status != core.IssueStatusDraft {
+		t.Fatalf("created status = %q, want %q", issue.Status, core.IssueStatusDraft)
 	}
-	if reviewed.Status != core.PlanWaitingHuman {
-		t.Fatalf("reviewed status = %q, want %q", reviewed.Status, core.PlanWaitingHuman)
+	if issue.State != core.IssueStateOpen {
+		t.Fatalf("created state = %q, want %q", issue.State, core.IssueStateOpen)
 	}
-	if reviewed.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("reviewed wait_reason = %q, want %q", reviewed.WaitReason, core.WaitFinalApproval)
+	if issue.Template != "standard" {
+		t.Fatalf("created template = %q, want %q", issue.Template, "standard")
 	}
-	if _, err := store.GetTaskItem("task-flow-2"); err != nil {
-		t.Fatalf("task-flow-2 should be upserted after SubmitReview, got error = %v", err)
+	if !issue.AutoMerge {
+		t.Fatalf("created auto_merge = %t, want true", issue.AutoMerge)
 	}
-	if _, err := store.GetTaskItem("task-flow-1"); err == nil {
-		t.Fatal("task-flow-1 should be replaced after SubmitReview")
+	if issue.FailPolicy != core.FailBlock {
+		t.Fatalf("created fail_policy = %q, want %q", issue.FailPolicy, core.FailBlock)
+	}
+	if len(issue.DependsOn) != 1 || issue.DependsOn[0] != "issue-prep" {
+		t.Fatalf("created depends_on = %#v, want [issue-prep]", issue.DependsOn)
+	}
+	if len(issue.Blocks) != 1 || issue.Blocks[0] != "issue-deploy" {
+		t.Fatalf("created blocks = %#v, want [issue-deploy]", issue.Blocks)
 	}
 
-	executing, err := manager.ApplyPlanAction(context.Background(), reviewed.ID, PlanAction{
-		Action: PlanActionApprove,
-	})
+	persisted, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("ApplyPlanAction(approve) error = %v", err)
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
 	}
-	if executing.Status != core.PlanExecuting {
-		t.Fatalf("plan status after approve = %q, want %q", executing.Status, core.PlanExecuting)
+	if persisted.Status != core.IssueStatusDraft {
+		t.Fatalf("persisted status = %q, want %q", persisted.Status, core.IssueStatusDraft)
 	}
-	if scheduler.startPlanCalls != 1 {
-		t.Fatalf("scheduler StartPlan calls = %d, want 1", scheduler.startPlanCalls)
+	if !persisted.AutoMerge {
+		t.Fatalf("persisted auto_merge = %t, want true", persisted.AutoMerge)
+	}
+	if persisted.SessionID != sessionID {
+		t.Fatalf("persisted session_id = %q, want %q", persisted.SessionID, sessionID)
 	}
 }
 
-func TestManager_CreateDraftSubmitReviewApproveFlowViaReviewGate(t *testing.T) {
+func TestManager_CreateIssuesRejectsDuplicateIssueIDs(t *testing.T) {
 	t.Parallel()
 
 	store := newManagerTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
-	project := mustCreateManagerProject(t, store, "proj-manager-flow-gate")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "draft-login-plan",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-flow-gate-1",
-						Title:       "拆分认证模块任务",
-						Description: "分析认证模块并生成执行任务",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			},
-		},
+	project := mustCreateManagerProject(t, store, "proj-manager-dup")
+	manager, err := NewManager(store, nil, nil, &fakeManagerScheduler{})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	review := &fakeManagerReviewOrchestrator{
-		runFn: func(_ context.Context, _ *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-			t.Fatal("ReviewOrchestrator.Run should not be called when ReviewGate is enabled")
-			return nil, errors.New("unexpected review orchestrator run")
+	_, err = manager.CreateIssues(context.Background(), CreateIssuesInput{
+		ProjectID: project.ID,
+		Issues: []CreateIssueSpec{
+			{ID: "issue-dup", Title: "first"},
+			{ID: "issue-dup", Title: "second"},
 		},
+	})
+	if err == nil {
+		t.Fatal("CreateIssues() should fail for duplicate issue IDs")
 	}
-	gate := &fakeManagerReviewGate{
-		submitFn: func(_ context.Context, plan *core.TaskPlan, callNo int) (string, error) {
-			updated := cloneManagerTestPlan(plan)
-			updated.Status = core.PlanReviewing
-			updated.WaitReason = core.WaitNone
-			updated.ReviewRound = callNo
-			if err := store.SaveTaskPlan(updated); err != nil {
-				return "", err
-			}
+	if !strings.Contains(err.Error(), `duplicate issue id "issue-dup"`) {
+		t.Fatalf("error = %v, want duplicate issue id message", err)
+	}
+}
 
-			go func(planID string, round int) {
-				time.Sleep(40 * time.Millisecond)
-				next, err := store.GetTaskPlan(planID)
-				if err != nil {
-					return
+func TestManager_SubmitForReviewMarksIssueReviewingViaTwoPhase(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-submit-two-phase")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-submit-two-phase", core.IssueStatusDraft, core.IssueStateOpen)
+
+	review := &fakeManagerTwoPhaseReview{}
+	manager, err := NewManager(store, nil, review, &fakeManagerScheduler{})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	err = manager.SubmitForReview(context.Background(), []string{" " + issue.ID + " ", issue.ID, ""})
+	if err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
+	}
+	if review.submitCalls != 1 {
+		t.Fatalf("two-phase SubmitForReview calls = %d, want 1", review.submitCalls)
+	}
+	if len(review.lastSubmitted) != 1 || review.lastSubmitted[0].ID != issue.ID {
+		t.Fatalf("two-phase submitted issues = %#v, want [%s]", review.lastSubmitted, issue.ID)
+	}
+
+	updated, err := store.GetIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
+	}
+	if updated.Status != core.IssueStatusReviewing {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusReviewing)
+	}
+	if updated.State != core.IssueStateOpen {
+		t.Fatalf("updated state = %q, want %q", updated.State, core.IssueStateOpen)
+	}
+
+	change := mustLatestIssueChange(t, store, issue.ID)
+	if change.Field != "status" {
+		t.Fatalf("change field = %q, want %q", change.Field, "status")
+	}
+	if change.OldValue != string(core.IssueStatusDraft) {
+		t.Fatalf("change old_value = %q, want %q", change.OldValue, core.IssueStatusDraft)
+	}
+	if change.NewValue != string(core.IssueStatusReviewing) {
+		t.Fatalf("change new_value = %q, want %q", change.NewValue, core.IssueStatusReviewing)
+	}
+	if change.Reason != "submit_for_review" {
+		t.Fatalf("change reason = %q, want %q", change.Reason, "submit_for_review")
+	}
+}
+
+func TestManager_SubmitForReviewAutoApprovesWhenAutoMergeEnabledAndRoundPasses(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-auto-approve")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-auto-approve", core.IssueStatusDraft, core.IssueStateOpen)
+	issue.AutoMerge = true
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue(%s) error = %v", issue.ID, err)
+	}
+
+	review := &fakeManagerTwoPhaseReview{
+		submitHook: func(issues []*core.Issue) error {
+			for i := range issues {
+				if err := store.SaveReviewRecord(&core.ReviewRecord{
+					IssueID:   issues[i].ID,
+					Round:     1,
+					Reviewer:  "auto-reviewer",
+					Verdict:   "pass",
+					Issues:    nil,
+					Fixes:     nil,
+					RawOutput: "all checks passed",
+				}); err != nil {
+					return err
 				}
-				next.Status = core.PlanWaitingHuman
-				next.WaitReason = core.WaitFinalApproval
-				next.ReviewRound = round
-				_ = store.SaveTaskPlan(next)
-			}(updated.ID, callNo)
-			return updated.ID, nil
+			}
+			return nil
 		},
 	}
-
-	scheduler := &fakeManagerScheduler{store: store}
-	manager, err := NewManager(store, agent, review, scheduler, WithReviewGate(gate))
+	scheduler := &fakeManagerScheduler{}
+	manager, err := NewManager(store, nil, review, scheduler)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	draft, err := manager.CreateDraft(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Request: Request{
-			Conversation: "给认证系统增加可审计的登录流程",
-			ProjectName:  "manager-flow-gate",
-			TechStack:    "go",
-			RepoPath:     project.RepoPath,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraft() error = %v", err)
+	if err := manager.SubmitForReview(context.Background(), []string{issue.ID}); err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
+	}
+	if scheduler.startIssueCalls != 1 {
+		t.Fatalf("scheduler StartIssue calls = %d, want 1", scheduler.startIssueCalls)
 	}
 
-	reviewing, err := manager.SubmitReview(context.Background(), draft.ID, ReviewInput{
-		Conversation:   "给认证系统增加可审计的登录流程",
-		ProjectContext: "manager flow review gate",
-	})
+	updated, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("SubmitReview() error = %v", err)
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
 	}
-	if reviewing.Status != core.PlanReviewing {
-		t.Fatalf("reviewing status = %q, want %q", reviewing.Status, core.PlanReviewing)
+	if updated.Status != core.IssueStatusQueued {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusQueued)
 	}
-	if reviewing.WaitReason != core.WaitNone {
-		t.Fatalf("reviewing wait_reason = %q, want %q", reviewing.WaitReason, core.WaitNone)
+}
+
+func TestManager_SubmitForReviewDoesNotAutoApproveWhenAutoMergeDisabled(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-auto-approve-disabled")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-auto-approve-disabled", core.IssueStatusDraft, core.IssueStateOpen)
+	issue.AutoMerge = false
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue(%s) error = %v", issue.ID, err)
+	}
+
+	review := &fakeManagerTwoPhaseReview{
+		submitHook: func(issues []*core.Issue) error {
+			for i := range issues {
+				if err := store.SaveReviewRecord(&core.ReviewRecord{
+					IssueID:  issues[i].ID,
+					Round:    1,
+					Reviewer: "auto-reviewer",
+					Verdict:  "pass",
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	scheduler := &fakeManagerScheduler{}
+	manager, err := NewManager(store, nil, review, scheduler)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	if err := manager.SubmitForReview(context.Background(), []string{issue.ID}); err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
+	}
+	if scheduler.startIssueCalls != 0 {
+		t.Fatalf("scheduler StartIssue calls = %d, want 0", scheduler.startIssueCalls)
+	}
+
+	updated, err := store.GetIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
+	}
+	if updated.Status != core.IssueStatusReviewing {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusReviewing)
+	}
+}
+
+func TestManager_SubmitForReviewDoesNotAutoApproveWhenRoundNotPass(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-auto-approve-no-pass")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-auto-approve-no-pass", core.IssueStatusDraft, core.IssueStateOpen)
+	issue.AutoMerge = true
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue(%s) error = %v", issue.ID, err)
+	}
+
+	review := &fakeManagerTwoPhaseReview{
+		submitHook: func(issues []*core.Issue) error {
+			for i := range issues {
+				if err := store.SaveReviewRecord(&core.ReviewRecord{
+					IssueID:  issues[i].ID,
+					Round:    1,
+					Reviewer: "auto-reviewer",
+					Verdict:  "fix",
+					Issues: []core.ReviewIssue{
+						{
+							Severity:    "high",
+							IssueID:     "rv-1",
+							Description: "need rework",
+							Suggestion:  "add missing rollback flow",
+						},
+					},
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	scheduler := &fakeManagerScheduler{}
+	manager, err := NewManager(store, nil, review, scheduler)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	if err := manager.SubmitForReview(context.Background(), []string{issue.ID}); err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
+	}
+	if scheduler.startIssueCalls != 0 {
+		t.Fatalf("scheduler StartIssue calls = %d, want 0", scheduler.startIssueCalls)
+	}
+
+	updated, err := store.GetIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
+	}
+	if updated.Status != core.IssueStatusReviewing {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusReviewing)
+	}
+}
+
+func TestManager_SubmitForReviewUsesReviewGateWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-submit-gate")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-submit-gate", core.IssueStatusDraft, core.IssueStateOpen)
+
+	gate := &fakeManagerReviewGate{}
+	manager, err := NewManager(store, nil, nil, &fakeManagerScheduler{}, WithReviewGate(gate))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	if err := manager.SubmitForReview(context.Background(), []string{issue.ID}); err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
 	}
 	if gate.submitCalls != 1 {
-		t.Fatalf("review gate submit calls = %d, want 1", gate.submitCalls)
+		t.Fatalf("review gate Submit calls = %d, want 1", gate.submitCalls)
+	}
+	if len(gate.lastSubmitted) != 1 || gate.lastSubmitted[0].ID != issue.ID {
+		t.Fatalf("review gate submitted issues = %#v, want [%s]", gate.lastSubmitted, issue.ID)
 	}
 
-	waiting := waitManagerPlanState(
-		t,
-		manager,
-		draft.ID,
-		core.PlanWaitingHuman,
-		core.WaitFinalApproval,
-		2*time.Second,
-	)
-	if waiting.ReviewRound != 1 {
-		t.Fatalf("waiting review_round = %d, want 1", waiting.ReviewRound)
-	}
-
-	executing, err := manager.ApplyPlanAction(context.Background(), waiting.ID, PlanAction{
-		Action: PlanActionApprove,
-	})
+	updated, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("ApplyPlanAction(approve) error = %v", err)
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
 	}
-	if executing.Status != core.PlanExecuting {
-		t.Fatalf("plan status after approve = %q, want %q", executing.Status, core.PlanExecuting)
-	}
-	if scheduler.startPlanCalls != 1 {
-		t.Fatalf("scheduler StartPlan calls = %d, want 1", scheduler.startPlanCalls)
+	if updated.Status != core.IssueStatusReviewing {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusReviewing)
 	}
 }
 
-func TestManager_ApplyPlanActionApproveRequiresFinalApproval(t *testing.T) {
+func TestManager_SubmitForReviewFailsWithoutSubmitter(t *testing.T) {
 	t.Parallel()
 
 	store := newManagerTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
-	project := mustCreateManagerProject(t, store, "proj-manager-approve-invalid")
-	plan := mustCreateManagerPlan(t, store, project.ID, "plan-manager-approve-invalid", core.PlanReviewing, core.WaitNone)
+	project := mustCreateManagerProject(t, store, "proj-manager-submit-no-review")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-submit-no-review", core.IssueStatusDraft, core.IssueStateOpen)
+
+	manager, err := NewManager(store, nil, nil, &fakeManagerScheduler{})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	err = manager.SubmitForReview(context.Background(), []string{issue.ID})
+	if err == nil {
+		t.Fatal("SubmitForReview() should fail when no review submitter is configured")
+	}
+	if !strings.Contains(err.Error(), "no issue review submitter configured") {
+		t.Fatalf("error = %v, want no review submitter message", err)
+	}
+}
+
+func TestManager_ApplyIssueActionApproveQueuesAndStartsIssue(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-approve")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-approve", core.IssueStatusReviewing, core.IssueStateOpen)
 
 	scheduler := &fakeManagerScheduler{}
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, scheduler)
+	manager, err := NewManager(store, nil, nil, scheduler)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	_, err = manager.ApplyPlanAction(context.Background(), plan.ID, PlanAction{Action: PlanActionApprove})
+	updated, err := manager.ApplyIssueAction(context.Background(), issue.ID, " APPROVE ", "ship it")
+	if err != nil {
+		t.Fatalf("ApplyIssueAction(approve) error = %v", err)
+	}
+	if updated.Status != core.IssueStatusQueued {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusQueued)
+	}
+	if updated.State != core.IssueStateOpen {
+		t.Fatalf("updated state = %q, want %q", updated.State, core.IssueStateOpen)
+	}
+	if updated.ClosedAt != nil {
+		t.Fatal("updated closed_at should be nil after approve")
+	}
+	if scheduler.startIssueCalls != 1 {
+		t.Fatalf("scheduler StartIssue calls = %d, want 1", scheduler.startIssueCalls)
+	}
+	if len(scheduler.startedIssues) != 1 || scheduler.startedIssues[0].ID != issue.ID {
+		t.Fatalf("scheduler started issues = %#v, want [%s]", scheduler.startedIssues, issue.ID)
+	}
+
+	change := mustLatestIssueChange(t, store, issue.ID)
+	if change.OldValue != string(core.IssueStatusReviewing) {
+		t.Fatalf("change old_value = %q, want %q", change.OldValue, core.IssueStatusReviewing)
+	}
+	if change.NewValue != string(core.IssueStatusQueued) {
+		t.Fatalf("change new_value = %q, want %q", change.NewValue, core.IssueStatusQueued)
+	}
+	if change.Reason != "ship it" {
+		t.Fatalf("change reason = %q, want %q", change.Reason, "ship it")
+	}
+}
+
+func TestManager_ApplyIssueActionApproveStartIssueFailureMarksIssueFailed(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-approve-start-fail")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-approve-start-fail", core.IssueStatusReviewing, core.IssueStateOpen)
+
+	startErr := errors.New("scheduler unavailable")
+	scheduler := &fakeManagerScheduler{
+		startIssueErr: startErr,
+	}
+	manager, err := NewManager(store, nil, nil, scheduler)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	updated, err := manager.ApplyIssueAction(context.Background(), issue.ID, IssueActionApprove, "ship it")
 	if err == nil {
-		t.Fatal("ApplyPlanAction(approve) should fail for non-waiting_human status")
+		t.Fatal("ApplyIssueAction(approve) should fail when scheduler StartIssue fails")
 	}
-	if !strings.Contains(err.Error(), "approve requires waiting_human/final_approval") {
-		t.Fatalf("error = %v, want contains %q", err, "approve requires waiting_human/final_approval")
+	if updated != nil {
+		t.Fatalf("ApplyIssueAction(approve) result = %#v, want nil on failure", updated)
 	}
-	if scheduler.startPlanCalls != 0 {
-		t.Fatalf("scheduler StartPlan calls = %d, want 0", scheduler.startPlanCalls)
+	if !strings.Contains(err.Error(), "start issue scheduler for "+issue.ID) {
+		t.Fatalf("error = %v, want issue scheduler start context", err)
+	}
+	if !strings.Contains(err.Error(), startErr.Error()) {
+		t.Fatalf("error = %v, want root scheduler error %q", err, startErr)
+	}
+	if scheduler.startIssueCalls != 1 {
+		t.Fatalf("scheduler StartIssue calls = %d, want 1", scheduler.startIssueCalls)
+	}
+
+	persisted, err := store.GetIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
+	}
+	if persisted.Status != core.IssueStatusFailed {
+		t.Fatalf("persisted status = %q, want %q", persisted.Status, core.IssueStatusFailed)
+	}
+	if persisted.State != core.IssueStateOpen {
+		t.Fatalf("persisted state = %q, want %q", persisted.State, core.IssueStateOpen)
+	}
+	if persisted.ClosedAt != nil {
+		t.Fatal("persisted closed_at should be nil after approve dispatch failure")
+	}
+	if persisted.PipelineID != "" {
+		t.Fatalf("persisted pipeline_id = %q, want empty when dispatch fails", persisted.PipelineID)
+	}
+
+	changes, err := store.GetIssueChanges(issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssueChanges(%s) error = %v", issue.ID, err)
+	}
+	var hasApproveQueuedChange bool
+	var hasDispatchFailedChange bool
+	for _, change := range changes {
+		if change.OldValue == string(core.IssueStatusReviewing) &&
+			change.NewValue == string(core.IssueStatusQueued) &&
+			change.Reason == "ship it" {
+			hasApproveQueuedChange = true
+		}
+		if change.OldValue == string(core.IssueStatusQueued) &&
+			change.NewValue == string(core.IssueStatusFailed) &&
+			strings.Contains(change.Reason, "approve dispatch failed") &&
+			strings.Contains(change.Reason, startErr.Error()) {
+			hasDispatchFailedChange = true
+		}
+	}
+	if !hasApproveQueuedChange {
+		t.Fatalf("missing approve queued issue change, got %#v", changes)
+	}
+	if !hasDispatchFailedChange {
+		t.Fatalf("missing dispatch failure issue change, got %#v", changes)
 	}
 }
 
-func TestManager_CreateDraftFromFiles(t *testing.T) {
+func TestManager_ApplyIssueActionRejectRequiresFeedback(t *testing.T) {
 	t.Parallel()
 
 	store := newManagerTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
-	project := mustCreateManagerProject(t, store, "proj-manager-file-draft")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "should-not-be-called",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-unexpected",
-						Title:       "unexpected",
-						Description: "unexpected",
-						Template:    "standard",
-					},
-				},
-			},
-		},
-	}
-	manager, err := NewManager(store, agent, &fakeManagerReviewOrchestrator{}, &fakeManagerScheduler{})
+	project := mustCreateManagerProject(t, store, "proj-manager-reject-no-feedback")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-reject-no-feedback", core.IssueStatusReviewing, core.IssueStateOpen)
+
+	manager, err := NewManager(store, nil, nil, &fakeManagerScheduler{})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	draft, err := manager.CreateDraftFromFiles(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Name:      "file-based-draft",
-		Request: Request{
-			Conversation: "基于提供的文件内容拆解任务",
-			ProjectName:  "manager-file-draft",
-			RepoPath:     project.RepoPath,
-		},
-		SourceFiles: []string{
-			"docs/spec.md",
-		},
-		FileContents: map[string]string{
-			"docs/spec.md": "# Feature spec",
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraftFromFiles() error = %v", err)
+	_, err = manager.ApplyIssueAction(context.Background(), issue.ID, IssueActionReject, "   ")
+	if err == nil {
+		t.Fatal("ApplyIssueAction(reject) should fail when feedback is empty")
 	}
-	if draft.Status != core.PlanDraft {
-		t.Fatalf("draft status = %q, want %q", draft.Status, core.PlanDraft)
-	}
-	if len(draft.Tasks) != 0 {
-		t.Fatalf("draft tasks = %d, want 0 for file-based draft", len(draft.Tasks))
-	}
-	if len(agent.calls) != 0 {
-		t.Fatalf("agent Decompose calls = %d, want 0 for CreateDraftFromFiles", len(agent.calls))
+	if !strings.Contains(err.Error(), "reject action requires feedback") {
+		t.Fatalf("error = %v, want reject feedback requirement", err)
 	}
 
-	meta, ok := manager.planMeta[draft.ID]
-	if !ok {
-		t.Fatalf("planMeta for %s not found", draft.ID)
+	persisted, err := store.GetIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
 	}
-	if len(meta.FileContents) != 1 || strings.TrimSpace(meta.FileContents["docs/spec.md"]) == "" {
-		t.Fatalf("planMeta.fileContents mismatch: %#v", meta.FileContents)
-	}
-	if len(meta.SourceFiles) != 1 || meta.SourceFiles[0] != "docs/spec.md" {
-		t.Fatalf("planMeta.sourceFiles mismatch: %#v", meta.SourceFiles)
+	if persisted.Status != core.IssueStatusReviewing {
+		t.Fatalf("persisted status = %q, want unchanged %q", persisted.Status, core.IssueStatusReviewing)
 	}
 }
 
-func TestManager_ApplyPlanActionApproveFileBasedParseAndScheduleSuccess(t *testing.T) {
+func TestManager_ApplyIssueActionRejectMovesIssueToDraft(t *testing.T) {
 	t.Parallel()
 
 	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-file-approve-success")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "parsed-from-files",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-file-1",
-						Title:       "从文件拆解任务",
-						Description: "根据文件内容拆解并生成可执行任务",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			},
-		},
-	}
-	scheduler := &fakeManagerScheduler{store: store}
-	manager, err := NewManager(store, agent, &fakeManagerReviewOrchestrator{}, scheduler)
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	draft, err := manager.CreateDraftFromFiles(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Name:      "file-based-approve",
-		Request: Request{
-			Conversation: "根据 docs/spec.md 生成任务清单",
-			ProjectName:  "manager-file-approve-success",
-			TechStack:    "go",
-			RepoPath:     project.RepoPath,
-		},
-		SourceFiles: []string{
-			"docs/spec.md",
-		},
-		FileContents: map[string]string{
-			"docs/spec.md": "spec content",
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraftFromFiles() error = %v", err)
-	}
-
-	readyToApprove := cloneManagerTestPlan(draft)
-	readyToApprove.Status = core.PlanWaitingHuman
-	readyToApprove.WaitReason = core.WaitFinalApproval
-	if err := store.SaveTaskPlan(readyToApprove); err != nil {
-		t.Fatalf("SaveTaskPlan(waiting final_approval) error = %v", err)
-	}
-
-	updated, err := manager.ApplyPlanAction(context.Background(), draft.ID, PlanAction{
-		Action: PlanActionApprove,
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(approve) error = %v", err)
-	}
-	if updated.Status != core.PlanExecuting {
-		t.Fatalf("updated status = %q, want %q", updated.Status, core.PlanExecuting)
-	}
-	if scheduler.startPlanCalls != 1 {
-		t.Fatalf("scheduler StartPlan calls = %d, want 1", scheduler.startPlanCalls)
-	}
-	if len(agent.calls) != 1 {
-		t.Fatalf("agent Decompose calls = %d, want 1", len(agent.calls))
-	}
-	if strings.TrimSpace(agent.calls[0].FileContents["docs/spec.md"]) == "" {
-		t.Fatalf("agent decompose request file contents missing: %#v", agent.calls[0].FileContents)
-	}
-
-	persisted, err := manager.GetPlan(context.Background(), draft.ID)
-	if err != nil {
-		t.Fatalf("GetPlan() error = %v", err)
-	}
-	if len(persisted.Tasks) != 1 || persisted.Tasks[0].ID != "task-file-1" {
-		t.Fatalf("persisted tasks mismatch after parse-and-schedule: %#v", persisted.Tasks)
-	}
-}
-
-func TestManager_ApplyPlanActionApproveFileBasedParseFailureSetsParseFailed(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-file-approve-parse-fail")
-	agent := &fakeManagerAgent{
-		err: errors.New("decompose failed"),
-	}
-	scheduler := &fakeManagerScheduler{store: store}
-	manager, err := NewManager(store, agent, &fakeManagerReviewOrchestrator{}, scheduler)
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	draft, err := manager.CreateDraftFromFiles(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Name:      "file-based-parse-fail",
-		Request: Request{
-			Conversation: "从文件解析任务",
-			ProjectName:  "manager-file-approve-parse-fail",
-			RepoPath:     project.RepoPath,
-		},
-		FileContents: map[string]string{
-			"docs/spec.md": "spec content",
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraftFromFiles() error = %v", err)
-	}
-
-	readyToApprove := cloneManagerTestPlan(draft)
-	readyToApprove.Status = core.PlanWaitingHuman
-	readyToApprove.WaitReason = core.WaitFinalApproval
-	if err := store.SaveTaskPlan(readyToApprove); err != nil {
-		t.Fatalf("SaveTaskPlan(waiting final_approval) error = %v", err)
-	}
-
-	updated, err := manager.ApplyPlanAction(context.Background(), draft.ID, PlanAction{
-		Action: PlanActionApprove,
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(approve) error = %v", err)
-	}
-	if updated.Status != core.PlanWaitingHuman {
-		t.Fatalf("updated status = %q, want %q", updated.Status, core.PlanWaitingHuman)
-	}
-	if updated.WaitReason != waitReasonParseFailed {
-		t.Fatalf("updated wait_reason = %q, want %q", updated.WaitReason, waitReasonParseFailed)
-	}
-	if scheduler.startPlanCalls != 0 {
-		t.Fatalf("scheduler StartPlan calls = %d, want 0 when parse fails", scheduler.startPlanCalls)
-	}
-}
-
-func TestManager_ApplyPlanActionApproveFileBasedDAGFailureSetsParseFailed(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-file-approve-dag-fail")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "parsed-with-cycle",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-cycle-1",
-						Title:       "A",
-						Description: "A",
-						Template:    "standard",
-						DependsOn:   []string{"task-cycle-2"},
-					},
-					{
-						ID:          "task-cycle-2",
-						Title:       "B",
-						Description: "B",
-						Template:    "standard",
-						DependsOn:   []string{"task-cycle-1"},
-					},
-				},
-			},
-		},
-	}
-	scheduler := &fakeManagerScheduler{store: store}
-	manager, err := NewManager(store, agent, &fakeManagerReviewOrchestrator{}, scheduler)
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	draft, err := manager.CreateDraftFromFiles(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Name:      "file-based-dag-fail",
-		Request: Request{
-			Conversation: "从文件解析任务",
-			ProjectName:  "manager-file-approve-dag-fail",
-			RepoPath:     project.RepoPath,
-		},
-		FileContents: map[string]string{
-			"docs/spec.md": "spec content",
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraftFromFiles() error = %v", err)
-	}
-
-	readyToApprove := cloneManagerTestPlan(draft)
-	readyToApprove.Status = core.PlanWaitingHuman
-	readyToApprove.WaitReason = core.WaitFinalApproval
-	if err := store.SaveTaskPlan(readyToApprove); err != nil {
-		t.Fatalf("SaveTaskPlan(waiting final_approval) error = %v", err)
-	}
-
-	updated, err := manager.ApplyPlanAction(context.Background(), draft.ID, PlanAction{
-		Action: PlanActionApprove,
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(approve) error = %v", err)
-	}
-	if updated.Status != core.PlanWaitingHuman {
-		t.Fatalf("updated status = %q, want %q", updated.Status, core.PlanWaitingHuman)
-	}
-	if updated.WaitReason != waitReasonParseFailed {
-		t.Fatalf("updated wait_reason = %q, want %q", updated.WaitReason, waitReasonParseFailed)
-	}
-	if scheduler.startPlanCalls != 0 {
-		t.Fatalf("scheduler StartPlan calls = %d, want 0 when dag validate fails", scheduler.startPlanCalls)
-	}
-}
-
-func TestManager_ApplyPlanActionRejectParseFailedResetsToFinalApproval(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-file-reject-parse-failed")
-	agent := &fakeManagerAgent{}
-	review := &fakeManagerReviewOrchestrator{}
-	manager, err := NewManager(store, agent, review, &fakeManagerScheduler{})
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	draft, err := manager.CreateDraftFromFiles(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Name:      "file-based-reject-parse-failed",
-		Request: Request{
-			Conversation: "从文件解析任务",
-			ProjectName:  "manager-file-reject-parse-failed",
-			RepoPath:     project.RepoPath,
-		},
-		FileContents: map[string]string{
-			"docs/spec.md": "spec content",
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraftFromFiles() error = %v", err)
-	}
-
-	parseFailedPlan := cloneManagerTestPlan(draft)
-	parseFailedPlan.Status = core.PlanWaitingHuman
-	parseFailedPlan.WaitReason = waitReasonParseFailed
-	if err := store.SaveTaskPlan(parseFailedPlan); err != nil {
-		t.Fatalf("SaveTaskPlan(parse_failed) error = %v", err)
-	}
-
-	updated, err := manager.ApplyPlanAction(context.Background(), draft.ID, PlanAction{
-		Action: PlanActionReject,
-		Feedback: &HumanFeedback{
-			Category: FeedbackCoverageGap,
-			Detail:   "解析失败后我补充了文件边界和验收标准，请按新描述重新解析任务。",
-		},
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(reject) error = %v", err)
-	}
-	if updated.Status != core.PlanWaitingHuman {
-		t.Fatalf("updated status = %q, want %q", updated.Status, core.PlanWaitingHuman)
-	}
-	if updated.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("updated wait_reason = %q, want %q", updated.WaitReason, core.WaitFinalApproval)
-	}
-	if review.handleRejectCalls != 0 {
-		t.Fatalf("HandleHumanReject calls = %d, want 0 for parse_failed reject branch", review.handleRejectCalls)
-	}
-
-	meta, ok := manager.planMeta[draft.ID]
-	if !ok {
-		t.Fatalf("planMeta for %s not found", draft.ID)
-	}
-	if len(meta.ParseFailedFeedbacks) != 1 {
-		t.Fatalf("parse_failed feedback count = %d, want 1", len(meta.ParseFailedFeedbacks))
-	}
-	if meta.ParseFailedFeedbacks[0].Category != FeedbackCoverageGap {
-		t.Fatalf("parse_failed feedback category = %q, want %q", meta.ParseFailedFeedbacks[0].Category, FeedbackCoverageGap)
-	}
-}
-
-func TestManager_ApplyPlanActionApproveTasksBasedDoesNotParseFiles(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-approve-tasks-based")
-	plan := mustCreateManagerPlan(
-		t,
-		store,
-		project.ID,
-		"plan-manager-approve-tasks-based",
-		core.PlanWaitingHuman,
-		core.WaitFinalApproval,
-	)
-	task := core.TaskItem{
-		ID:          "task-tasks-based-1",
-		PlanID:      plan.ID,
-		Title:       "tasks-based",
-		Description: "existing tasks based flow",
-		Template:    "standard",
-		Status:      core.ItemPending,
-	}
-	if err := store.CreateTaskItem(&task); err != nil {
-		t.Fatalf("CreateTaskItem() error = %v", err)
-	}
-
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "unexpected-parse",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-unexpected-parse",
-						Title:       "unexpected",
-						Description: "unexpected",
-						Template:    "standard",
-					},
-				},
-			},
-		},
-	}
-	scheduler := &fakeManagerScheduler{store: store}
-	manager, err := NewManager(store, agent, &fakeManagerReviewOrchestrator{}, scheduler)
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	updated, err := manager.ApplyPlanAction(context.Background(), plan.ID, PlanAction{
-		Action: PlanActionApprove,
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(approve) error = %v", err)
-	}
-	if updated.Status != core.PlanExecuting {
-		t.Fatalf("updated status = %q, want %q", updated.Status, core.PlanExecuting)
-	}
-	if scheduler.startPlanCalls != 1 {
-		t.Fatalf("scheduler StartPlan calls = %d, want 1", scheduler.startPlanCalls)
-	}
-	if len(agent.calls) != 0 {
-		t.Fatalf("agent Decompose calls = %d, want 0 for tasks-based approve", len(agent.calls))
-	}
-}
-
-func TestManager_ApplyPlanActionRejectTriggersRegeneration(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	project := mustCreateManagerProject(t, store, "proj-manager-reject")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "initial-plan",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-reject-initial",
-						Title:       "初始任务",
-						Description: "先生成一版任务计划",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			},
-			{
-				Name: "regenerated-plan",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-regenerated",
-						Title:       "重生成任务",
-						Description: "根据人工反馈重生成任务结构",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			},
-		},
-	}
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-reject", core.IssueStatusReviewing, core.IssueStateOpen)
 
-	review := &fakeManagerReviewOrchestrator{}
-	review.runFn = func(_ context.Context, plan *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-		review.mu.Lock()
-		callNo := review.runCalls
-		review.mu.Unlock()
-
-		out := cloneManagerTestPlan(plan)
-		switch callNo {
-		case 1:
-			out.Status = core.PlanWaitingHuman
-			out.WaitReason = core.WaitFinalApproval
-			out.ReviewRound = 1
-			out.Tasks = []core.TaskItem{
-				{
-					ID:          "task-review-first",
-					PlanID:      plan.ID,
-					Title:       "首轮审核结果",
-					Description: "首轮审核后等待人工最终确认",
-					Template:    "standard",
-					Status:      core.ItemPending,
-				},
-			}
-			return &ReviewResult{
-				Plan:     out,
-				Decision: DecisionApprove,
-				Round:    1,
-			}, nil
-		case 2:
-			if plan.Status != core.PlanReviewing {
-				t.Fatalf("second review should receive reviewing plan, got %q", plan.Status)
-			}
-			out.Status = core.PlanWaitingHuman
-			out.WaitReason = core.WaitFinalApproval
-			out.ReviewRound = 1
-			out.Tasks = []core.TaskItem{
-				{
-					ID:          "task-review-second",
-					PlanID:      plan.ID,
-					Title:       "重审后结果",
-					Description: "重审后再次进入人工最终确认",
-					Template:    "standard",
-					Status:      core.ItemPending,
-				},
-			}
-			return &ReviewResult{
-				Plan:     out,
-				Decision: DecisionApprove,
-				Round:    1,
-			}, nil
-		default:
-			return nil, errors.New("unexpected review run call")
-		}
-	}
-
-	review.handleRejectFn = func(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
-		if plan.Status != core.PlanWaitingHuman {
-			t.Fatalf("HandleHumanReject should receive waiting_human plan, got %q", plan.Status)
-		}
-		if plan.WaitReason != core.WaitFinalApproval {
-			t.Fatalf("HandleHumanReject should receive final_approval wait reason, got %q", plan.WaitReason)
-		}
-		nextPlan, err := regenerator.Regenerate(ctx, RegenerationRequest{
-			PlanID:       plan.ID,
-			RevisionFrom: plan.ReviewRound,
-			WaitReason:   plan.WaitReason,
-			Feedback:     feedback,
-			AIReviewSummary: AIReviewSummary{
-				Rounds:       plan.ReviewRound,
-				LastDecision: DecisionApprove,
-				TopIssues:    []string{"需要补齐验收步骤"},
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		nextPlan.ID = plan.ID
-		nextPlan.ProjectID = plan.ProjectID
-		nextPlan.Status = core.PlanReviewing
-		nextPlan.WaitReason = core.WaitNone
-		nextPlan.ReviewRound = 0
-		return nextPlan, nil
-	}
-
-	manager, err := NewManager(store, agent, review, &fakeManagerScheduler{store: store})
+	manager, err := NewManager(store, nil, nil, &fakeManagerScheduler{})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	draft, err := manager.CreateDraft(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Request: Request{
-			Conversation: "把发布流程拆成可回滚的子任务",
-			ProjectName:  "manager-reject",
-			TechStack:    "go",
-			RepoPath:     project.RepoPath,
-		},
-	})
+	updated, err := manager.ApplyIssueAction(context.Background(), issue.ID, IssueActionReject, "need more details")
 	if err != nil {
-		t.Fatalf("CreateDraft() error = %v", err)
+		t.Fatalf("ApplyIssueAction(reject) error = %v", err)
 	}
-	if _, err := manager.SubmitReview(context.Background(), draft.ID, ReviewInput{
-		Conversation:   "把发布流程拆成可回滚的子任务",
-		ProjectContext: "reject path",
-	}); err != nil {
-		t.Fatalf("SubmitReview() error = %v", err)
+	if updated.Status != core.IssueStatusDraft {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusDraft)
+	}
+	if updated.State != core.IssueStateOpen {
+		t.Fatalf("updated state = %q, want %q", updated.State, core.IssueStateOpen)
+	}
+	if updated.ClosedAt != nil {
+		t.Fatal("updated closed_at should be nil after reject")
 	}
 
-	updated, err := manager.ApplyPlanAction(context.Background(), draft.ID, PlanAction{
-		Action: PlanActionReject,
-		Feedback: &HumanFeedback{
-			Category:          FeedbackCoverageGap,
-			Detail:            "当前计划没有覆盖上线回滚演练和异常告警回归，请补齐这两个任务并明确依赖关系。",
-			ExpectedDirection: "补齐回滚和告警回归任务",
-		},
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(reject) error = %v", err)
-	}
-
-	if review.handleRejectCalls != 1 {
-		t.Fatalf("HandleHumanReject calls = %d, want 1", review.handleRejectCalls)
-	}
-	if review.runCalls != 2 {
-		t.Fatalf("Run calls = %d, want 2 (initial + rerun)", review.runCalls)
-	}
-	if len(agent.calls) != 2 {
-		t.Fatalf("agent Decompose calls = %d, want 2 (create + regenerate)", len(agent.calls))
-	}
-	if updated.Status != core.PlanWaitingHuman {
-		t.Fatalf("updated plan status = %q, want %q", updated.Status, core.PlanWaitingHuman)
-	}
-	if updated.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("updated wait_reason = %q, want %q", updated.WaitReason, core.WaitFinalApproval)
-	}
-	if _, err := store.GetTaskItem("task-review-second"); err != nil {
-		t.Fatalf("task-review-second should be upserted after rerun review, got error = %v", err)
-	}
-	if _, err := store.GetTaskItem("task-review-first"); err == nil {
-		t.Fatal("task-review-first should be replaced after rerun review")
+	change := mustLatestIssueChange(t, store, issue.ID)
+	if change.Reason != "need more details" {
+		t.Fatalf("change reason = %q, want %q", change.Reason, "need more details")
 	}
 }
 
-func TestManager_ApplyPlanActionRejectResubmitsToReviewGate(t *testing.T) {
+func TestManager_ApplyIssueActionAbandonClosesIssue(t *testing.T) {
 	t.Parallel()
 
 	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-reject-gate")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "initial-plan",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-reject-gate-initial",
-						Title:       "初始任务",
-						Description: "先生成一版任务计划",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			},
-			{
-				Name: "regenerated-plan",
-				Tasks: []core.TaskItem{
-					{
-						ID:          "task-reject-gate-regenerated",
-						Title:       "重生成任务",
-						Description: "根据人工反馈重生成任务结构",
-						Template:    "standard",
-						Status:      core.ItemPending,
-					},
-				},
-			},
-		},
-	}
-
-	review := &fakeManagerReviewOrchestrator{
-		runFn: func(_ context.Context, _ *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-			t.Fatal("ReviewOrchestrator.Run should not be called when ReviewGate is enabled")
-			return nil, errors.New("unexpected review orchestrator run")
-		},
-	}
-	review.handleRejectFn = func(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
-		if plan.Status != core.PlanWaitingHuman {
-			t.Fatalf("HandleHumanReject should receive waiting_human plan, got %q", plan.Status)
-		}
-		if plan.WaitReason != core.WaitFinalApproval {
-			t.Fatalf("HandleHumanReject should receive final_approval wait reason, got %q", plan.WaitReason)
-		}
-		nextPlan, err := regenerator.Regenerate(ctx, RegenerationRequest{
-			PlanID:       plan.ID,
-			RevisionFrom: plan.ReviewRound,
-			WaitReason:   plan.WaitReason,
-			Feedback:     feedback,
-			AIReviewSummary: AIReviewSummary{
-				Rounds:       plan.ReviewRound,
-				LastDecision: DecisionApprove,
-				TopIssues:    []string{"补齐回滚演练任务"},
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		nextPlan.ID = plan.ID
-		nextPlan.ProjectID = plan.ProjectID
-		nextPlan.Status = core.PlanReviewing
-		nextPlan.WaitReason = core.WaitNone
-		nextPlan.ReviewRound = 0
-		return nextPlan, nil
-	}
-
-	gate := &fakeManagerReviewGate{
-		submitFn: func(_ context.Context, plan *core.TaskPlan, callNo int) (string, error) {
-			updated := cloneManagerTestPlan(plan)
-			updated.Status = core.PlanReviewing
-			updated.WaitReason = core.WaitNone
-			updated.ReviewRound = callNo
-			if err := store.SaveTaskPlan(updated); err != nil {
-				return "", err
-			}
-
-			go func(planID string, round int) {
-				time.Sleep(40 * time.Millisecond)
-				next, err := store.GetTaskPlan(planID)
-				if err != nil {
-					return
-				}
-				next.Status = core.PlanWaitingHuman
-				next.WaitReason = core.WaitFinalApproval
-				next.ReviewRound = round
-				_ = store.SaveTaskPlan(next)
-			}(updated.ID, callNo)
-			return updated.ID, nil
-		},
-	}
-
-	manager, err := NewManager(store, agent, review, &fakeManagerScheduler{store: store}, WithReviewGate(gate))
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	draft, err := manager.CreateDraft(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Request: Request{
-			Conversation: "把发布流程拆成可回滚的子任务",
-			ProjectName:  "manager-reject-gate",
-			TechStack:    "go",
-			RepoPath:     project.RepoPath,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraft() error = %v", err)
-	}
-
-	if _, err := manager.SubmitReview(context.Background(), draft.ID, ReviewInput{
-		Conversation:   "把发布流程拆成可回滚的子任务",
-		ProjectContext: "reject gate path",
-	}); err != nil {
-		t.Fatalf("SubmitReview() error = %v", err)
-	}
-
-	waitManagerPlanState(
-		t,
-		manager,
-		draft.ID,
-		core.PlanWaitingHuman,
-		core.WaitFinalApproval,
-		2*time.Second,
-	)
-
-	reviewing, err := manager.ApplyPlanAction(context.Background(), draft.ID, PlanAction{
-		Action: PlanActionReject,
-		Feedback: &HumanFeedback{
-			Category:          FeedbackCoverageGap,
-			Detail:            "当前计划没有覆盖上线回滚演练和异常告警回归，请补齐这两个任务并明确依赖关系。",
-			ExpectedDirection: "补齐回滚和告警回归任务",
-		},
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(reject) error = %v", err)
-	}
-
-	if reviewing.Status != core.PlanReviewing {
-		t.Fatalf("updated plan status = %q, want %q", reviewing.Status, core.PlanReviewing)
-	}
-	if reviewing.WaitReason != core.WaitNone {
-		t.Fatalf("updated plan wait_reason = %q, want %q", reviewing.WaitReason, core.WaitNone)
-	}
-	if review.handleRejectCalls != 1 {
-		t.Fatalf("HandleHumanReject calls = %d, want 1", review.handleRejectCalls)
-	}
-	if review.runCalls != 0 {
-		t.Fatalf("Run calls = %d, want 0 when ReviewGate is enabled", review.runCalls)
-	}
-	if gate.submitCalls != 2 {
-		t.Fatalf("review gate submit calls = %d, want 2 (initial + reject resubmit)", gate.submitCalls)
-	}
-	if len(agent.calls) != 2 {
-		t.Fatalf("agent Decompose calls = %d, want 2 (create + regenerate)", len(agent.calls))
-	}
-
-	waitingAgain := waitManagerPlanState(
-		t,
-		manager,
-		draft.ID,
-		core.PlanWaitingHuman,
-		core.WaitFinalApproval,
-		2*time.Second,
-	)
-	if waitingAgain.ReviewRound != 2 {
-		t.Fatalf("waiting review_round after reject = %d, want 2", waitingAgain.ReviewRound)
-	}
-}
-
-func TestManager_ApplyPlanActionRejectRequiresAllowedWaitReason(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-reject-invalid-wait-reason")
-	plan := mustCreateManagerPlan(t, store, project.ID, "plan-manager-reject-invalid-wait-reason", core.PlanWaitingHuman, core.WaitNone)
-
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, &fakeManagerScheduler{})
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	_, err = manager.ApplyPlanAction(context.Background(), plan.ID, PlanAction{
-		Action: PlanActionReject,
-		Feedback: &HumanFeedback{
-			Category: FeedbackCoverageGap,
-			Detail:   "当前计划仍缺少回滚演练和告警回归任务，请补齐并明确依赖关系以便调度执行。",
-		},
-	})
-	if err == nil {
-		t.Fatal("ApplyPlanAction(reject) should fail for waiting_human + empty wait_reason")
-	}
-	if !strings.Contains(err.Error(), "reject requires waiting_human/final_approval|feedback_required|parse_failed") {
-		t.Fatalf("error = %v, want wait_reason guard", err)
-	}
-}
-
-func TestManager_CreateDraft_TaskIDCollisionAcrossPlans(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-id-collision")
-	agent := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "plan-a",
-				Tasks: []core.TaskItem{
-					{ID: "task-1", Title: "A", Description: "task A", Template: "standard"},
-				},
-			},
-			{
-				Name: "plan-b",
-				Tasks: []core.TaskItem{
-					{ID: "task-1", Title: "B", Description: "task B", Template: "standard"},
-				},
-			},
-		},
-	}
-
-	manager, err := NewManager(store, agent, &fakeManagerReviewOrchestrator{}, &fakeManagerScheduler{})
-	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
-	}
-
-	planA, err := manager.CreateDraft(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Request: Request{
-			Conversation: "first plan",
-			ProjectName:  "id-collision",
-			RepoPath:     project.RepoPath,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraft(planA) error = %v", err)
-	}
-	planB, err := manager.CreateDraft(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Request: Request{
-			Conversation: "second plan",
-			ProjectName:  "id-collision",
-			RepoPath:     project.RepoPath,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraft(planB) error = %v", err)
-	}
-
-	if len(planA.Tasks) != 1 || len(planB.Tasks) != 1 {
-		t.Fatalf("unexpected task count: planA=%d planB=%d", len(planA.Tasks), len(planB.Tasks))
-	}
-	if planA.Tasks[0].ID == planB.Tasks[0].ID {
-		t.Fatalf("task ids should be disambiguated across plans, got duplicated id %q", planA.Tasks[0].ID)
-	}
-
-	taskA, err := store.GetTaskItem(planA.Tasks[0].ID)
-	if err != nil {
-		t.Fatalf("GetTaskItem(planA task) error = %v", err)
-	}
-	if taskA.PlanID != planA.ID {
-		t.Fatalf("planA task plan_id = %q, want %q", taskA.PlanID, planA.ID)
-	}
-}
-
-func TestManager_ApplyPlanActionRejectAfterManagerRestart(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
-
-	project := mustCreateManagerProject(t, store, "proj-manager-restart-reject")
-
-	agentCreate := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "initial-plan",
-				Tasks: []core.TaskItem{
-					{ID: "task-initial", Title: "Initial", Description: "initial task", Template: "standard"},
-				},
-			},
-		},
-	}
-	reviewCreate := &fakeManagerReviewOrchestrator{
-		runFn: func(_ context.Context, plan *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-			out := cloneManagerTestPlan(plan)
-			out.Status = core.PlanWaitingHuman
-			out.WaitReason = core.WaitFinalApproval
-			out.ReviewRound = 1
-			return &ReviewResult{Plan: out, Decision: DecisionApprove, Round: 1}, nil
-		},
-	}
-
-	managerCreate, err := NewManager(store, agentCreate, reviewCreate, &fakeManagerScheduler{store: store})
-	if err != nil {
-		t.Fatalf("NewManager(create) error = %v", err)
-	}
-	draft, err := managerCreate.CreateDraft(context.Background(), CreateDraftInput{
-		ProjectID: project.ID,
-		Request: Request{
-			Conversation: "restart reject flow",
-			ProjectName:  "manager-restart",
-			RepoPath:     project.RepoPath,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateDraft() error = %v", err)
-	}
-	if _, err := managerCreate.SubmitReview(context.Background(), draft.ID, ReviewInput{
-		Conversation:   "restart reject flow",
-		ProjectContext: "restart reject",
-	}); err != nil {
-		t.Fatalf("SubmitReview() error = %v", err)
-	}
-
-	agentRestart := &fakeManagerAgent{
-		outputs: []*core.TaskPlan{
-			{
-				Name: "regenerated-plan",
-				Tasks: []core.TaskItem{
-					{ID: "task-regenerated-restart", Title: "Regenerated", Description: "regen task", Template: "standard"},
-				},
-			},
-		},
-	}
-	reviewRestart := &fakeManagerReviewOrchestrator{
-		handleRejectFn: func(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
-			next, err := regenerator.Regenerate(ctx, RegenerationRequest{
-				PlanID:       plan.ID,
-				RevisionFrom: plan.ReviewRound,
-				WaitReason:   plan.WaitReason,
-				Feedback:     feedback,
-				AIReviewSummary: AIReviewSummary{
-					Rounds:       plan.ReviewRound,
-					LastDecision: DecisionApprove,
-				},
-			})
-			if err != nil {
-				return nil, err
-			}
-			next.ID = plan.ID
-			next.ProjectID = plan.ProjectID
-			next.Status = core.PlanReviewing
-			next.WaitReason = core.WaitNone
-			return next, nil
-		},
-		runFn: func(_ context.Context, plan *core.TaskPlan, _ ReviewInput) (*ReviewResult, error) {
-			out := cloneManagerTestPlan(plan)
-			out.Status = core.PlanWaitingHuman
-			out.WaitReason = core.WaitFinalApproval
-			out.ReviewRound = 1
-			return &ReviewResult{Plan: out, Decision: DecisionApprove, Round: 1}, nil
-		},
-	}
-
-	// 构造新的 manager 实例，验证无内存 planMeta 时 reject 仍可重生成。
-	managerRestart, err := NewManager(store, agentRestart, reviewRestart, &fakeManagerScheduler{store: store})
-	if err != nil {
-		t.Fatalf("NewManager(restart) error = %v", err)
-	}
-
-	updated, err := managerRestart.ApplyPlanAction(context.Background(), draft.ID, PlanAction{
-		Action: PlanActionReject,
-		Feedback: &HumanFeedback{
-			Category: FeedbackCoverageGap,
-			Detail:   "重启后继续驳回流程，要求补齐异常回滚和告警验证步骤，确保任务可独立执行。",
-		},
-	})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(reject after restart) error = %v", err)
-	}
-	if updated.Status != core.PlanWaitingHuman || updated.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("updated plan = %s/%s, want waiting_human/final_approval", updated.Status, updated.WaitReason)
-	}
-	if len(agentRestart.calls) != 1 {
-		t.Fatalf("regeneration decompose calls = %d, want 1", len(agentRestart.calls))
-	}
-}
-
-func TestManager_ApplyPlanActionAbandonOnlyWaitingHuman(t *testing.T) {
-	t.Parallel()
-
-	store := newManagerTestStore(t)
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	project := mustCreateManagerProject(t, store, "proj-manager-abandon")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-abandon", core.IssueStatusReviewing, core.IssueStateOpen)
 
-	notAllowed := mustCreateManagerPlan(t, store, project.ID, "plan-manager-abandon-invalid", core.PlanReviewing, core.WaitNone)
-	manager, err := NewManager(store, &fakeManagerAgent{}, &fakeManagerReviewOrchestrator{}, &fakeManagerScheduler{})
+	manager, err := NewManager(store, nil, nil, &fakeManagerScheduler{})
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	_, err = manager.ApplyPlanAction(context.Background(), notAllowed.ID, PlanAction{Action: PlanActionAbandon})
-	if err == nil {
-		t.Fatal("ApplyPlanAction(abandon) should fail for non-waiting_human status")
+	updated, err := manager.ApplyIssueAction(context.Background(), issue.ID, IssueActionAbandon, "")
+	if err != nil {
+		t.Fatalf("ApplyIssueAction(abandon) error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "abandon requires waiting_human") {
-		t.Fatalf("error = %v, want contains %q", err, "abandon requires waiting_human")
+	if updated.Status != core.IssueStatusAbandoned {
+		t.Fatalf("updated status = %q, want %q", updated.Status, core.IssueStatusAbandoned)
+	}
+	if updated.State != core.IssueStateClosed {
+		t.Fatalf("updated state = %q, want %q", updated.State, core.IssueStateClosed)
+	}
+	if updated.ClosedAt == nil {
+		t.Fatal("updated closed_at should be set after abandon")
 	}
 
-	allowed := mustCreateManagerPlan(t, store, project.ID, "plan-manager-abandon-valid", core.PlanWaitingHuman, core.WaitFeedbackReq)
-	got, err := manager.ApplyPlanAction(context.Background(), allowed.ID, PlanAction{Action: PlanActionAbandon})
-	if err != nil {
-		t.Fatalf("ApplyPlanAction(abandon waiting_human) error = %v", err)
-	}
-	if got.Status != core.PlanAbandoned {
-		t.Fatalf("abandon result status = %q, want %q", got.Status, core.PlanAbandoned)
-	}
-	if got.WaitReason != core.WaitNone {
-		t.Fatalf("abandon result wait_reason = %q, want empty", got.WaitReason)
+	change := mustLatestIssueChange(t, store, issue.ID)
+	if change.Reason != "human abandon" {
+		t.Fatalf("change reason = %q, want %q", change.Reason, "human abandon")
 	}
 }
 
@@ -1326,100 +662,71 @@ func mustCreateManagerProject(t *testing.T, store core.Store, id string) *core.P
 	return project
 }
 
-func mustCreateManagerPlan(
+func mustCreateManagerIssue(
 	t *testing.T,
 	store core.Store,
 	projectID string,
-	planID string,
-	status core.TaskPlanStatus,
-	waitReason core.WaitReason,
-) *core.TaskPlan {
+	issueID string,
+	status core.IssueStatus,
+	state core.IssueState,
+) *core.Issue {
 	t.Helper()
 
-	plan := &core.TaskPlan{
-		ID:         planID,
+	if status == "" {
+		status = core.IssueStatusDraft
+	}
+	if state == "" {
+		state = core.IssueStateOpen
+	}
+
+	issue := &core.Issue{
+		ID:         issueID,
 		ProjectID:  projectID,
-		Name:       planID,
+		Title:      issueID,
+		Body:       "manager test issue",
+		Template:   "standard",
 		Status:     status,
-		WaitReason: waitReason,
+		State:      state,
 		FailPolicy: core.FailBlock,
 	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("CreateTaskPlan() error = %v", err)
-	}
-	return plan
-}
-
-type fakeManagerAgent struct {
-	mu      sync.Mutex
-	outputs []*core.TaskPlan
-	calls   []Request
-	err     error
-}
-
-func (a *fakeManagerAgent) Decompose(_ context.Context, req Request) (*core.TaskPlan, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.calls = append(a.calls, req)
-	if a.err != nil {
-		return nil, a.err
-	}
-	if len(a.outputs) == 0 {
-		return nil, errors.New("no fake agent output configured")
+	if err := store.CreateIssue(issue); err != nil {
+		t.Fatalf("CreateIssue() error = %v", err)
 	}
 
-	next := cloneManagerTestPlan(a.outputs[0])
-	a.outputs = a.outputs[1:]
-	return next, nil
-}
-
-type fakeManagerReviewOrchestrator struct {
-	mu                sync.Mutex
-	runCalls          int
-	handleRejectCalls int
-	runFn             func(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*ReviewResult, error)
-	handleRejectFn    func(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error)
-}
-
-func (p *fakeManagerReviewOrchestrator) Run(ctx context.Context, plan *core.TaskPlan, input ReviewInput) (*ReviewResult, error) {
-	p.mu.Lock()
-	p.runCalls++
-	runFn := p.runFn
-	p.mu.Unlock()
-
-	if runFn == nil {
-		return &ReviewResult{
-			Plan:     cloneManagerTestPlan(plan),
-			Decision: DecisionApprove,
-		}, nil
+	persisted, err := store.GetIssue(issueID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s) error = %v", issueID, err)
 	}
-	return runFn(ctx, cloneManagerTestPlan(plan), input)
+	return persisted
 }
 
-func (p *fakeManagerReviewOrchestrator) HandleHumanReject(ctx context.Context, plan *core.TaskPlan, feedback HumanFeedback, regenerator Regenerator) (*core.TaskPlan, error) {
-	p.mu.Lock()
-	p.handleRejectCalls++
-	handleFn := p.handleRejectFn
-	p.mu.Unlock()
+func mustLatestIssueChange(t *testing.T, store core.Store, issueID string) core.IssueChange {
+	t.Helper()
 
-	if handleFn == nil {
-		return cloneManagerTestPlan(plan), nil
+	changes, err := store.GetIssueChanges(issueID)
+	if err != nil {
+		t.Fatalf("GetIssueChanges(%s) error = %v", issueID, err)
 	}
-	return handleFn(ctx, cloneManagerTestPlan(plan), feedback, regenerator)
+	if len(changes) == 0 {
+		t.Fatalf("GetIssueChanges(%s) returned no changes", issueID)
+	}
+	return changes[len(changes)-1]
 }
 
 type fakeManagerScheduler struct {
-	mu             sync.Mutex
-	store          core.Store
-	startCalled    bool
-	stopCalled     bool
-	recoverCalled  bool
-	startPlanCalls int
-	startErr       error
-	stopErr        error
-	recoverErr     error
-	startPlanErr   error
+	mu sync.Mutex
+
+	startCalled   bool
+	stopCalled    bool
+	recoverCalled bool
+
+	startIssueCalls int
+	startedIssues   []*core.Issue
+
+	startErr      error
+	stopErr       error
+	recoverErr    error
+	startIssueErr error
 }
 
 func (s *fakeManagerScheduler) Start(_ context.Context) error {
@@ -1436,45 +743,51 @@ func (s *fakeManagerScheduler) Stop(_ context.Context) error {
 	return s.stopErr
 }
 
-func (s *fakeManagerScheduler) RecoverExecutingPlans(_ context.Context) error {
+func (s *fakeManagerScheduler) RecoverExecutingIssues(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recoverCalled = true
 	return s.recoverErr
 }
 
-func (s *fakeManagerScheduler) StartPlan(_ context.Context, plan *core.TaskPlan) error {
+func (s *fakeManagerScheduler) StartIssue(_ context.Context, issue *core.Issue) error {
 	s.mu.Lock()
-	s.startPlanCalls++
-	store := s.store
-	err := s.startPlanErr
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
-	if err != nil {
-		return err
-	}
-	if store == nil {
-		return nil
-	}
-
-	updated := cloneManagerTestPlan(plan)
-	updated.Status = core.PlanExecuting
-	updated.WaitReason = core.WaitNone
-	return store.SaveTaskPlan(updated)
+	s.startIssueCalls++
+	s.startedIssues = append(s.startedIssues, cloneManagerIssue(issue))
+	return s.startIssueErr
 }
 
-func cloneManagerTestPlan(plan *core.TaskPlan) *core.TaskPlan {
-	return cloneManagerPlan(plan)
+type fakeManagerTwoPhaseReview struct {
+	mu sync.Mutex
+
+	submitCalls   int
+	lastSubmitted []*core.Issue
+	submitHook    func(issues []*core.Issue) error
+	submitErr     error
+}
+
+func (r *fakeManagerTwoPhaseReview) SubmitForReview(_ context.Context, issues []*core.Issue) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.submitCalls++
+	r.lastSubmitted = cloneManagerIssues(issues)
+	if r.submitHook != nil {
+		if err := r.submitHook(cloneManagerIssues(issues)); err != nil {
+			return err
+		}
+	}
+	return r.submitErr
 }
 
 type fakeManagerReviewGate struct {
-	mu          sync.Mutex
-	submitCalls int
-	checkCalls  int
-	cancelCalls int
-	submitFn    func(ctx context.Context, plan *core.TaskPlan, callNo int) (string, error)
-	checkFn     func(ctx context.Context, reviewID string) (*core.ReviewResult, error)
-	cancelFn    func(ctx context.Context, reviewID string) error
+	mu sync.Mutex
+
+	submitCalls   int
+	lastSubmitted []*core.Issue
+	submitErr     error
 }
 
 func (g *fakeManagerReviewGate) Name() string {
@@ -1489,79 +802,22 @@ func (g *fakeManagerReviewGate) Close() error {
 	return nil
 }
 
-func (g *fakeManagerReviewGate) Submit(ctx context.Context, plan *core.TaskPlan) (string, error) {
+func (g *fakeManagerReviewGate) Submit(_ context.Context, issues []*core.Issue) (string, error) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	g.submitCalls++
-	callNo := g.submitCalls
-	submitFn := g.submitFn
-	g.mu.Unlock()
-
-	if submitFn == nil {
-		return plan.ID, nil
-	}
-	return submitFn(ctx, cloneManagerTestPlan(plan), callNo)
+	g.lastSubmitted = cloneManagerIssues(issues)
+	return "review-manager-test", g.submitErr
 }
 
-func (g *fakeManagerReviewGate) Check(ctx context.Context, reviewID string) (*core.ReviewResult, error) {
-	g.mu.Lock()
-	g.checkCalls++
-	checkFn := g.checkFn
-	g.mu.Unlock()
-
-	if checkFn == nil {
-		return &core.ReviewResult{
-			Status:   "pending",
-			Decision: "pending",
-		}, nil
-	}
-	return checkFn(ctx, strings.TrimSpace(reviewID))
+func (g *fakeManagerReviewGate) Check(_ context.Context, _ string) (*core.ReviewResult, error) {
+	return &core.ReviewResult{
+		Status:   core.ReviewStatusPending,
+		Decision: core.ReviewDecisionPending,
+	}, nil
 }
 
-func (g *fakeManagerReviewGate) Cancel(ctx context.Context, reviewID string) error {
-	g.mu.Lock()
-	g.cancelCalls++
-	cancelFn := g.cancelFn
-	g.mu.Unlock()
-
-	if cancelFn == nil {
-		return nil
-	}
-	return cancelFn(ctx, strings.TrimSpace(reviewID))
-}
-
-func waitManagerPlanState(
-	t *testing.T,
-	manager *Manager,
-	planID string,
-	wantStatus core.TaskPlanStatus,
-	wantWaitReason core.WaitReason,
-	timeout time.Duration,
-) *core.TaskPlan {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		plan, err := manager.GetPlan(context.Background(), planID)
-		if err != nil {
-			t.Fatalf("GetPlan(%s) error = %v", planID, err)
-		}
-		if plan.Status == wantStatus && plan.WaitReason == wantWaitReason {
-			return plan
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	last, err := manager.GetPlan(context.Background(), planID)
-	if err != nil {
-		t.Fatalf("GetPlan(%s) error = %v", planID, err)
-	}
-	t.Fatalf(
-		"plan status = %s/%s, want %s/%s within %s",
-		last.Status,
-		last.WaitReason,
-		wantStatus,
-		wantWaitReason,
-		timeout,
-	)
+func (g *fakeManagerReviewGate) Cancel(_ context.Context, _ string) error {
 	return nil
 }

@@ -16,8 +16,8 @@ type ClientCapabilities struct {
 }
 
 type PromptResult struct {
-	Text       string             `json:"text,omitempty"`
-	Usage      *acpproto.Usage    `json:"usage,omitempty"`
+	Text       string              `json:"text,omitempty"`
+	Usage      *acpproto.Usage     `json:"usage,omitempty"`
 	StopReason acpproto.StopReason `json:"stopReason,omitempty"`
 }
 

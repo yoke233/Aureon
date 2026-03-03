@@ -18,26 +18,23 @@ const (
 	EventPipelineStuck   EventType = "pipeline_stuck"
 
 	// Secretary lifecycle events.
-	EventSecretaryThinking     EventType = "secretary_thinking"
-	EventSecretaryFilesChanged EventType = "secretary_files_changed"
-	EventChatRunStarted        EventType = "chat_run_started"
-	EventChatRunUpdate         EventType = "chat_run_update"
-	EventChatRunCompleted      EventType = "chat_run_completed"
-	EventChatRunFailed         EventType = "chat_run_failed"
-	EventChatRunCancelled      EventType = "chat_run_cancelled"
-	EventPlanCreated           EventType = "plan_created"
-	EventPlanReviewing         EventType = "plan_reviewing"
-	EventReviewAgentDone       EventType = "review_agent_done"
-	EventReviewComplete        EventType = "review_complete"
-	EventPlanApproved          EventType = "plan_approved"
-	EventPlanWaitingHuman      EventType = "plan_waiting_human"
-	EventTaskReady             EventType = "task_ready"
-	EventTaskRunning           EventType = "task_running"
-	EventTaskDone              EventType = "task_done"
-	EventTaskFailed            EventType = "task_failed"
-	EventPlanDone              EventType = "plan_done"
-	EventPlanFailed            EventType = "plan_failed"
-	EventPlanPartiallyDone     EventType = "plan_partially_done"
+	EventSecretaryThinking      EventType = "secretary_thinking"
+	EventSecretaryFilesChanged  EventType = "secretary_files_changed"
+	EventChatRunStarted         EventType = "chat_run_started"
+	EventChatRunUpdate          EventType = "chat_run_update"
+	EventChatRunCompleted       EventType = "chat_run_completed"
+	EventChatRunFailed          EventType = "chat_run_failed"
+	EventChatRunCancelled       EventType = "chat_run_cancelled"
+	EventIssueCreated           EventType = "issue_created"
+	EventIssueReviewing         EventType = "issue_reviewing"
+	EventReviewDone             EventType = "review_done"
+	EventIssueApproved          EventType = "issue_approved"
+	EventIssueQueued            EventType = "issue_queued"
+	EventIssueReady             EventType = "issue_ready"
+	EventIssueExecuting         EventType = "issue_executing"
+	EventIssueDone              EventType = "issue_done"
+	EventIssueFailed            EventType = "issue_failed"
+	EventIssueDependencyChanged EventType = "issue_dependency_changed"
 
 	// GitHub integration lifecycle events.
 	EventGitHubWebhookReceived            EventType = "github_webhook_received"
@@ -53,7 +50,7 @@ type Event struct {
 	Type       EventType         `json:"type"`
 	PipelineID string            `json:"pipeline_id"`
 	ProjectID  string            `json:"project_id"`
-	PlanID     string            `json:"plan_id,omitempty"`
+	IssueID    string            `json:"issue_id,omitempty"`
 	Stage      StageID           `json:"stage,omitempty"`
 	Agent      string            `json:"agent,omitempty"`
 	Data       map[string]string `json:"data,omitempty"`
@@ -61,34 +58,30 @@ type Event struct {
 	Timestamp  time.Time         `json:"timestamp"`
 }
 
-func IsPlanScopedEvent(eventType EventType) bool {
+func IsIssueScopedEvent(eventType EventType) bool {
 	switch eventType {
 	case EventSecretaryThinking,
-		EventPlanCreated,
-		EventPlanReviewing,
-		EventReviewAgentDone,
-		EventReviewComplete,
-		EventPlanApproved,
-		EventPlanWaitingHuman,
-		EventTaskReady,
-		EventTaskRunning,
-		EventTaskDone,
-		EventTaskFailed,
-		EventPlanDone,
-		EventPlanFailed,
-		EventPlanPartiallyDone:
+		EventIssueCreated,
+		EventIssueReviewing,
+		EventReviewDone,
+		EventIssueApproved,
+		EventIssueQueued,
+		EventIssueReady,
+		EventIssueExecuting,
+		EventIssueDone,
+		EventIssueFailed,
+		EventIssueDependencyChanged:
 		return true
 	default:
 		return false
 	}
 }
 
-func IsAlwaysBroadcastPlanEvent(eventType EventType) bool {
+func IsAlwaysBroadcastIssueEvent(eventType EventType) bool {
 	switch eventType {
-	case EventPlanCreated,
-		EventPlanDone,
-		EventPlanFailed,
-		EventPlanPartiallyDone:
+	case EventIssueCreated,
+		EventIssueDone,
+		EventIssueFailed:
 		return true
 	default:
 		return false

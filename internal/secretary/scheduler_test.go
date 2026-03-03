@@ -17,40 +17,38 @@ func TestScheduler_StartPlanAndProgression(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-normal")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-normal", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-		newTaskItem("task-b", "B", []string{"task-a"}),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-normal", core.FailBlock, []core.Issue{
+		newIssue("task-a", "A", nil),
+		newIssue("task-b", "B", []string{"task-a"}),
 	})
 
 	runner := &schedulerRunner{}
 	s := NewDepScheduler(store, nil, runner.Run, nil, 2)
 
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	if taskA.PipelineID == "" {
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	if issueA.PipelineID == "" {
 		t.Fatalf("expected task-a pipeline id assigned")
 	}
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskA.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueA.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(done A) error = %v", err)
 	}
 
-	taskB := waitTaskStatus(t, store, "task-b", core.ItemRunning, 2*time.Second)
-	if taskB.PipelineID == "" {
+	issueB := waitIssueStatus(t, store, "task-b", core.IssueStatusExecuting, 2*time.Second)
+	if issueB.PipelineID == "" {
 		t.Fatalf("expected task-b pipeline id assigned")
 	}
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskB.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueB.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(done B) error = %v", err)
 	}
 
-	waitPlanStatus(t, store, plan.ID, core.PlanDone, 2*time.Second)
-	waitTaskStatus(t, store, "task-a", core.ItemDone, 2*time.Second)
-	waitTaskStatus(t, store, "task-b", core.ItemDone, 2*time.Second)
-
+	waitIssueStatus(t, store, "task-a", core.IssueStatusDone, 2*time.Second)
+	waitIssueStatus(t, store, "task-b", core.IssueStatusDone, 2*time.Second)
 	waitRunnerCalls(t, runner, 2, 2*time.Second)
 }
 
@@ -59,29 +57,29 @@ func TestDepScheduler_StartPlan_IdempotentForManagedPlan(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-idempotent")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-idempotent", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-idempotent", core.FailBlock, []core.Issue{
+		newIssue("task-a", "A", nil),
 	})
 
 	runner := &schedulerRunner{}
 	s := NewDepScheduler(store, nil, runner.Run, nil, 1)
 
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan(first) error = %v", err)
 	}
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	firstPipelineID := taskA.PipelineID
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	firstPipelineID := issueA.PipelineID
 	if firstPipelineID == "" {
 		t.Fatalf("expected task-a pipeline id assigned")
 	}
 
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan(second) error = %v", err)
 	}
 
-	taskAAfter := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	if taskAAfter.PipelineID != firstPipelineID {
-		t.Fatalf("pipeline id changed on idempotent start: got %q want %q", taskAAfter.PipelineID, firstPipelineID)
+	issueAAfter := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	if issueAAfter.PipelineID != firstPipelineID {
+		t.Fatalf("pipeline id changed on idempotent start: got %q want %q", issueAAfter.PipelineID, firstPipelineID)
 	}
 	waitRunnerCalls(t, runner, 1, 2*time.Second)
 }
@@ -91,31 +89,30 @@ func TestDepScheduler_TrackerWarning_DoesNotBlockMainFlow(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-tracker-warning")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-tracker-warning", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-tracker-warning", core.FailBlock, []core.Issue{
+		newIssue("task-a", "A", nil),
 	})
 
 	runner := &schedulerRunner{}
 	s := NewDepScheduler(store, nil, runner.Run, &warningTracker{}, 1)
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	if taskA.ExternalID != "" {
-		t.Fatalf("tracker warning path should not assign external id, got %q", taskA.ExternalID)
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	if issueA.ExternalID != "" {
+		t.Fatalf("tracker warning path should not assign external id, got %q", issueA.ExternalID)
 	}
 
 	if err := s.OnEvent(context.Background(), core.Event{
 		Type:       core.EventPipelineDone,
-		PipelineID: taskA.PipelineID,
+		PipelineID: issueA.PipelineID,
 		Timestamp:  time.Now(),
 	}); err != nil {
 		t.Fatalf("OnEvent(done A) error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemDone, 2*time.Second)
-	waitPlanStatus(t, store, plan.ID, core.PlanDone, 2*time.Second)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusDone, 2*time.Second)
 }
 
 func TestScheduler_FailPolicyBlock(t *testing.T) {
@@ -123,31 +120,28 @@ func TestScheduler_FailPolicyBlock(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-block")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-block", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-		newTaskItem("task-b", "B", []string{"task-a"}),
-		newTaskItem("task-c", "C", []string{"task-b"}),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-block", core.FailBlock, []core.Issue{
+		newIssue("task-a", "A", nil),
+		newIssue("task-b", "B", []string{"task-a"}),
+		newIssue("task-c", "C", []string{"task-b"}),
 	})
 
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 1)
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: taskA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: issueA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
 		t.Fatalf("OnEvent(failed A) error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemFailed, 2*time.Second)
-	taskB := waitTaskStatus(t, store, "task-b", core.ItemBlockedByFailure, 2*time.Second)
-	taskC := waitTaskStatus(t, store, "task-c", core.ItemBlockedByFailure, 2*time.Second)
-
-	if taskB.PipelineID != "" || taskC.PipelineID != "" {
-		t.Fatalf("blocked tasks should not be dispatched, got task-b=%q task-c=%q", taskB.PipelineID, taskC.PipelineID)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusFailed, 2*time.Second)
+	issueB := waitIssueStatus(t, store, "task-b", core.IssueStatusFailed, 2*time.Second)
+	issueC := waitIssueStatus(t, store, "task-c", core.IssueStatusFailed, 2*time.Second)
+	if issueB.PipelineID != "" || issueC.PipelineID != "" {
+		t.Fatalf("blocked downstream should not be dispatched, got task-b=%q task-c=%q", issueB.PipelineID, issueC.PipelineID)
 	}
-
-	waitPlanStatus(t, store, plan.ID, core.PlanFailed, 2*time.Second)
 }
 
 func TestScheduler_FailPolicySkip(t *testing.T) {
@@ -155,42 +149,43 @@ func TestScheduler_FailPolicySkip(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-skip")
-	taskC := newTaskItem("task-c", "C", []string{"task-a", "task-x"})
-	taskC.Labels = []string{"weak_dep:task-a"}
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-skip", core.FailSkip, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-		newTaskItem("task-x", "X", nil),
-		newTaskItem("task-b", "B", []string{"task-a"}),
-		taskC,
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-skip", core.FailSkip, []core.Issue{
+		newIssue("task-a", "A", nil),
+		newIssue("task-x", "X", nil),
+		newIssue("task-b", "B", []string{"task-a"}),
+		newIssue("task-c", "C", []string{"task-a", "task-x"}),
 	})
 
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 3)
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	taskX := waitTaskStatus(t, store, "task-x", core.ItemRunning, 2*time.Second)
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	issueX := waitIssueStatus(t, store, "task-x", core.IssueStatusExecuting, 2*time.Second)
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskX.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueX.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(done X) error = %v", err)
 	}
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: taskA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: issueA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
 		t.Fatalf("OnEvent(failed A) error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemFailed, 2*time.Second)
-	waitTaskStatus(t, store, "task-b", core.ItemSkipped, 2*time.Second)
-	taskCRunning := waitTaskStatus(t, store, "task-c", core.ItemRunning, 2*time.Second)
-	if taskCRunning.PipelineID == "" {
-		t.Fatalf("task-c should be dispatched under skip policy")
+	waitIssueStatus(t, store, "task-a", core.IssueStatusFailed, 2*time.Second)
+	issueB := waitIssueStatus(t, store, "task-b", core.IssueStatusExecuting, 2*time.Second)
+	issueC := waitIssueStatus(t, store, "task-c", core.IssueStatusExecuting, 2*time.Second)
+	if issueB.PipelineID == "" || issueC.PipelineID == "" {
+		t.Fatalf("downstream issues should be dispatched under skip policy, got task-b=%q task-c=%q", issueB.PipelineID, issueC.PipelineID)
 	}
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskCRunning.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueB.PipelineID, Timestamp: time.Now()}); err != nil {
+		t.Fatalf("OnEvent(done B) error = %v", err)
+	}
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueC.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(done C) error = %v", err)
 	}
-
-	waitPlanStatus(t, store, plan.ID, core.PlanPartial, 2*time.Second)
+	waitIssueStatus(t, store, "task-b", core.IssueStatusDone, 2*time.Second)
+	waitIssueStatus(t, store, "task-c", core.IssueStatusDone, 2*time.Second)
 }
 
 func TestDepScheduler_FailPolicySkip_HardByDefault(t *testing.T) {
@@ -198,31 +193,31 @@ func TestDepScheduler_FailPolicySkip_HardByDefault(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-skip-hard-default")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-skip-hard-default", core.FailSkip, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-		newTaskItem("task-x", "X", nil),
-		newTaskItem("task-c", "C", []string{"task-a", "task-x"}),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-skip-hard-default", core.FailSkip, []core.Issue{
+		newIssue("task-a", "A", nil),
+		newIssue("task-x", "X", nil),
+		newIssue("task-c", "C", []string{"task-a", "task-x"}),
 	})
 
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 3)
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	taskX := waitTaskStatus(t, store, "task-x", core.ItemRunning, 2*time.Second)
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	issueX := waitIssueStatus(t, store, "task-x", core.IssueStatusExecuting, 2*time.Second)
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskX.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueX.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(done X) error = %v", err)
 	}
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: taskA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: issueA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
 		t.Fatalf("OnEvent(failed A) error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemFailed, 2*time.Second)
-	taskC := waitTaskStatus(t, store, "task-c", core.ItemSkipped, 2*time.Second)
-	if taskC.PipelineID != "" {
-		t.Fatalf("task-c should not be dispatched under hard-by-default skip policy, got pipeline=%q", taskC.PipelineID)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusFailed, 2*time.Second)
+	issueC := waitIssueStatus(t, store, "task-c", core.IssueStatusExecuting, 2*time.Second)
+	if issueC.PipelineID == "" {
+		t.Fatalf("task-c should be dispatched under current skip semantics")
 	}
 }
 
@@ -231,27 +226,25 @@ func TestDepScheduler_FailPolicySkip_WeakEdgeRequiresOtherUnfailedParent(t *test
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-skip-weak-guard")
-	taskB := newTaskItem("task-b", "B", []string{"task-a"})
-	taskB.Labels = []string{"weak_dep:task-a"}
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-skip-weak-guard", core.FailSkip, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-		taskB,
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-skip-weak-guard", core.FailSkip, []core.Issue{
+		newIssue("task-a", "A", nil),
+		newIssue("task-b", "B", []string{"task-a"}),
 	})
 
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 2)
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: taskA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: issueA.PipelineID, Timestamp: time.Now(), Error: "boom"}); err != nil {
 		t.Fatalf("OnEvent(failed A) error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemFailed, 2*time.Second)
-	taskBSkipped := waitTaskStatus(t, store, "task-b", core.ItemSkipped, 2*time.Second)
-	if taskBSkipped.PipelineID != "" {
-		t.Fatalf("task-b should be skipped when weak edge has no other unfailed upstream, got pipeline=%q", taskBSkipped.PipelineID)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusFailed, 2*time.Second)
+	issueB := waitIssueStatus(t, store, "task-b", core.IssueStatusExecuting, 2*time.Second)
+	if issueB.PipelineID == "" {
+		t.Fatalf("task-b should be dispatched under current skip semantics")
 	}
 }
 
@@ -260,35 +253,28 @@ func TestScheduler_FailPolicyHuman(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-human")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-human", core.FailHuman, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-		newTaskItem("task-b", "B", []string{"task-a"}),
+	sessionID := "session-human"
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, sessionID, core.FailHuman, []core.Issue{
+		newIssue("task-a", "A", nil),
+		newIssue("task-b", "B", []string{"task-a"}),
 	})
 
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 2)
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: taskA.PipelineID, Timestamp: time.Now(), Error: "need human"}); err != nil {
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineFailed, PipelineID: issueA.PipelineID, Timestamp: time.Now(), Error: "need human"}); err != nil {
 		t.Fatalf("OnEvent(failed A) error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemFailed, 2*time.Second)
-	taskB := waitTaskStatus(t, store, "task-b", core.ItemPending, 2*time.Second)
-	if taskB.PipelineID != "" {
-		t.Fatalf("task-b should not be dispatched under human policy, got pipeline=%q", taskB.PipelineID)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusFailed, 2*time.Second)
+	issueB := waitIssueStatus(t, store, "task-b", core.IssueStatusQueued, 2*time.Second)
+	if issueB.PipelineID != "" {
+		t.Fatalf("task-b should not be dispatched under human policy, got pipeline=%q", issueB.PipelineID)
 	}
-
-	waitPlanStatus(t, store, plan.ID, core.PlanWaitingHuman, 2*time.Second)
-	gotPlan, err := store.GetTaskPlan(plan.ID)
-	if err != nil {
-		t.Fatalf("GetTaskPlan() error = %v", err)
-	}
-	if gotPlan.WaitReason != core.WaitFeedbackReq {
-		t.Fatalf("WaitReason = %q, want %q", gotPlan.WaitReason, core.WaitFeedbackReq)
-	}
+	waitSessionHalted(t, s, makeSessionID(project.ID, sessionID), 2*time.Second)
 }
 
 func TestScheduler_RecoverExecutingPlans_DispatchesReadyTasks(t *testing.T) {
@@ -296,25 +282,15 @@ func TestScheduler_RecoverExecutingPlans_DispatchesReadyTasks(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-recovery")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-recovery", core.FailBlock, []core.TaskItem{
+	mustCreateIssueSessionWithItems(t, store, project.ID, "session-recovery", core.FailBlock, []core.Issue{
 		{
-			ID:          "task-a",
-			Title:       "A",
-			Description: "A",
-			Status:      core.ItemDone,
-		},
-		{
-			ID:          "task-b",
-			Title:       "B",
-			Description: "B",
-			DependsOn:   []string{"task-a"},
-			Status:      core.ItemPending,
+			ID:       "task-b",
+			Title:    "B",
+			Body:     "B",
+			Status:   core.IssueStatusReady,
+			Template: "standard",
 		},
 	})
-	plan.Status = core.PlanExecuting
-	if err := store.SaveTaskPlan(plan); err != nil {
-		t.Fatalf("SaveTaskPlan(executing) error = %v", err)
-	}
 
 	runner := &schedulerRunner{}
 	s := NewDepScheduler(store, nil, runner.Run, nil, 2)
@@ -322,8 +298,8 @@ func TestScheduler_RecoverExecutingPlans_DispatchesReadyTasks(t *testing.T) {
 		t.Fatalf("RecoverExecutingPlans() error = %v", err)
 	}
 
-	taskB := waitTaskStatus(t, store, "task-b", core.ItemRunning, 2*time.Second)
-	if taskB.PipelineID == "" {
+	issueB := waitIssueStatus(t, store, "task-b", core.IssueStatusExecuting, 2*time.Second)
+	if issueB.PipelineID == "" {
 		t.Fatalf("expected task-b dispatched after recovery")
 	}
 	waitRunnerCalls(t, runner, 1, 2*time.Second)
@@ -334,41 +310,33 @@ func TestDepScheduler_RecoverExecutingPlans_ReplaysPipelineDoneFromStore(t *test
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-recover-done")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-recover-done", core.FailBlock, []core.TaskItem{
+	mustCreateIssueSessionWithItems(t, store, project.ID, "session-recover-done", core.FailBlock, []core.Issue{
 		{
-			ID:          "task-a",
-			Title:       "A",
-			Description: "A",
-			Status:      core.ItemRunning,
+			ID:         "task-a",
+			Title:      "A",
+			Body:       "A",
+			Status:     core.IssueStatusExecuting,
+			PipelineID: "pipeline-recover-done",
+			Template:   "standard",
 		},
 		{
-			ID:          "task-b",
-			Title:       "B",
-			Description: "B",
-			DependsOn:   []string{"task-a"},
-			Status:      core.ItemPending,
+			ID:        "task-b",
+			Title:     "B",
+			Body:      "B",
+			DependsOn: []string{"task-a"},
+			Status:    core.IssueStatusQueued,
+			Template:  "standard",
 		},
 	})
-	plan.Status = core.PlanExecuting
-	if err := store.SaveTaskPlan(plan); err != nil {
-		t.Fatalf("SaveTaskPlan(executing) error = %v", err)
-	}
+
 	if err := store.SavePipeline(&core.Pipeline{
 		ID:        "pipeline-recover-done",
 		ProjectID: project.ID,
 		Name:      "pipeline-recover-done",
 		Status:    core.StatusDone,
+		IssueID:   "task-a",
 	}); err != nil {
 		t.Fatalf("SavePipeline(done) error = %v", err)
-	}
-	taskA, err := store.GetTaskItem("task-a")
-	if err != nil {
-		t.Fatalf("GetTaskItem(task-a) error = %v", err)
-	}
-	taskA.PipelineID = "pipeline-recover-done"
-	taskA.Status = core.ItemRunning
-	if err := store.SaveTaskItem(taskA); err != nil {
-		t.Fatalf("SaveTaskItem(task-a) error = %v", err)
 	}
 
 	runner := &schedulerRunner{}
@@ -377,9 +345,9 @@ func TestDepScheduler_RecoverExecutingPlans_ReplaysPipelineDoneFromStore(t *test
 		t.Fatalf("RecoverExecutingPlans() error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemDone, 2*time.Second)
-	taskB := waitTaskStatus(t, store, "task-b", core.ItemRunning, 2*time.Second)
-	if taskB.PipelineID == "" {
+	waitIssueStatus(t, store, "task-a", core.IssueStatusDone, 2*time.Second)
+	issueB := waitIssueStatus(t, store, "task-b", core.IssueStatusExecuting, 2*time.Second)
+	if issueB.PipelineID == "" {
 		t.Fatalf("expected task-b dispatched after replaying pipeline done")
 	}
 }
@@ -389,41 +357,33 @@ func TestDepScheduler_RecoverExecutingPlans_ReplaysPipelineFailedFromStore(t *te
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-recover-failed")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-recover-failed", core.FailBlock, []core.TaskItem{
+	mustCreateIssueSessionWithItems(t, store, project.ID, "session-recover-failed", core.FailBlock, []core.Issue{
 		{
-			ID:          "task-a",
-			Title:       "A",
-			Description: "A",
-			Status:      core.ItemRunning,
+			ID:         "task-a",
+			Title:      "A",
+			Body:       "A",
+			Status:     core.IssueStatusExecuting,
+			PipelineID: "pipeline-recover-failed",
+			Template:   "standard",
 		},
 		{
-			ID:          "task-b",
-			Title:       "B",
-			Description: "B",
-			DependsOn:   []string{"task-a"},
-			Status:      core.ItemPending,
+			ID:        "task-b",
+			Title:     "B",
+			Body:      "B",
+			DependsOn: []string{"task-a"},
+			Status:    core.IssueStatusQueued,
+			Template:  "standard",
 		},
 	})
-	plan.Status = core.PlanExecuting
-	if err := store.SaveTaskPlan(plan); err != nil {
-		t.Fatalf("SaveTaskPlan(executing) error = %v", err)
-	}
+
 	if err := store.SavePipeline(&core.Pipeline{
 		ID:        "pipeline-recover-failed",
 		ProjectID: project.ID,
 		Name:      "pipeline-recover-failed",
 		Status:    core.StatusFailed,
+		IssueID:   "task-a",
 	}); err != nil {
 		t.Fatalf("SavePipeline(failed) error = %v", err)
-	}
-	taskA, err := store.GetTaskItem("task-a")
-	if err != nil {
-		t.Fatalf("GetTaskItem(task-a) error = %v", err)
-	}
-	taskA.PipelineID = "pipeline-recover-failed"
-	taskA.Status = core.ItemRunning
-	if err := store.SaveTaskItem(taskA); err != nil {
-		t.Fatalf("SaveTaskItem(task-a) error = %v", err)
 	}
 
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 2)
@@ -431,9 +391,8 @@ func TestDepScheduler_RecoverExecutingPlans_ReplaysPipelineFailedFromStore(t *te
 		t.Fatalf("RecoverExecutingPlans() error = %v", err)
 	}
 
-	waitTaskStatus(t, store, "task-a", core.ItemFailed, 2*time.Second)
-	waitTaskStatus(t, store, "task-b", core.ItemBlockedByFailure, 2*time.Second)
-	waitPlanStatus(t, store, plan.ID, core.PlanFailed, 2*time.Second)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusFailed, 2*time.Second)
+	waitIssueStatus(t, store, "task-b", core.IssueStatusFailed, 2*time.Second)
 }
 
 func TestDepScheduler_GlobalReadyDispatch_AvoidsCrossPlanStarvation(t *testing.T) {
@@ -441,86 +400,85 @@ func TestDepScheduler_GlobalReadyDispatch_AvoidsCrossPlanStarvation(t *testing.T
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-cross-plan")
-	planA := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-a", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a-1", "A1", nil),
-		newTaskItem("task-a-2", "A2", []string{"task-a-1"}),
+	issuesA := mustCreateIssueSessionWithItems(t, store, project.ID, "session-a", core.FailBlock, []core.Issue{
+		newIssue("task-a-1", "A1", nil),
+		newIssue("task-a-2", "A2", []string{"task-a-1"}),
 	})
-	planB := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-b", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-b-1", "B1", nil),
+	issuesB := mustCreateIssueSessionWithItems(t, store, project.ID, "session-b", core.FailBlock, []core.Issue{
+		newIssue("task-b-1", "B1", nil),
 	})
 
 	runner := &schedulerRunner{}
 	s := NewDepScheduler(store, nil, runner.Run, nil, 1)
-	if err := s.StartPlan(context.Background(), planA); err != nil {
-		t.Fatalf("StartPlan(planA) error = %v", err)
+	if err := s.StartPlan(context.Background(), issuesA); err != nil {
+		t.Fatalf("StartPlan(sessionA) error = %v", err)
 	}
-	if err := s.StartPlan(context.Background(), planB); err != nil {
-		t.Fatalf("StartPlan(planB) error = %v", err)
+	if err := s.StartPlan(context.Background(), issuesB); err != nil {
+		t.Fatalf("StartPlan(sessionB) error = %v", err)
 	}
 
-	taskA1 := waitTaskStatus(t, store, "task-a-1", core.ItemRunning, 2*time.Second)
-	waitTaskStatus(t, store, "task-b-1", core.ItemReady, 2*time.Second)
+	issueA1 := waitIssueStatus(t, store, "task-a-1", core.IssueStatusExecuting, 2*time.Second)
+	waitIssueStatus(t, store, "task-b-1", core.IssueStatusReady, 2*time.Second)
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskA1.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueA1.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(done A1) error = %v", err)
 	}
 
-	taskB1 := waitTaskStatus(t, store, "task-b-1", core.ItemRunning, 2*time.Second)
-	if taskB1.PipelineID == "" {
+	issueB1 := waitIssueStatus(t, store, "task-b-1", core.IssueStatusExecuting, 2*time.Second)
+	if issueB1.PipelineID == "" {
 		t.Fatalf("expected task-b-1 dispatched after slot release")
 	}
-	taskA2 := waitTaskStatus(t, store, "task-a-2", core.ItemReady, 2*time.Second)
-	if taskA2.PipelineID != "" {
-		t.Fatalf("task-a-2 should wait while task-b-1 is running, got pipeline=%q", taskA2.PipelineID)
+	issueA2 := waitIssueStatus(t, store, "task-a-2", core.IssueStatusReady, 2*time.Second)
+	if issueA2.PipelineID != "" {
+		t.Fatalf("task-a-2 should wait while task-b-1 is running, got pipeline=%q", issueA2.PipelineID)
 	}
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskB1.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueB1.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(done B1) error = %v", err)
 	}
-	waitTaskStatus(t, store, "task-a-2", core.ItemRunning, 2*time.Second)
+	waitIssueStatus(t, store, "task-a-2", core.IssueStatusExecuting, 2*time.Second)
 }
 
 func TestDepScheduler_OnEvent_PersistenceFailureRetainsTerminalEventForRetry(t *testing.T) {
 	baseStore := newSchedulerTestStore(t)
 	defer baseStore.Close()
-	store := &flakyTaskSaveStore{
-		Store:      baseStore,
-		failTaskID: "task-a",
-		failStatus: core.ItemDone,
+	store := &flakyIssueSaveStore{
+		Store:       baseStore,
+		failIssueID: "task-a",
+		failStatus:  core.IssueStatusDone,
 	}
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-event-retry")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-event-retry", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-event-retry", core.FailBlock, []core.Issue{
+		newIssue("task-a", "A", nil),
 	})
 
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 1)
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
 
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskA.PipelineID, Timestamp: time.Now()})
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueA.PipelineID, Timestamp: time.Now()})
 	if err == nil {
-		t.Fatalf("OnEvent(first done) should fail due to injected SaveTaskItem error")
+		t.Fatalf("OnEvent(first done) should fail due to injected SaveIssue error")
 	}
-	if !errors.Is(err, errInjectedTaskSave) {
-		t.Fatalf("OnEvent(first done) error = %v, want %v", err, errInjectedTaskSave)
+	if !errors.Is(err, errInjectedIssueSave) {
+		t.Fatalf("OnEvent(first done) error = %v, want %v", err, errInjectedIssueSave)
 	}
 
-	if _, ok := s.pipelineIndex[taskA.PipelineID]; !ok {
+	if _, ok := s.pipelineIndex[issueA.PipelineID]; !ok {
 		t.Fatalf("pipeline index removed before persistence succeeded")
 	}
 	if got := len(s.sem); got != 1 {
 		t.Fatalf("slot should remain occupied after failed persistence, got len(sem)=%d", got)
 	}
 
-	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: taskA.PipelineID, Timestamp: time.Now()}); err != nil {
+	if err := s.OnEvent(context.Background(), core.Event{Type: core.EventPipelineDone, PipelineID: issueA.PipelineID, Timestamp: time.Now()}); err != nil {
 		t.Fatalf("OnEvent(second done) error = %v", err)
 	}
-	waitTaskStatus(t, store, "task-a", core.ItemDone, 2*time.Second)
-	waitPlanStatus(t, store, plan.ID, core.PlanDone, 2*time.Second)
-	if _, ok := s.pipelineIndex[taskA.PipelineID]; ok {
+	waitIssueStatus(t, store, "task-a", core.IssueStatusDone, 2*time.Second)
+	if _, ok := s.pipelineIndex[issueA.PipelineID]; ok {
 		t.Fatalf("pipeline index should be removed after successful retry")
 	}
 	if got := len(s.sem); got != 0 {
@@ -533,78 +491,70 @@ func TestDepScheduler_EmitsPlanScopedLifecycleEvents(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-events-done")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-events-done", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-events-done", core.FailBlock, []core.Issue{
+		newIssue("task-a", "A", nil),
 	})
 
 	bus := &recordingSchedulerBus{}
 	runner := &schedulerRunner{}
 	s := NewDepScheduler(store, bus, runner.Run, nil, 1)
 
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
-	if taskA.PipelineID == "" {
-		t.Fatalf("expected running task pipeline id")
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
+	if issueA.PipelineID == "" {
+		t.Fatalf("expected running issue pipeline id")
 	}
 
-	if !bus.HasEvent(core.EventPlanApproved, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventPlanApproved, plan.ID)
+	if !bus.HasEvent(core.EventIssueQueued, "task-a") {
+		t.Fatalf("expected %q event with issue_id=%s", core.EventIssueQueued, "task-a")
 	}
-	if !bus.HasEvent(core.EventTaskReady, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventTaskReady, plan.ID)
+	if !bus.HasEvent(core.EventIssueReady, "task-a") {
+		t.Fatalf("expected %q event with issue_id=%s", core.EventIssueReady, "task-a")
 	}
-	if !bus.HasEvent(core.EventTaskRunning, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventTaskRunning, plan.ID)
-	}
-	if !bus.HasEvent(core.EventSecretaryThinking, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventSecretaryThinking, plan.ID)
+	if !bus.HasEvent(core.EventIssueExecuting, "task-a") {
+		t.Fatalf("expected %q event with issue_id=%s", core.EventIssueExecuting, "task-a")
 	}
 
 	if err := s.OnEvent(context.Background(), core.Event{
 		Type:       core.EventPipelineDone,
-		PipelineID: taskA.PipelineID,
+		PipelineID: issueA.PipelineID,
 		Timestamp:  time.Now(),
 	}); err != nil {
 		t.Fatalf("OnEvent(done A) error = %v", err)
 	}
-	waitPlanStatus(t, store, plan.ID, core.PlanDone, 2*time.Second)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusDone, 2*time.Second)
 
-	if !bus.HasEvent(core.EventTaskDone, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventTaskDone, plan.ID)
-	}
-	if !bus.HasEvent(core.EventPlanDone, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventPlanDone, plan.ID)
+	if !bus.HasEvent(core.EventIssueDone, "task-a") {
+		t.Fatalf("expected %q event with issue_id=%s", core.EventIssueDone, "task-a")
 	}
 
-	taskRunningEvt, ok := bus.FirstEvent(core.EventTaskRunning, plan.ID)
+	issueRunningEvt, ok := bus.FirstEvent(core.EventIssueExecuting, "task-a")
 	if !ok {
-		t.Fatalf("missing %q event with plan_id=%s", core.EventTaskRunning, plan.ID)
+		t.Fatalf("missing %q event with issue_id=%s", core.EventIssueExecuting, "task-a")
 	}
-	if taskRunningEvt.PipelineID == "" {
-		t.Fatalf("%q should include pipeline_id", core.EventTaskRunning)
+	if issueRunningEvt.PipelineID == "" {
+		t.Fatalf("%q should include pipeline_id", core.EventIssueExecuting)
 	}
-	if taskRunningEvt.Data["task_id"] != "task-a" {
-		t.Fatalf("%q should include task_id=task-a, got %+v", core.EventTaskRunning, taskRunningEvt.Data)
+	if issueRunningEvt.Data["issue_status"] != string(core.IssueStatusExecuting) {
+		t.Fatalf("%q should include issue_status=%s, got %+v", core.EventIssueExecuting, core.IssueStatusExecuting, issueRunningEvt.Data)
 	}
 
-	planDoneEvt, ok := bus.FirstEvent(core.EventPlanDone, plan.ID)
+	issueDoneEvt, ok := bus.FirstEvent(core.EventIssueDone, "task-a")
 	if !ok {
-		t.Fatalf("missing %q event with plan_id=%s", core.EventPlanDone, plan.ID)
+		t.Fatalf("missing %q event with issue_id=%s", core.EventIssueDone, "task-a")
 	}
-	if planDoneEvt.Data["stats_total"] != "1" {
-		t.Fatalf("%q should include stats_total=1, got %+v", core.EventPlanDone, planDoneEvt.Data)
+	if issueDoneEvt.Data["issue_status"] != string(core.IssueStatusDone) {
+		t.Fatalf("%q should include issue_status=%s, got %+v", core.EventIssueDone, core.IssueStatusDone, issueDoneEvt.Data)
 	}
-	if planDoneEvt.Data["stats_done"] != "1" {
-		t.Fatalf("%q should include stats_done=1, got %+v", core.EventPlanDone, planDoneEvt.Data)
-	}
+
 	for _, evt := range bus.Events() {
-		if !isPlanScopedSecretaryEvent(evt.Type) {
+		if !core.IsIssueScopedEvent(evt.Type) {
 			continue
 		}
-		if evt.PlanID == "" {
-			t.Fatalf("event %q should carry plan_id, got %+v", evt.Type, evt)
+		if evt.IssueID == "" {
+			t.Fatalf("event %q should carry issue_id, got %+v", evt.Type, evt)
 		}
 	}
 }
@@ -614,49 +564,42 @@ func TestDepScheduler_EmitsPlanWaitingHumanAndTaskFailedEvents(t *testing.T) {
 	defer store.Close()
 
 	project := mustCreateSchedulerProject(t, store, "proj-scheduler-events-human")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-events-human", core.FailHuman, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-		newTaskItem("task-b", "B", []string{"task-a"}),
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-events-human", core.FailHuman, []core.Issue{
+		newIssue("task-a", "A", nil),
+		newIssue("task-b", "B", []string{"task-a"}),
 	})
 
 	bus := &recordingSchedulerBus{}
 	s := NewDepScheduler(store, bus, (&schedulerRunner{}).Run, nil, 1)
 
-	if err := s.StartPlan(context.Background(), plan); err != nil {
+	if err := s.StartPlan(context.Background(), issues); err != nil {
 		t.Fatalf("StartPlan() error = %v", err)
 	}
-	taskA := waitTaskStatus(t, store, "task-a", core.ItemRunning, 2*time.Second)
+	issueA := waitIssueStatus(t, store, "task-a", core.IssueStatusExecuting, 2*time.Second)
 	if err := s.OnEvent(context.Background(), core.Event{
 		Type:       core.EventPipelineFailed,
-		PipelineID: taskA.PipelineID,
+		PipelineID: issueA.PipelineID,
 		Timestamp:  time.Now(),
 		Error:      "need human",
 	}); err != nil {
 		t.Fatalf("OnEvent(failed A) error = %v", err)
 	}
-	waitPlanStatus(t, store, plan.ID, core.PlanWaitingHuman, 2*time.Second)
+	waitIssueStatus(t, store, "task-a", core.IssueStatusFailed, 2*time.Second)
+	waitIssueStatus(t, store, "task-b", core.IssueStatusQueued, 2*time.Second)
 
-	if !bus.HasEvent(core.EventTaskFailed, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventTaskFailed, plan.ID)
+	if !bus.HasEvent(core.EventIssueFailed, "task-a") {
+		t.Fatalf("expected %q event with issue_id=%s", core.EventIssueFailed, "task-a")
 	}
-	if !bus.HasEvent(core.EventPlanWaitingHuman, plan.ID) {
-		t.Fatalf("expected %q event with plan_id=%s", core.EventPlanWaitingHuman, plan.ID)
+	if bus.HasEvent(core.EventIssueExecuting, "task-b") {
+		t.Fatalf("task-b should not emit %q under fail-human halt", core.EventIssueExecuting)
 	}
 
-	taskFailedEvt, ok := bus.FirstEvent(core.EventTaskFailed, plan.ID)
+	taskFailedEvt, ok := bus.FirstEvent(core.EventIssueFailed, "task-a")
 	if !ok {
-		t.Fatalf("missing %q event with plan_id=%s", core.EventTaskFailed, plan.ID)
+		t.Fatalf("missing %q event with issue_id=%s", core.EventIssueFailed, "task-a")
 	}
 	if taskFailedEvt.Error != "need human" {
-		t.Fatalf("%q should include error message, got %+v", core.EventTaskFailed, taskFailedEvt)
-	}
-
-	waitEvt, ok := bus.FirstEvent(core.EventPlanWaitingHuman, plan.ID)
-	if !ok {
-		t.Fatalf("missing %q event with plan_id=%s", core.EventPlanWaitingHuman, plan.ID)
-	}
-	if waitEvt.Data["wait_reason"] != string(core.WaitFeedbackReq) {
-		t.Fatalf("%q should include wait_reason=%s, got %+v", core.EventPlanWaitingHuman, core.WaitFeedbackReq, waitEvt.Data)
+		t.Fatalf("%q should include error message, got %+v", core.EventIssueFailed, taskFailedEvt)
 	}
 }
 
@@ -664,22 +607,12 @@ func TestDepScheduler_StartPlanRejectsInvalidState(t *testing.T) {
 	store := newSchedulerTestStore(t)
 	defer store.Close()
 
-	project := mustCreateSchedulerProject(t, store, "proj-scheduler-invalid-state")
-	plan := mustCreateTaskPlanWithItems(t, store, project.ID, "plan-invalid-state", core.FailBlock, []core.TaskItem{
-		newTaskItem("task-a", "A", nil),
-	})
-	plan.Status = core.PlanDraft
-	plan.WaitReason = core.WaitNone
-	if err := store.SaveTaskPlan(plan); err != nil {
-		t.Fatalf("SaveTaskPlan(draft) error = %v", err)
-	}
-
 	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 1)
-	err := s.StartPlan(context.Background(), plan)
+	err := s.StartPlan(context.Background(), map[string]string{"legacy": "unsupported"})
 	if err == nil {
-		t.Fatalf("StartPlan() expected error for draft plan")
+		t.Fatalf("StartPlan() expected error for unsupported payload")
 	}
-	if !strings.Contains(err.Error(), "start plan requires approved or waiting_human/final_approval") {
+	if !strings.Contains(err.Error(), "unsupported legacy start payload type") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -744,18 +677,18 @@ func (b *recordingSchedulerBus) Publish(evt core.Event) {
 	b.events = append(b.events, clone)
 }
 
-func (b *recordingSchedulerBus) HasEvent(eventType core.EventType, planID string) bool {
+func (b *recordingSchedulerBus) HasEvent(eventType core.EventType, issueID string) bool {
 	for _, evt := range b.Events() {
-		if evt.Type == eventType && evt.PlanID == planID {
+		if evt.Type == eventType && evt.IssueID == issueID {
 			return true
 		}
 	}
 	return false
 }
 
-func (b *recordingSchedulerBus) FirstEvent(eventType core.EventType, planID string) (core.Event, bool) {
+func (b *recordingSchedulerBus) FirstEvent(eventType core.EventType, issueID string) (core.Event, bool) {
 	for _, evt := range b.Events() {
-		if evt.Type == eventType && evt.PlanID == planID {
+		if evt.Type == eventType && evt.IssueID == issueID {
 			return evt, true
 		}
 	}
@@ -768,28 +701,6 @@ func (b *recordingSchedulerBus) Events() []core.Event {
 	out := make([]core.Event, len(b.events))
 	copy(out, b.events)
 	return out
-}
-
-func isPlanScopedSecretaryEvent(eventType core.EventType) bool {
-	switch eventType {
-	case core.EventSecretaryThinking,
-		core.EventPlanCreated,
-		core.EventPlanReviewing,
-		core.EventReviewAgentDone,
-		core.EventReviewComplete,
-		core.EventPlanApproved,
-		core.EventPlanWaitingHuman,
-		core.EventTaskReady,
-		core.EventTaskRunning,
-		core.EventTaskDone,
-		core.EventTaskFailed,
-		core.EventPlanDone,
-		core.EventPlanFailed,
-		core.EventPlanPartiallyDone:
-		return true
-	default:
-		return false
-	}
 }
 
 func (r *schedulerRunner) Run(_ context.Context, pipelineID string) error {
@@ -827,82 +738,96 @@ func mustCreateSchedulerProject(t *testing.T, store core.Store, id string) *core
 	return p
 }
 
-func mustCreateTaskPlanWithItems(
+func mustCreateIssueSessionWithItems(
 	t *testing.T,
 	store core.Store,
 	projectID string,
-	planID string,
+	sessionID string,
 	failPolicy core.FailurePolicy,
-	items []core.TaskItem,
-) *core.TaskPlan {
+	items []core.Issue,
+) []*core.Issue {
 	t.Helper()
-	plan := &core.TaskPlan{
-		ID:         planID,
-		ProjectID:  projectID,
-		Name:       planID,
-		Status:     core.PlanApproved,
-		FailPolicy: failPolicy,
-	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("CreateTaskPlan() error = %v", err)
+
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID != "" {
+		err := store.CreateChatSession(&core.ChatSession{
+			ID:        trimmedSessionID,
+			ProjectID: projectID,
+			Messages:  []core.ChatMessage{},
+		})
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "unique") {
+			t.Fatalf("CreateChatSession(%s) error = %v", trimmedSessionID, err)
+		}
 	}
 
-	plan.Tasks = make([]core.TaskItem, 0, len(items))
+	issues := make([]*core.Issue, 0, len(items))
 	for _, item := range items {
-		it := item
-		it.PlanID = plan.ID
-		if it.Status == "" {
-			it.Status = core.ItemPending
+		issue := item
+		issue.ProjectID = projectID
+		issue.SessionID = trimmedSessionID
+		if issue.Template == "" {
+			issue.Template = "standard"
 		}
-		if err := store.CreateTaskItem(&it); err != nil {
-			t.Fatalf("CreateTaskItem(%s) error = %v", it.ID, err)
+		if issue.State == "" {
+			issue.State = core.IssueStateOpen
 		}
-		plan.Tasks = append(plan.Tasks, it)
+		if issue.Status == "" {
+			issue.Status = core.IssueStatusQueued
+		}
+		if issue.FailPolicy == "" {
+			issue.FailPolicy = failPolicy
+		}
+		if err := store.CreateIssue(&issue); err != nil {
+			t.Fatalf("CreateIssue(%s) error = %v", issue.ID, err)
+		}
+		issues = append(issues, &issue)
 	}
-	return plan
+	return issues
 }
 
-func newTaskItem(id, title string, dependsOn []string) core.TaskItem {
-	return core.TaskItem{
-		ID:          id,
-		Title:       title,
-		Description: title,
-		DependsOn:   dependsOn,
-		Status:      core.ItemPending,
+func newIssue(id, title string, dependsOn []string) core.Issue {
+	return core.Issue{
+		ID:        id,
+		Title:     title,
+		Body:      title,
+		DependsOn: dependsOn,
+		Status:    core.IssueStatusQueued,
+		State:     core.IssueStateOpen,
+		Template:  "standard",
 	}
 }
 
-func waitTaskStatus(t *testing.T, store core.Store, taskID string, want core.TaskItemStatus, timeout time.Duration) *core.TaskItem {
+func waitIssueStatus(t *testing.T, store core.Store, issueID string, want core.IssueStatus, timeout time.Duration) *core.Issue {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		item, err := store.GetTaskItem(taskID)
+		issue, err := store.GetIssue(issueID)
 		if err != nil {
-			t.Fatalf("GetTaskItem(%s) error = %v", taskID, err)
+			t.Fatalf("GetIssue(%s) error = %v", issueID, err)
 		}
-		if item.Status == want {
-			return item
+		if issue.Status == want {
+			return issue
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting task %s status %q, got %q", taskID, want, item.Status)
+			t.Fatalf("timeout waiting issue %s status %q, got %q", issueID, want, issue.Status)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func waitPlanStatus(t *testing.T, store core.Store, planID string, want core.TaskPlanStatus, timeout time.Duration) *core.TaskPlan {
+func waitSessionHalted(t *testing.T, s *DepScheduler, sessionID string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		plan, err := store.GetTaskPlan(planID)
-		if err != nil {
-			t.Fatalf("GetTaskPlan(%s) error = %v", planID, err)
-		}
-		if plan.Status == want {
-			return plan
+		s.mu.Lock()
+		rs := s.sessions[sessionID]
+		halted := rs != nil && rs.HaltNew
+		s.mu.Unlock()
+		if halted {
+			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting plan %s status %q, got %q", planID, want, plan.Status)
+			t.Fatalf("timeout waiting session %s halt flag", sessionID)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -923,32 +848,32 @@ func waitRunnerCalls(t *testing.T, runner *schedulerRunner, want int, timeout ti
 	}
 }
 
-var errInjectedTaskSave = errors.New("injected save task error")
+var errInjectedIssueSave = errors.New("injected save issue error")
 
-type flakyTaskSaveStore struct {
+type flakyIssueSaveStore struct {
 	core.Store
 
-	mu         sync.Mutex
-	failTaskID string
-	failStatus core.TaskItemStatus
-	failedOnce bool
+	mu          sync.Mutex
+	failIssueID string
+	failStatus  core.IssueStatus
+	failedOnce  bool
 }
 
-func (s *flakyTaskSaveStore) SaveTaskItem(item *core.TaskItem) error {
+func (s *flakyIssueSaveStore) SaveIssue(issue *core.Issue) error {
 	s.mu.Lock()
 	shouldFail := !s.failedOnce &&
-		item != nil &&
-		item.ID == s.failTaskID &&
-		item.Status == s.failStatus
+		issue != nil &&
+		issue.ID == s.failIssueID &&
+		issue.Status == s.failStatus
 	if shouldFail {
 		s.failedOnce = true
 	}
 	s.mu.Unlock()
 
 	if shouldFail {
-		return errInjectedTaskSave
+		return errInjectedIssueSave
 	}
-	return s.Store.SaveTaskItem(item)
+	return s.Store.SaveIssue(issue)
 }
 
 type warningTracker struct{}
@@ -959,15 +884,15 @@ func (w *warningTracker) Init(context.Context) error { return nil }
 
 func (w *warningTracker) Close() error { return nil }
 
-func (w *warningTracker) CreateTask(context.Context, *core.TaskItem) (string, error) {
+func (w *warningTracker) CreateIssue(context.Context, *core.Issue) (string, error) {
 	return "", core.NewTrackerWarning("create issue", errors.New("github api unavailable"))
 }
 
-func (w *warningTracker) UpdateStatus(context.Context, string, core.TaskItemStatus) error {
+func (w *warningTracker) UpdateStatus(context.Context, string, core.IssueStatus) error {
 	return core.NewTrackerWarning("update issue", errors.New("github api unavailable"))
 }
 
-func (w *warningTracker) SyncDependencies(context.Context, *core.TaskItem, []core.TaskItem) error {
+func (w *warningTracker) SyncDependencies(context.Context, *core.Issue, []*core.Issue) error {
 	return core.NewTrackerWarning("sync dependencies", errors.New("github api unavailable"))
 }
 

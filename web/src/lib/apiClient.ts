@@ -14,10 +14,16 @@ import type {
   CreatePlanRequest,
   CreateProjectRequest,
   GetProjectCreateRequestResponse,
+  GetPipelineLogsQuery,
+  GetPipelineLogsResponse,
   GetPipelineCheckpointsResponse,
   GetChatResponse,
   ListChatRunEventsResponse,
+  ListAdminAuditLogResponse,
   ListChatsResponse,
+  IssueTimelineEntry,
+  ListIssueTimelineQuery,
+  ListIssueTimelineResponse,
   ListPipelinesResponse,
   ListPlansResponse,
   ListProjectsResponse,
@@ -25,10 +31,14 @@ import type {
   PipelineActionResponse,
   PlanActionRequest,
   PlanActionResponse,
+  PlanChangeRecord,
   PlanDagResponse,
+  PlanReviewRecord,
   RepoDiffResponse,
   RepoStatusResponse,
   RepoTreeResponse,
+  SetIssueAutoMergeRequest,
+  SetIssueAutoMergeResponse,
   SubmitPlanReviewResponse,
   TaskActionRequest,
   TaskActionResponse,
@@ -39,6 +49,14 @@ type Primitive = string | number | boolean;
 type PaginationParams = {
   limit?: number;
   offset?: number;
+};
+
+type AdminAuditLogQuery = PaginationParams & {
+  projectId?: string;
+  action?: string;
+  user?: string;
+  since?: string;
+  until?: string;
 };
 
 export interface RequestOptions<TBody = unknown> {
@@ -254,6 +272,56 @@ const normalizeApiTaskPlan = (plan: ApiTaskPlan): ApiTaskPlan => {
   };
 };
 
+const normalizeIssueTimelineEntry = (
+  rawEntry: unknown,
+  index: number,
+): IssueTimelineEntry => {
+  const entry =
+    rawEntry && typeof rawEntry === "object"
+      ? (rawEntry as Record<string, unknown>)
+      : {};
+  const refs =
+    entry.refs && typeof entry.refs === "object"
+      ? (entry.refs as Record<string, unknown>)
+      : {};
+  const meta =
+    entry.meta && typeof entry.meta === "object"
+      ? (entry.meta as Record<string, unknown>)
+      : {};
+
+  const eventID = toSafeString(entry.event_id);
+  const createdAt = toSafeString(entry.created_at);
+  const issueID = toSafeString(refs.issue_id);
+
+  if (!eventID || !createdAt || !issueID) {
+    throw new Error(
+      "issue timeline 响应结构不兼容：缺少 event_id/created_at/refs.issue_id，请重启后端到最新版本。",
+    );
+  }
+
+  const actorName = toSafeString(entry.actor_name) ?? "system";
+  const actorAvatarSeed = toSafeString(entry.actor_avatar_seed) ?? actorName;
+  const kind = toSafeString(entry.kind) ?? "event";
+
+  return {
+    event_id: eventID,
+    kind,
+    created_at: createdAt,
+    actor_type: toSafeString(entry.actor_type) ?? "system",
+    actor_name: actorName,
+    actor_avatar_seed: actorAvatarSeed,
+    title: toSafeString(entry.title) ?? `${kind} #${index + 1}`,
+    body: toSafeString(entry.body) ?? "",
+    status: toSafeString(entry.status) ?? "info",
+    refs: {
+      issue_id: issueID,
+      pipeline_id: toSafeString(refs.pipeline_id),
+      stage: toSafeString(refs.stage),
+    },
+    meta,
+  };
+};
+
 export interface ApiClient {
   request<TResponse, TBody = unknown>(options: RequestOptions<TBody>): Promise<TResponse>;
   get<TResponse>(path: string, options?: Omit<RequestOptions<never>, "path" | "method">): Promise<TResponse>;
@@ -294,6 +362,11 @@ export interface ApiClient {
     planId: string,
     body: PlanActionRequest,
   ): Promise<PlanActionResponse>;
+  setIssueAutoMerge(
+    projectId: string,
+    issueId: string,
+    body: SetIssueAutoMergeRequest,
+  ): Promise<SetIssueAutoMergeResponse>;
   applyTaskAction(
     projectId: string,
     planId: string,
@@ -302,7 +375,20 @@ export interface ApiClient {
   ): Promise<TaskActionResponse>;
   listPlans(projectId: string, pagination?: PaginationParams): Promise<ListPlansResponse>;
   getPlanDag(projectId: string, planId: string): Promise<PlanDagResponse>;
+  listPlanReviews?(projectId: string, planId: string): Promise<PlanReviewRecord[]>;
+  listPlanChanges?(projectId: string, planId: string): Promise<PlanChangeRecord[]>;
+  listIssueTimeline(
+    projectId: string,
+    issueId: string,
+    query?: ListIssueTimelineQuery,
+  ): Promise<ListIssueTimelineResponse>;
+  listAdminAuditLog?(query?: AdminAuditLogQuery): Promise<ListAdminAuditLogResponse>;
   getPipeline(projectId: string, pipelineId: string): Promise<ApiPipeline>;
+  getPipelineLogs(
+    projectId: string,
+    pipelineId: string,
+    query?: GetPipelineLogsQuery,
+  ): Promise<GetPipelineLogsResponse>;
   getPipelineCheckpoints(
     projectId: string,
     pipelineId: string,
@@ -482,6 +568,12 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
         method: "POST",
         body,
       }),
+    setIssueAutoMerge: (projectId, issueId, body) =>
+      request<SetIssueAutoMergeResponse, SetIssueAutoMergeRequest>({
+        path: `/projects/${projectId}/issues/${issueId}/auto-merge`,
+        method: "POST",
+        body,
+      }),
     applyTaskAction: (projectId, planId, taskId, body) =>
       request<TaskActionResponse, TaskActionRequest>({
         path: `/projects/${projectId}/plans/${planId}/tasks/${taskId}/action`,
@@ -489,18 +581,63 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
         body,
       }),
     listPlans: async (projectId, pagination) => {
-      const response = await request<ListPlansResponse>({
+      const response = await request<ListPlansResponse | ApiTaskPlan[]>({
         path: `/projects/${projectId}/plans`,
         query: pagination,
       });
+      if (Array.isArray(response)) {
+        return {
+          items: response.map(normalizeApiTaskPlan),
+          total: response.length,
+          offset: pagination?.offset ?? 0,
+        };
+      }
+      const items = Array.isArray(response.items) ? response.items : [];
       return {
-        ...response,
-        items: response.items.map(normalizeApiTaskPlan),
+        items: items.map(normalizeApiTaskPlan),
+        total: typeof response.total === "number" ? response.total : items.length,
+        offset: typeof response.offset === "number" ? response.offset : pagination?.offset ?? 0,
       };
     },
     getPlanDag: (projectId, planId) =>
       request<PlanDagResponse>({
         path: `/projects/${projectId}/plans/${planId}/dag`,
+      }),
+    listPlanReviews: (projectId, planId) =>
+      request<PlanReviewRecord[]>({
+        path: `/projects/${projectId}/plans/${planId}/reviews`,
+      }),
+    listPlanChanges: (projectId, planId) =>
+      request<PlanChangeRecord[]>({
+        path: `/projects/${projectId}/plans/${planId}/changes`,
+      }),
+    listIssueTimeline: async (projectId, issueId, query) => {
+      const response = await request<ListIssueTimelineResponse>({
+        path: `/projects/${projectId}/issues/${issueId}/timeline`,
+        query: {
+          limit: query?.limit,
+          offset: query?.offset,
+        },
+      });
+      const rawItems = Array.isArray(response.items) ? response.items : [];
+      return {
+        items: rawItems.map((item, index) => normalizeIssueTimelineEntry(item, index)),
+        total: typeof response.total === "number" ? response.total : rawItems.length,
+        offset: typeof response.offset === "number" ? response.offset : query?.offset ?? 0,
+      };
+    },
+    listAdminAuditLog: (query) =>
+      request<ListAdminAuditLogResponse>({
+        path: "/admin/audit-log",
+        query: {
+          project_id: query?.projectId?.trim() ? query.projectId : undefined,
+          action: query?.action?.trim() ? query.action : undefined,
+          user: query?.user?.trim() ? query.user : undefined,
+          since: query?.since?.trim() ? query.since : undefined,
+          until: query?.until?.trim() ? query.until : undefined,
+          limit: query?.limit,
+          offset: query?.offset,
+        },
       }),
     getPipeline: async (projectId, pipelineId) => {
       const response = await request<ApiPipeline>({
@@ -508,6 +645,15 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
       });
       return normalizeApiPipeline(response);
     },
+    getPipelineLogs: (projectId, pipelineId, query) =>
+      request<GetPipelineLogsResponse>({
+        path: `/projects/${projectId}/pipelines/${pipelineId}/logs`,
+        query: {
+          stage: query?.stage?.trim() ? query.stage : undefined,
+          limit: query?.limit,
+          offset: query?.offset,
+        },
+      }),
     getPipelineCheckpoints: (projectId, pipelineId) =>
       request<GetPipelineCheckpointsResponse>({
         path: `/projects/${projectId}/pipelines/${pipelineId}/checkpoints`,

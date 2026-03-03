@@ -158,23 +158,23 @@ func TestRunServer_PortPriority(t *testing.T) {
 
 			origSchedulerFactory := newServerScheduler
 			origServerFactory := newAPIServer
-			origPlanManagerFactory := newServerPlanManager
+			origIssueManagerFactory := newServerIssueManager
 			t.Cleanup(func() {
 				newServerScheduler = origSchedulerFactory
 				newAPIServer = origServerFactory
-				newServerPlanManager = origPlanManagerFactory
+				newServerIssueManager = origIssueManagerFactory
 			})
 
 			startErr := errors.New("server start failed")
 			fakeScheduler := &testScheduler{}
-			fakePlanManager := &testServerPlanManager{}
+			fakeIssueManager := &testServerIssueManager{}
 			capturedAddr := ""
 
 			newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 				return fakeScheduler, nil
 			}
-			newServerPlanManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverPlanManager, error) {
-				return fakePlanManager, nil
+			newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverIssueManager, error) {
+				return fakeIssueManager, nil
 			}
 			newAPIServer = func(cfg web.Config) apiServer {
 				capturedAddr = cfg.Addr
@@ -191,8 +191,8 @@ func TestRunServer_PortPriority(t *testing.T) {
 			if !fakeScheduler.stopCalled {
 				t.Fatal("expected scheduler stop to be called on startup failure")
 			}
-			if !fakePlanManager.stopCalled {
-				t.Fatal("expected plan manager stop to be called on startup failure")
+			if !fakeIssueManager.stopCalled {
+				t.Fatal("expected issue manager stop to be called on startup failure")
 			}
 		})
 	}
@@ -205,23 +205,23 @@ func TestRunServer_StartFailureJoinsSchedulerStopError(t *testing.T) {
 
 	origSchedulerFactory := newServerScheduler
 	origServerFactory := newAPIServer
-	origPlanManagerFactory := newServerPlanManager
+	origIssueManagerFactory := newServerIssueManager
 	t.Cleanup(func() {
 		newServerScheduler = origSchedulerFactory
 		newAPIServer = origServerFactory
-		newServerPlanManager = origPlanManagerFactory
+		newServerIssueManager = origIssueManagerFactory
 	})
 
 	startErr := errors.New("server start failed")
 	stopErr := errors.New("scheduler stop failed")
 	fakeScheduler := &testScheduler{stopErr: stopErr}
-	fakePlanManager := &testServerPlanManager{}
+	fakeIssueManager := &testServerIssueManager{}
 
 	newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 		return fakeScheduler, nil
 	}
-	newServerPlanManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverPlanManager, error) {
-		return fakePlanManager, nil
+	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverIssueManager, error) {
+		return fakeIssueManager, nil
 	}
 	newAPIServer = func(_ web.Config) apiServer {
 		return &testAPIServer{startErr: startErr}
@@ -240,36 +240,36 @@ func TestRunServer_StartFailureJoinsSchedulerStopError(t *testing.T) {
 	if !fakeScheduler.stopCalled {
 		t.Fatal("expected scheduler stop to be called on server start failure")
 	}
-	if !fakePlanManager.stopCalled {
-		t.Fatal("expected plan manager stop to be called on server start failure")
+	if !fakeIssueManager.stopCalled {
+		t.Fatal("expected issue manager stop to be called on server start failure")
 	}
 }
 
-func TestRunServer_PlanManagerReceivesReviewRoleBindings(t *testing.T) {
+func TestRunServer_IssueManagerReceivesReviewRoleBindings(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 	t.Setenv("USERPROFILE", tempHome)
 
 	origSchedulerFactory := newServerScheduler
 	origServerFactory := newAPIServer
-	origPlanManagerFactory := newServerPlanManager
+	origIssueManagerFactory := newServerIssueManager
 	t.Cleanup(func() {
 		newServerScheduler = origSchedulerFactory
 		newAPIServer = origServerFactory
-		newServerPlanManager = origPlanManagerFactory
+		newServerIssueManager = origIssueManagerFactory
 	})
 
 	startErr := errors.New("server start failed")
 	fakeScheduler := &testScheduler{}
-	fakePlanManager := &testServerPlanManager{}
+	fakeIssueManager := &testServerIssueManager{}
 	var capturedRoleBinds config.RoleBindings
 
 	newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 		return fakeScheduler, nil
 	}
-	newServerPlanManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, roleBinds config.RoleBindings) (serverPlanManager, error) {
+	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, roleBinds config.RoleBindings) (serverIssueManager, error) {
 		capturedRoleBinds = roleBinds
-		return fakePlanManager, nil
+		return fakeIssueManager, nil
 	}
 	newAPIServer = func(_ web.Config) apiServer {
 		return &testAPIServer{startErr: startErr}
@@ -349,6 +349,109 @@ func TestCLI_ServerCommandStartsAndHealth(t *testing.T) {
 	t.Fatalf("health check did not return 200 within timeout")
 }
 
+func TestSecretaryIssueManagerAdapterCreateIssuesDelegatesToManager(t *testing.T) {
+	fakeManager := &fakeSecretaryIssueService{
+		createIssuesFn: func(_ context.Context, input secretary.CreateIssuesInput) ([]*core.Issue, error) {
+			if input.ProjectID != "proj-1" {
+				t.Fatalf("create issues project id = %q, want %q", input.ProjectID, "proj-1")
+			}
+			if input.SessionID != "chat-1" {
+				t.Fatalf("create issues session id = %q, want %q", input.SessionID, "chat-1")
+			}
+			if len(input.Issues) != 1 {
+				t.Fatalf("create issues size = %d, want 1", len(input.Issues))
+			}
+			spec := input.Issues[0]
+			if spec.Title != "my plan" {
+				t.Fatalf("issue title = %q, want %q", spec.Title, "my plan")
+			}
+			if spec.Template != "standard" {
+				t.Fatalf("issue template = %q, want %q", spec.Template, "standard")
+			}
+			if spec.FailPolicy != core.FailSkip {
+				t.Fatalf("issue fail policy = %q, want %q", spec.FailPolicy, core.FailSkip)
+			}
+			if len(spec.Labels) != 2 || spec.Labels[0] != "plan" || spec.Labels[1] != "from-files" {
+				t.Fatalf("issue labels = %#v, want [plan from-files]", spec.Labels)
+			}
+			if !strings.Contains(spec.Body, "## Conversation") || !strings.Contains(spec.Body, "## Source Files") {
+				t.Fatalf("issue body should include conversation and source files sections, got %q", spec.Body)
+			}
+			if !strings.Contains(spec.Body, "docs/spec/demo.md") || !strings.Contains(spec.Body, "hello spec") {
+				t.Fatalf("issue body should include file path and file content, got %q", spec.Body)
+			}
+			return []*core.Issue{
+				{
+					ID:        "issue-1",
+					ProjectID: input.ProjectID,
+					SessionID: input.SessionID,
+					Title:     spec.Title,
+					Template:  spec.Template,
+					Status:    core.IssueStatusDraft,
+					State:     core.IssueStateOpen,
+				},
+			}, nil
+		},
+	}
+
+	adapter := &secretaryIssueManagerAdapter{manager: fakeManager}
+	issues, err := adapter.CreateIssues(context.Background(), web.IssueCreateInput{
+		ProjectID:  "proj-1",
+		SessionID:  "chat-1",
+		Name:       "my plan",
+		FailPolicy: core.FailSkip,
+		Request: web.IssueCreateRequest{
+			Conversation: "请生成计划",
+		},
+		SourceFiles: []string{"docs/spec/demo.md"},
+		FileContents: map[string]string{
+			"docs/spec/demo.md": "hello spec",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateIssues() error = %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("CreateIssues() returned %d issues, want 1", len(issues))
+	}
+	if issues[0].ID != "issue-1" {
+		t.Fatalf("created issue id = %q, want %q", issues[0].ID, "issue-1")
+	}
+}
+
+func TestSecretaryIssueManagerAdapterCreateIssuesDefaultFailPolicy(t *testing.T) {
+	fakeManager := &fakeSecretaryIssueService{
+		createIssuesFn: func(_ context.Context, input secretary.CreateIssuesInput) ([]*core.Issue, error) {
+			if len(input.Issues) != 1 {
+				t.Fatalf("create issues size = %d, want 1", len(input.Issues))
+			}
+			spec := input.Issues[0]
+			if spec.FailPolicy != core.FailBlock {
+				t.Fatalf("default fail policy = %q, want %q", spec.FailPolicy, core.FailBlock)
+			}
+			if spec.Title != "Plan from chat session" {
+				t.Fatalf("default issue title = %q, want %q", spec.Title, "Plan from chat session")
+			}
+			return []*core.Issue{{ID: "issue-default"}}, nil
+		},
+	}
+
+	adapter := &secretaryIssueManagerAdapter{manager: fakeManager}
+	issues, err := adapter.CreateIssues(context.Background(), web.IssueCreateInput{
+		ProjectID: "proj-2",
+		SessionID: "chat-2",
+		Request: web.IssueCreateRequest{
+			Conversation: "hello",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateIssues() error = %v", err)
+	}
+	if len(issues) != 1 || issues[0].ID != "issue-default" {
+		t.Fatalf("CreateIssues() returned %#v, want issue-default", issues)
+	}
+}
+
 func reserveFreePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -394,35 +497,68 @@ func (s *testScheduler) Stop(_ context.Context) error {
 	return s.stopErr
 }
 
-type testServerPlanManager struct {
+type testServerIssueManager struct {
 	startErr    error
 	stopErr     error
 	startCalled bool
 	stopCalled  bool
 }
 
-func (m *testServerPlanManager) Start(_ context.Context) error {
+func (m *testServerIssueManager) Start(_ context.Context) error {
 	m.startCalled = true
 	return m.startErr
 }
 
-func (m *testServerPlanManager) Stop(_ context.Context) error {
+func (m *testServerIssueManager) Stop(_ context.Context) error {
 	m.stopCalled = true
 	return m.stopErr
 }
 
-func (m *testServerPlanManager) CreateDraft(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
-	return nil, nil
+func (m *testServerIssueManager) CreateIssues(_ context.Context, _ web.IssueCreateInput) ([]core.Issue, error) {
+	return []core.Issue{}, nil
 }
 
-func (m *testServerPlanManager) CreateDraftFromFiles(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
-	return nil, nil
+func (m *testServerIssueManager) SubmitForReview(_ context.Context, issueID string, _ web.IssueReviewInput) (*core.Issue, error) {
+	return &core.Issue{ID: issueID}, nil
 }
 
-func (m *testServerPlanManager) SubmitReview(_ context.Context, _ string, _ secretary.ReviewInput) (*core.TaskPlan, error) {
-	return nil, nil
+func (m *testServerIssueManager) ApplyIssueAction(_ context.Context, issueID string, _ web.IssueAction) (*core.Issue, error) {
+	return &core.Issue{ID: issueID}, nil
 }
 
-func (m *testServerPlanManager) ApplyPlanAction(_ context.Context, _ string, _ secretary.PlanAction) (*core.TaskPlan, error) {
-	return nil, nil
+type fakeSecretaryIssueService struct {
+	startErr          error
+	stopErr           error
+	createIssuesFn    func(ctx context.Context, input secretary.CreateIssuesInput) ([]*core.Issue, error)
+	submitForReviewFn func(ctx context.Context, issueIDs []string) error
+	applyActionFn     func(ctx context.Context, issueID, action, feedback string) (*core.Issue, error)
+}
+
+func (s *fakeSecretaryIssueService) Start(_ context.Context) error {
+	return s.startErr
+}
+
+func (s *fakeSecretaryIssueService) Stop(_ context.Context) error {
+	return s.stopErr
+}
+
+func (s *fakeSecretaryIssueService) CreateIssues(ctx context.Context, input secretary.CreateIssuesInput) ([]*core.Issue, error) {
+	if s.createIssuesFn == nil {
+		return nil, errors.New("unexpected CreateIssues call")
+	}
+	return s.createIssuesFn(ctx, input)
+}
+
+func (s *fakeSecretaryIssueService) SubmitForReview(ctx context.Context, issueIDs []string) error {
+	if s.submitForReviewFn == nil {
+		return nil
+	}
+	return s.submitForReviewFn(ctx, issueIDs)
+}
+
+func (s *fakeSecretaryIssueService) ApplyIssueAction(ctx context.Context, issueID, action, feedback string) (*core.Issue, error) {
+	if s.applyActionFn == nil {
+		return &core.Issue{ID: issueID}, nil
+	}
+	return s.applyActionFn(ctx, issueID, action, feedback)
 }

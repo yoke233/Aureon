@@ -238,6 +238,152 @@ func TestGetPipelineCheckpoints(t *testing.T) {
 	}
 }
 
+func TestGetPipelineLogsSupportsStageLimitOffset(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-pipe-logs",
+		Name:     "project-pipe-logs",
+		RepoPath: filepath.Join(t.TempDir(), "repo-pipe-logs"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+
+	now := time.Now()
+	pipeline := &core.Pipeline{
+		ID:              "pipe-logs-1",
+		ProjectID:       project.ID,
+		Name:            "logs-pipeline",
+		Template:        "quick",
+		Status:          core.StatusRunning,
+		CurrentStage:    core.StageImplement,
+		Stages:          []core.StageConfig{{Name: core.StageImplement, Agent: "codex"}},
+		Artifacts:       map[string]string{},
+		Config:          map[string]any{},
+		MaxTotalRetries: 5,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := store.SavePipeline(pipeline); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+
+	for _, entry := range []core.LogEntry{
+		{
+			PipelineID: pipeline.ID,
+			Stage:      "implement",
+			Type:       "stdout",
+			Agent:      "codex",
+			Content:    "implement-log-1",
+			Timestamp:  "2026-03-03T10:00:00Z",
+		},
+		{
+			PipelineID: pipeline.ID,
+			Stage:      "code_review",
+			Type:       "stdout",
+			Agent:      "claude",
+			Content:    "review-log-1",
+			Timestamp:  "2026-03-03T10:01:00Z",
+		},
+		{
+			PipelineID: pipeline.ID,
+			Stage:      "implement",
+			Type:       "stdout",
+			Agent:      "codex",
+			Content:    "implement-log-2",
+			Timestamp:  "2026-03-03T10:02:00Z",
+		},
+	} {
+		if err := store.AppendLog(entry); err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-pipe-logs/pipelines/pipe-logs-1/logs?stage=implement&limit=1&offset=1")
+	if err != nil {
+		t.Fatalf("GET logs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var got struct {
+		Items  []core.LogEntry `json:"items"`
+		Total  int             `json:"total"`
+		Offset int             `json:"offset"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode logs response: %v", err)
+	}
+
+	if got.Total != 2 {
+		t.Fatalf("expected total=2 for implement stage, got %d", got.Total)
+	}
+	if got.Offset != 1 {
+		t.Fatalf("expected offset=1, got %d", got.Offset)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(got.Items))
+	}
+	if got.Items[0].Stage != "implement" {
+		t.Fatalf("expected stage implement, got %s", got.Items[0].Stage)
+	}
+	if got.Items[0].Content != "implement-log-2" {
+		t.Fatalf("expected second implement log, got %q", got.Items[0].Content)
+	}
+}
+
+func TestGetPipelineLogsInvalidLimitReturns400(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-pipe-logs-limit",
+		Name:     "project-pipe-logs-limit",
+		RepoPath: filepath.Join(t.TempDir(), "repo-pipe-logs-limit"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+
+	now := time.Now()
+	pipeline := &core.Pipeline{
+		ID:              "pipe-logs-limit-1",
+		ProjectID:       project.ID,
+		Name:            "logs-limit-pipeline",
+		Template:        "quick",
+		Status:          core.StatusRunning,
+		CurrentStage:    core.StageImplement,
+		Stages:          []core.StageConfig{{Name: core.StageImplement, Agent: "codex"}},
+		Artifacts:       map[string]string{},
+		Config:          map[string]any{},
+		MaxTotalRetries: 5,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := store.SavePipeline(pipeline); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-pipe-logs-limit/pipelines/pipe-logs-limit-1/logs?limit=bad")
+	if err != nil {
+		t.Fatalf("GET logs with invalid limit: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid limit, got %d", resp.StatusCode)
+	}
+}
+
 func TestApplyPipelineAction(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
@@ -507,12 +653,12 @@ func TestDefaultPipelineStageConfig_DefaultAgentAndE2E(t *testing.T) {
 	}
 }
 
-func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
+func TestGetPipeline_IncludesIssueID(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
-		ID:       "proj-pipe-task-item-id",
-		Name:     "project-pipe-task-item-id",
-		RepoPath: filepath.Join(t.TempDir(), "repo-pipe-task-item-id"),
+		ID:       "proj-pipe-issue-id",
+		Name:     "project-pipe-issue-id",
+		RepoPath: filepath.Join(t.TempDir(), "repo-pipe-issue-id"),
 	}
 	if err := store.CreateProject(&project); err != nil {
 		t.Fatalf("seed project: %v", err)
@@ -520,12 +666,12 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 
 	now := time.Now()
 	pipeline := &core.Pipeline{
-		ID:              "pipe-task-item-id-1",
+		ID:              "pipe-issue-id-1",
 		ProjectID:       project.ID,
-		Name:            "task-item-pipeline",
+		Name:            "issue-pipeline",
 		Template:        "quick",
 		Status:          core.StatusCreated,
-		TaskItemID:      "task-a3f1b2c0-1",
+		IssueID:         "issue-a3f1b2c0-1",
 		Stages:          []core.StageConfig{{Name: core.StageImplement, Agent: "codex"}},
 		Artifacts:       map[string]string{},
 		Config:          map[string]any{},
@@ -541,7 +687,7 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-pipe-task-item-id/pipelines/pipe-task-item-id-1")
+	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-pipe-issue-id/pipelines/pipe-issue-id-1")
 	if err != nil {
 		t.Fatalf("GET /api/v1/projects/{pid}/pipelines/{id}: %v", err)
 	}
@@ -551,8 +697,8 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 	}
 
 	var got struct {
-		ID         string `json:"id"`
-		TaskItemID string `json:"task_item_id"`
+		ID      string `json:"id"`
+		IssueID string `json:"issue_id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode pipeline response: %v", err)
@@ -560,8 +706,8 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 	if got.ID != pipeline.ID {
 		t.Fatalf("expected pipeline id %s, got %s", pipeline.ID, got.ID)
 	}
-	if got.TaskItemID != pipeline.TaskItemID {
-		t.Fatalf("expected task_item_id %s, got %s", pipeline.TaskItemID, got.TaskItemID)
+	if got.IssueID != pipeline.IssueID {
+		t.Fatalf("expected issue_id %s, got %s", pipeline.IssueID, got.IssueID)
 	}
 }
 

@@ -133,6 +133,7 @@ func (a *ACPChatAssistant) Reply(ctx context.Context, req ChatAssistantRequest) 
 	handler := secretary.NewACPHandler(launchCfg.WorkDir, strings.TrimSpace(req.AgentSessionID), a.deps.EventPublisher)
 	handler.SetProjectID(strings.TrimSpace(req.ProjectID))
 	handler.SetChatSessionID(strings.TrimSpace(req.ChatSessionID))
+	handler.SetPermissionPolicy(role.PermissionPolicy)
 	handler.SetRunEventRecorder(a.deps.RunEventRecorder)
 	client, err := a.deps.ClientFactory.New(runCtx, launchCfg, handler, role.Capabilities)
 	if err != nil {

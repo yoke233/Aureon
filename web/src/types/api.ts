@@ -79,12 +79,14 @@ export interface CreatePlanRequest {
   session_id: string;
   name?: string;
   fail_policy?: "block" | "skip" | "human";
+  auto_merge?: boolean;
 }
 
 export interface CreatePlanFromFilesRequest {
   session_id: string;
   name?: string;
   fail_policy?: "block" | "skip" | "human";
+  auto_merge?: boolean;
   file_paths: string[];
 }
 
@@ -133,6 +135,15 @@ export interface PlanActionRequest {
 
 export interface PlanActionResponse {
   status: TaskPlanStatus | string;
+}
+
+export interface SetIssueAutoMergeRequest {
+  auto_merge: boolean;
+}
+
+export interface SetIssueAutoMergeResponse {
+  status: TaskPlanStatus | string;
+  auto_merge: boolean;
 }
 
 export interface TaskActionRequest {
@@ -246,6 +257,102 @@ export interface PlanDagResponse {
   stats: PlanDagStats;
 }
 
+export interface PlanReviewIssue {
+  severity: string;
+  issue_id: string;
+  description: string;
+  suggestion: string;
+}
+
+export interface PlanProposedFix {
+  issue_id?: string;
+  description: string;
+  suggestion?: string;
+}
+
+export interface PlanReviewRecord {
+  id: number;
+  issue_id: string;
+  round: number;
+  reviewer: string;
+  verdict: string;
+  summary?: string;
+  raw_output?: string;
+  issues: PlanReviewIssue[];
+  fixes: PlanProposedFix[];
+  score?: number;
+  created_at: string;
+}
+
+export interface PlanChangeRecord {
+  id: string;
+  issue_id: string;
+  field: string;
+  old_value: string;
+  new_value: string;
+  reason: string;
+  changed_by: string;
+  created_at: string;
+}
+
+export interface PipelineLogEntry {
+  id: number;
+  pipeline_id: string;
+  stage: string;
+  type: string;
+  agent: string;
+  content: string;
+  timestamp: string;
+}
+
+export interface GetPipelineLogsQuery {
+  stage?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export type GetPipelineLogsResponse = PaginatedResponse<PipelineLogEntry>;
+
+export interface IssueTimelineRefs {
+  issue_id: string;
+  pipeline_id?: string;
+  stage?: string;
+}
+
+export interface IssueTimelineEntry {
+  event_id: string;
+  kind: "review" | "change" | "action" | "checkpoint" | "log" | "audit" | string;
+  created_at: string;
+  actor_type: "human" | "agent" | "system" | string;
+  actor_name: string;
+  actor_avatar_seed: string;
+  title: string;
+  body: string;
+  status: "success" | "failed" | "running" | "info" | "warning" | string;
+  refs: IssueTimelineRefs;
+  meta: Record<string, unknown>;
+}
+
+export interface ListIssueTimelineQuery {
+  limit?: number;
+  offset?: number;
+}
+
+export type ListIssueTimelineResponse = PaginatedResponse<IssueTimelineEntry>;
+
+export interface AdminAuditLogItem {
+  id: number;
+  project_id?: string;
+  issue_id?: string;
+  pipeline_id: string;
+  stage?: string;
+  action: string;
+  message: string;
+  source: string;
+  user_id: string;
+  created_at: string;
+}
+
 export interface ApiStatsResponse {
   total_pipelines: number;
   active_pipelines: number;
@@ -261,3 +368,4 @@ export type ListChatsResponse = ChatSession[];
 export type ListChatRunEventsResponse = ChatRunEvent[];
 export type GetChatResponse = ChatSession;
 export type CreatePlanResponse = ApiTaskPlan;
+export type ListAdminAuditLogResponse = PaginatedResponse<AdminAuditLogItem>;

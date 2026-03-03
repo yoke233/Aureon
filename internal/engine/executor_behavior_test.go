@@ -582,7 +582,7 @@ func TestExecutor_Run_AgentPromptFromTemplate(t *testing.T) {
 		t.Fatalf("prompt should come from implement template, got: %s", prompt)
 	}
 	for _, required := range []string{
-		".ai-workflow/task_plan.md",
+		".ai-workflow/issue_plan.md",
 		".ai-workflow/progress.md",
 		".ai-workflow/findings.md",
 	} {

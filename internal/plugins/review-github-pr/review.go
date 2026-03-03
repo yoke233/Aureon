@@ -63,38 +63,35 @@ func (g *ReviewGate) Close() error {
 	return nil
 }
 
-func (g *ReviewGate) Submit(ctx context.Context, plan *core.TaskPlan) (string, error) {
+func (g *ReviewGate) Submit(ctx context.Context, issues []*core.Issue) (string, error) {
 	if err := g.ensureReady(); err != nil {
 		return "", err
 	}
-	if plan == nil {
-		return "", errors.New("review-github-pr submit: plan is nil")
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	planID := strings.TrimSpace(plan.ID)
-	if planID == "" {
-		return "", errors.New("review-github-pr submit: plan id is required")
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	issue, err := primaryIssue(issues)
+	if err != nil {
+		return "", err
 	}
 	if g.client == nil {
 		return "", errors.New("review-github-pr submit: github client is required")
 	}
 
-	records, err := g.store.GetReviewRecords(planID)
+	issueID := strings.TrimSpace(issue.ID)
+	records, err := g.store.GetReviewRecords(issueID)
 	if err != nil {
 		return "", fmt.Errorf("review-github-pr submit list records: %w", err)
 	}
 	round := nextRound(records)
-	if plan.ReviewRound > round {
-		round = plan.ReviewRound
-	}
 
-	title := strings.TrimSpace(plan.Name)
-	if title == "" {
-		title = planID
-	}
 	pr, err := g.client.CreatePR(ctx, githubsvc.CreatePRInput{
-		Title: "[Review] " + title,
-		Body:  "Automated review gate for plan " + planID,
-		Head:  "ai-flow/review-" + planID,
+		Title: buildPRTitle(issue),
+		Body:  buildPRBody(issue),
+		Head:  "ai-flow/review-" + issueID,
 		Base:  "main",
 		Draft: true,
 	})
@@ -119,33 +116,35 @@ func (g *ReviewGate) Submit(ctx context.Context, plan *core.TaskPlan) (string, e
 	}
 
 	record := &core.ReviewRecord{
-		PlanID:   planID,
-		Round:    round,
-		Reviewer: reviewerName,
-		Verdict:  "pending",
-		Fixes:    fixes,
+		IssueID:   issueID,
+		Round:     round,
+		Reviewer:  reviewerName,
+		Verdict:   "pending",
+		Summary:   "已创建 GitHub PR，等待评审结论",
+		RawOutput: strings.TrimSpace(buildPRBody(issue)),
+		Fixes:     fixes,
 	}
 	if err := g.store.SaveReviewRecord(record); err != nil {
 		return "", fmt.Errorf("review-github-pr submit save record: %w", err)
 	}
-	return planID, nil
+	return issueID, nil
 }
 
 func (g *ReviewGate) Check(ctx context.Context, reviewID string) (*core.ReviewResult, error) {
 	if err := g.ensureReady(); err != nil {
 		return nil, err
 	}
-	planID := strings.TrimSpace(reviewID)
-	if planID == "" {
+	issueID := strings.TrimSpace(reviewID)
+	if issueID == "" {
 		return nil, errors.New("review-github-pr check: review id is required")
 	}
 
-	records, err := g.store.GetReviewRecords(planID)
+	records, err := g.store.GetReviewRecords(issueID)
 	if err != nil {
 		return nil, fmt.Errorf("review-github-pr check list records: %w", err)
 	}
 	if len(records) == 0 {
-		return nil, fmt.Errorf("review-github-pr check: review %q not found", planID)
+		return nil, fmt.Errorf("review-github-pr check: review %q not found", issueID)
 	}
 
 	latest := records[len(records)-1]
@@ -158,10 +157,12 @@ func (g *ReviewGate) Check(ctx context.Context, reviewID string) (*core.ReviewRe
 		Status: status,
 		Verdicts: []core.ReviewVerdict{
 			{
-				Reviewer: latest.Reviewer,
-				Status:   strings.TrimSpace(latest.Verdict),
-				Issues:   append([]core.ReviewIssue(nil), latest.Issues...),
-				Score:    score,
+				Reviewer:  latest.Reviewer,
+				Status:    strings.TrimSpace(latest.Verdict),
+				Summary:   strings.TrimSpace(latest.Summary),
+				RawOutput: strings.TrimSpace(latest.RawOutput),
+				Issues:    append([]core.ReviewIssue(nil), latest.Issues...),
+				Score:     score,
 			},
 		},
 		Decision: decision,
@@ -173,17 +174,17 @@ func (g *ReviewGate) Cancel(ctx context.Context, reviewID string) error {
 	if err := g.ensureReady(); err != nil {
 		return err
 	}
-	planID := strings.TrimSpace(reviewID)
-	if planID == "" {
+	issueID := strings.TrimSpace(reviewID)
+	if issueID == "" {
 		return errors.New("review-github-pr cancel: review id is required")
 	}
 
-	records, err := g.store.GetReviewRecords(planID)
+	records, err := g.store.GetReviewRecords(issueID)
 	if err != nil {
 		return fmt.Errorf("review-github-pr cancel list records: %w", err)
 	}
 	if len(records) == 0 {
-		return fmt.Errorf("review-github-pr cancel: review %q not found", planID)
+		return fmt.Errorf("review-github-pr cancel: review %q not found", issueID)
 	}
 
 	latest := records[len(records)-1]
@@ -205,11 +206,56 @@ func (g *ReviewGate) Cancel(ctx context.Context, reviewID string) error {
 		round = 1
 	}
 	return g.store.SaveReviewRecord(&core.ReviewRecord{
-		PlanID:   planID,
-		Round:    round,
-		Reviewer: reviewerName,
-		Verdict:  "cancelled",
+		IssueID:   issueID,
+		Round:     round,
+		Reviewer:  reviewerName,
+		Verdict:   "cancelled",
+		Summary:   "GitHub PR 评审已取消",
+		RawOutput: "review-github-pr gate cancelled",
 	})
+}
+
+func primaryIssue(issues []*core.Issue) (*core.Issue, error) {
+	if len(issues) == 0 {
+		return nil, errors.New("review-github-pr submit: issues are required")
+	}
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		if strings.TrimSpace(issue.ID) == "" {
+			return nil, errors.New("review-github-pr submit: issue id is required")
+		}
+		return issue, nil
+	}
+	return nil, errors.New("review-github-pr submit: issues are required")
+}
+
+func buildPRTitle(issue *core.Issue) string {
+	title := strings.TrimSpace(issue.Title)
+	if title == "" {
+		title = strings.TrimSpace(issue.ID)
+	}
+	return "[Review] " + title
+}
+
+func buildPRBody(issue *core.Issue) string {
+	issueID := strings.TrimSpace(issue.ID)
+	issueTitle := strings.TrimSpace(issue.Title)
+	if issueTitle == "" {
+		issueTitle = issueID
+	}
+	body := strings.TrimSpace(issue.Body)
+	if body == "" {
+		body = "_No issue body provided._"
+	}
+	return strings.Join([]string{
+		"Automated review gate for issue " + issueID,
+		"",
+		"Title: " + issueTitle,
+		"",
+		body,
+	}, "\n")
 }
 
 func (g *ReviewGate) ensureReady() error {

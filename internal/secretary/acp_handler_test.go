@@ -207,6 +207,191 @@ func TestHandleWriteFileRejectsPathOutsideScope(t *testing.T) {
 	}
 }
 
+func TestHandleRequestPermissionSelectsAllowAlwaysByPolicy(t *testing.T) {
+	cwd := t.TempDir()
+	handler := NewACPHandler(cwd, "chat-1", nil)
+	handler.SetPermissionPolicy([]acpclient.PermissionRule{
+		{
+			Pattern: "fs/write_text_file",
+			Scope:   "cwd",
+			Action:  "allow_always",
+		},
+	})
+
+	decision, err := handler.RequestPermission(context.Background(), acpproto.RequestPermissionRequest{
+		Meta: map[string]any{
+			"action":   "fs/write_text_file",
+			"resource": filepath.Join(cwd, "plans", "plan-a.md"),
+		},
+		Options: []acpproto.PermissionOption{
+			{OptionId: "opt-allow-once", Kind: acpproto.PermissionOptionKindAllowOnce, Name: "Allow once"},
+			{OptionId: "opt-allow-always", Kind: acpproto.PermissionOptionKindAllowAlways, Name: "Allow always"},
+			{OptionId: "opt-reject-once", Kind: acpproto.PermissionOptionKindRejectOnce, Name: "Reject once"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if decision.Outcome.Selected == nil || decision.Outcome.Selected.Outcome != "selected" {
+		t.Fatalf("permission outcome = %#v, want selected", decision.Outcome)
+	}
+	if string(decision.Outcome.Selected.OptionId) != "opt-allow-always" {
+		t.Fatalf("permission option id = %q, want %q", decision.Outcome.Selected.OptionId, "opt-allow-always")
+	}
+}
+
+func TestHandleRequestPermissionUnknownScopeFallsBackToDefault(t *testing.T) {
+	cwd := t.TempDir()
+	handler := NewACPHandler(cwd, "chat-1", nil)
+	handler.SetPermissionPolicy([]acpclient.PermissionRule{
+		{
+			Pattern: "fs/write_text_file",
+			Scope:   "project",
+			Action:  "allow_always",
+		},
+	})
+
+	decision, err := handler.RequestPermission(context.Background(), acpproto.RequestPermissionRequest{
+		Meta: map[string]any{
+			"action":   "fs/write_text_file",
+			"resource": filepath.Join(cwd, "plans", "plan-a.md"),
+		},
+		Options: []acpproto.PermissionOption{
+			{OptionId: "opt-allow-once", Kind: acpproto.PermissionOptionKindAllowOnce, Name: "Allow once"},
+			{OptionId: "opt-allow-always", Kind: acpproto.PermissionOptionKindAllowAlways, Name: "Allow always"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if decision.Outcome.Selected == nil || decision.Outcome.Selected.Outcome != "selected" {
+		t.Fatalf("permission outcome = %#v, want selected", decision.Outcome)
+	}
+	if string(decision.Outcome.Selected.OptionId) != "opt-allow-once" {
+		t.Fatalf("permission option id = %q, want %q", decision.Outcome.Selected.OptionId, "opt-allow-once")
+	}
+}
+
+func TestHandleRequestPermissionInvalidRuleActionCancels(t *testing.T) {
+	cwd := t.TempDir()
+	handler := NewACPHandler(cwd, "chat-1", nil)
+	handler.SetPermissionPolicy([]acpclient.PermissionRule{
+		{
+			Pattern: "fs/write_text_file",
+			Scope:   "cwd",
+			Action:  "allow_forever",
+		},
+	})
+
+	decision, err := handler.RequestPermission(context.Background(), acpproto.RequestPermissionRequest{
+		Meta: map[string]any{
+			"action":   "fs/write_text_file",
+			"resource": filepath.Join(cwd, "plans", "plan-a.md"),
+		},
+		Options: []acpproto.PermissionOption{
+			{OptionId: "opt-allow-once", Kind: acpproto.PermissionOptionKindAllowOnce, Name: "Allow once"},
+			{OptionId: "opt-allow-always", Kind: acpproto.PermissionOptionKindAllowAlways, Name: "Allow always"},
+			{OptionId: "opt-reject-once", Kind: acpproto.PermissionOptionKindRejectOnce, Name: "Reject once"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if decision.Outcome.Cancelled == nil || decision.Outcome.Cancelled.Outcome != "cancelled" {
+		t.Fatalf("permission outcome = %#v, want cancelled", decision.Outcome)
+	}
+}
+
+func TestHandleRequestPermissionEmptyPatternDoesNotActAsWildcard(t *testing.T) {
+	cwd := t.TempDir()
+	handler := NewACPHandler(cwd, "chat-1", nil)
+	handler.SetPermissionPolicy([]acpclient.PermissionRule{
+		{
+			Pattern: "",
+			Action:  "allow_always",
+		},
+	})
+
+	decision, err := handler.RequestPermission(context.Background(), acpproto.RequestPermissionRequest{
+		Meta: map[string]any{
+			"action": "terminal/create",
+		},
+		Options: []acpproto.PermissionOption{
+			{OptionId: "opt-allow-once", Kind: acpproto.PermissionOptionKindAllowOnce, Name: "Allow once"},
+			{OptionId: "opt-allow-always", Kind: acpproto.PermissionOptionKindAllowAlways, Name: "Allow always"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if decision.Outcome.Selected == nil || decision.Outcome.Selected.Outcome != "selected" {
+		t.Fatalf("permission outcome = %#v, want selected", decision.Outcome)
+	}
+	if string(decision.Outcome.Selected.OptionId) != "opt-allow-once" {
+		t.Fatalf("permission option id = %q, want %q", decision.Outcome.Selected.OptionId, "opt-allow-once")
+	}
+}
+
+func TestHandleRequestPermissionUnknownRequestActionFallsBackToAllowOnce(t *testing.T) {
+	handler := NewACPHandler(t.TempDir(), "chat-1", nil)
+
+	decision, err := handler.RequestPermission(context.Background(), acpproto.RequestPermissionRequest{
+		Meta: map[string]any{
+			"action": "fs/delete_file",
+		},
+		Options: []acpproto.PermissionOption{
+			{OptionId: "opt-allow-once", Kind: acpproto.PermissionOptionKindAllowOnce, Name: "Allow once"},
+			{OptionId: "opt-allow-always", Kind: acpproto.PermissionOptionKindAllowAlways, Name: "Allow always"},
+			{OptionId: "opt-reject-once", Kind: acpproto.PermissionOptionKindRejectOnce, Name: "Reject once"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if decision.Outcome.Selected == nil || decision.Outcome.Selected.Outcome != "selected" {
+		t.Fatalf("permission outcome = %#v, want selected", decision.Outcome)
+	}
+	if string(decision.Outcome.Selected.OptionId) != "opt-allow-once" {
+		t.Fatalf("permission option id = %q, want %q", decision.Outcome.Selected.OptionId, "opt-allow-once")
+	}
+}
+
+func TestHandleRequestPermissionUnknownRequestActionWithoutOptionsCancels(t *testing.T) {
+	handler := NewACPHandler(t.TempDir(), "chat-1", nil)
+
+	decision, err := handler.RequestPermission(context.Background(), acpproto.RequestPermissionRequest{
+		Meta: map[string]any{
+			"action": "tool/execute",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if decision.Outcome.Cancelled == nil || decision.Outcome.Cancelled.Outcome != "cancelled" {
+		t.Fatalf("permission outcome = %#v, want cancelled", decision.Outcome)
+	}
+}
+
+func TestHandleRequestPermissionUnknownRequestActionWithoutAllowOptionCancels(t *testing.T) {
+	handler := NewACPHandler(t.TempDir(), "chat-1", nil)
+
+	decision, err := handler.RequestPermission(context.Background(), acpproto.RequestPermissionRequest{
+		Meta: map[string]any{
+			"action": "fs/delete_file",
+		},
+		Options: []acpproto.PermissionOption{
+			{OptionId: "opt-reject-once", Kind: acpproto.PermissionOptionKindRejectOnce, Name: "Reject once"},
+			{OptionId: "opt-reject-always", Kind: acpproto.PermissionOptionKindRejectAlways, Name: "Reject always"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission() error = %v", err)
+	}
+	if decision.Outcome.Cancelled == nil || decision.Outcome.Cancelled.Outcome != "cancelled" {
+		t.Fatalf("permission outcome = %#v, want cancelled", decision.Outcome)
+	}
+}
+
 func TestHandleSessionUpdatePublishesMinimalData(t *testing.T) {
 	pub := &recordingACPEventPublisher{}
 	handler := NewACPHandler(t.TempDir(), "agent-session-1", pub)

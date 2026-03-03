@@ -16,14 +16,14 @@ import (
 
 func TestAdminOps_ForceReady_Audited(t *testing.T) {
 	store := newTestStore(t)
-	task := seedAdminTaskFixture(t, store, "pipe-admin-ready", core.ItemPending)
+	issue := seedAdminIssueFixture(t, store, "pipe-admin-ready", core.IssueStatusDraft)
 
 	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	body := map[string]any{
-		"task_id":  task.ID,
+		"issue_id": issue.ID,
 		"trace_id": "trace-force-ready",
 	}
 	resp := postJSON(t, ts.URL+"/api/v1/admin/ops/force-ready", body)
@@ -32,15 +32,15 @@ func TestAdminOps_ForceReady_Audited(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	updated, err := store.GetTaskItem(task.ID)
+	updated, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("GetTaskItem() error = %v", err)
+		t.Fatalf("GetIssue() error = %v", err)
 	}
-	if updated.Status != core.ItemReady {
-		t.Fatalf("task status = %s, want %s", updated.Status, core.ItemReady)
+	if updated.Status != core.IssueStatusReady {
+		t.Fatalf("issue status = %s, want %s", updated.Status, core.IssueStatusReady)
 	}
 
-	actions, err := store.GetActions(task.PipelineID)
+	actions, err := store.GetActions(issue.PipelineID)
 	if err != nil {
 		t.Fatalf("GetActions() error = %v", err)
 	}
@@ -57,14 +57,14 @@ func TestAdminOps_ForceReady_Audited(t *testing.T) {
 
 func TestAdminOps_ForceUnblock_Audited(t *testing.T) {
 	store := newTestStore(t)
-	task := seedAdminTaskFixture(t, store, "pipe-admin-unblock", core.ItemBlockedByFailure)
+	issue := seedAdminIssueFixture(t, store, "pipe-admin-unblock", core.IssueStatusFailed)
 
 	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	body := map[string]any{
-		"task_id":  task.ID,
+		"task_id":  issue.ID,
 		"trace_id": "trace-force-unblock",
 	}
 	resp := postJSON(t, ts.URL+"/api/v1/admin/ops/force-unblock", body)
@@ -73,15 +73,15 @@ func TestAdminOps_ForceUnblock_Audited(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	updated, err := store.GetTaskItem(task.ID)
+	updated, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("GetTaskItem() error = %v", err)
+		t.Fatalf("GetIssue() error = %v", err)
 	}
-	if updated.Status != core.ItemReady {
-		t.Fatalf("task status = %s, want %s", updated.Status, core.ItemReady)
+	if updated.Status != core.IssueStatusReady {
+		t.Fatalf("issue status = %s, want %s", updated.Status, core.IssueStatusReady)
 	}
 
-	actions, err := store.GetActions(task.PipelineID)
+	actions, err := store.GetActions(issue.PipelineID)
 	if err != nil {
 		t.Fatalf("GetActions() error = %v", err)
 	}
@@ -145,7 +145,7 @@ func postJSON(t *testing.T, url string, body map[string]any) *http.Response {
 	return resp
 }
 
-func seedAdminTaskFixture(t *testing.T, store core.Store, pipelineID string, status core.TaskItemStatus) *core.TaskItem {
+func seedAdminIssueFixture(t *testing.T, store core.Store, pipelineID string, status core.IssueStatus) *core.Issue {
 	t.Helper()
 
 	project := &core.Project{
@@ -175,30 +175,23 @@ func seedAdminTaskFixture(t *testing.T, store core.Store, pipelineID string, sta
 		t.Fatalf("SavePipeline() error = %v", err)
 	}
 
-	plan := &core.TaskPlan{
-		ID:         "plan-" + pipelineID,
+	issue := &core.Issue{
+		ID:         "issue-" + pipelineID,
 		ProjectID:  project.ID,
-		Name:       "plan",
-		Status:     core.PlanExecuting,
-		WaitReason: core.WaitNone,
+		Title:      "admin-issue",
+		Body:       "admin issue",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     status,
+		PipelineID: pipelineID,
 		FailPolicy: core.FailBlock,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
-	if err := store.SaveTaskPlan(plan); err != nil {
-		t.Fatalf("SaveTaskPlan() error = %v", err)
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue() error = %v", err)
 	}
-
-	task := &core.TaskItem{
-		ID:          "task-" + pipelineID,
-		PlanID:      plan.ID,
-		Title:       "admin-task",
-		Description: "admin task",
-		Status:      status,
-		PipelineID:  pipelineID,
-	}
-	if err := store.SaveTaskItem(task); err != nil {
-		t.Fatalf("SaveTaskItem() error = %v", err)
-	}
-	return task
+	return issue
 }
 
 type fakeWebhookReplayer struct {
@@ -212,4 +205,88 @@ func (f *fakeWebhookReplayer) ReplayByDeliveryID(_ context.Context, deliveryID s
 	f.calls++
 	f.lastDeliveryID = deliveryID
 	return f.replayed, f.err
+}
+
+func TestAdminOps_ListAuditLog_WithFilters(t *testing.T) {
+	store := newTestStore(t)
+	issue := seedAdminIssueFixture(t, store, "pipe-admin-audit-list", core.IssueStatusReady)
+
+	if err := store.RecordAction(core.HumanAction{
+		PipelineID: issue.PipelineID,
+		Action:     "force_ready",
+		Message:    "trace_id=trace-audit-list",
+		Source:     "admin",
+		UserID:     "admin",
+	}); err != nil {
+		t.Fatalf("RecordAction() error = %v", err)
+	}
+
+	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		ts.URL+"/api/v1/admin/audit-log?project_id="+issue.ProjectID+"&action=force_ready&user=admin&limit=10&offset=0",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	req.RemoteAddr = "127.0.0.1:50001"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/admin/audit-log: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var payload adminAuditLogResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Total < 1 || len(payload.Items) < 1 {
+		t.Fatalf("expected at least one audit item, got total=%d items=%d", payload.Total, len(payload.Items))
+	}
+	first := payload.Items[0]
+	if first.ProjectID != issue.ProjectID {
+		t.Fatalf("project_id = %q, want %q", first.ProjectID, issue.ProjectID)
+	}
+	if first.IssueID != issue.ID {
+		t.Fatalf("issue_id = %q, want %q", first.IssueID, issue.ID)
+	}
+	if first.Action != "force_ready" || first.UserID != "admin" {
+		t.Fatalf("unexpected audit item: %+v", first)
+	}
+}
+
+func TestAdminOps_ListAuditLog_RejectsInvalidSinceBoundary(t *testing.T) {
+	store := newTestStore(t)
+	seedAdminIssueFixture(t, store, "pipe-admin-audit-since", core.IssueStatusDraft)
+
+	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		ts.URL+"/api/v1/admin/audit-log?since=not-a-time",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	req.RemoteAddr = "127.0.0.1:50001"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/admin/audit-log: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", resp.StatusCode)
+	}
 }

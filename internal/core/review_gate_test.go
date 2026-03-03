@@ -13,7 +13,7 @@ func TestReviewVerdictUnmarshalSnakeCaseIssueFields(t *testing.T) {
 		"issues":[
 			{
 				"severity":"critical",
-				"task_id":"task-a3f1b2c0-2",
+				"issue_id":"issue-20260302-a3f1b2c0",
 				"description":"cycle detected",
 				"suggestion":"remove circular edge"
 			}
@@ -28,7 +28,7 @@ func TestReviewVerdictUnmarshalSnakeCaseIssueFields(t *testing.T) {
 	if len(verdict.Issues) != 1 {
 		t.Fatalf("expected 1 issue, got %d", len(verdict.Issues))
 	}
-	if verdict.Issues[0].TaskID != "task-a3f1b2c0-2" {
-		t.Fatalf("unexpected task_id mapping: %q", verdict.Issues[0].TaskID)
+	if verdict.Issues[0].IssueID != "issue-20260302-a3f1b2c0" {
+		t.Fatalf("unexpected issue_id mapping: %q", verdict.Issues[0].IssueID)
 	}
 }

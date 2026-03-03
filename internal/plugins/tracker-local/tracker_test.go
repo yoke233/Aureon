@@ -21,12 +21,12 @@ func TestLocalTracker_NameInitClose(t *testing.T) {
 	}
 }
 
-func TestLocalTracker_CreateTask(t *testing.T) {
+func TestLocalTracker_CreateIssue(t *testing.T) {
 	tracker := New()
 
 	cases := []struct {
 		name string
-		item *core.TaskItem
+		item *core.Issue
 		want string
 	}{
 		{
@@ -36,7 +36,7 @@ func TestLocalTracker_CreateTask(t *testing.T) {
 		},
 		{
 			name: "with external id",
-			item: &core.TaskItem{
+			item: &core.Issue{
 				ID:         "task-1",
 				ExternalID: "ext-1",
 			},
@@ -44,7 +44,7 @@ func TestLocalTracker_CreateTask(t *testing.T) {
 		},
 		{
 			name: "without external id",
-			item: &core.TaskItem{
+			item: &core.Issue{
 				ID: "task-2",
 			},
 			want: "task-2",
@@ -54,12 +54,12 @@ func TestLocalTracker_CreateTask(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := tracker.CreateTask(context.Background(), tc.item)
+			got, err := tracker.CreateIssue(context.Background(), tc.item)
 			if err != nil {
-				t.Fatalf("CreateTask() error = %v", err)
+				t.Fatalf("CreateIssue() error = %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("CreateTask() externalID = %q, want %q", got, tc.want)
+				t.Fatalf("CreateIssue() externalID = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -68,7 +68,7 @@ func TestLocalTracker_CreateTask(t *testing.T) {
 func TestLocalTracker_UpdateStatus(t *testing.T) {
 	tracker := New()
 
-	if err := tracker.UpdateStatus(context.Background(), "", core.ItemDone); err != nil {
+	if err := tracker.UpdateStatus(context.Background(), "", core.IssueStatusDone); err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
 }
@@ -76,13 +76,13 @@ func TestLocalTracker_UpdateStatus(t *testing.T) {
 func TestLocalTracker_SyncDependencies(t *testing.T) {
 	tracker := New()
 
-	item := &core.TaskItem{
+	item := &core.Issue{
 		ID:        "task-2",
 		DependsOn: []string{"task-1"},
 	}
-	allItems := []core.TaskItem{
-		{ID: "task-1", Status: core.ItemDone},
-		{ID: "task-2", Status: core.ItemReady},
+	allItems := []*core.Issue{
+		{ID: "task-1", Status: core.IssueStatusDone},
+		{ID: "task-2", Status: core.IssueStatusReady},
 	}
 
 	if err := tracker.SyncDependencies(context.Background(), item, allItems); err != nil {
@@ -97,4 +97,3 @@ func TestLocalTracker_OnExternalComplete(t *testing.T) {
 		t.Fatalf("OnExternalComplete() error = %v", err)
 	}
 }
-

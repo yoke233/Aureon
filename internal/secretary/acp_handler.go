@@ -37,12 +37,13 @@ type ACPHandlerSessionContext struct {
 type ACPHandler struct {
 	acpclient.NopHandler
 
-	cwd           string
-	sessionID     string
-	chatSessionID string
-	projectID     string
-	publisher     acpEventPublisher
-	recorder      ChatRunEventRecorder
+	cwd              string
+	sessionID        string
+	chatSessionID    string
+	projectID        string
+	permissionPolicy []acpclient.PermissionRule
+	publisher        acpEventPublisher
+	recorder         ChatRunEventRecorder
 
 	mu          sync.Mutex
 	changedSet  map[string]struct{}
@@ -138,6 +139,20 @@ func (h *ACPHandler) SetChatSessionID(chatSessionID string) {
 	h.chatSessionID = strings.TrimSpace(chatSessionID)
 }
 
+func (h *ACPHandler) SetPermissionPolicy(policy []acpclient.PermissionRule) {
+	if h == nil {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(policy) == 0 {
+		h.permissionPolicy = nil
+		return
+	}
+	h.permissionPolicy = append([]acpclient.PermissionRule(nil), policy...)
+}
+
 func (h *ACPHandler) ReadTextFile(_ context.Context, req acpproto.ReadTextFileRequest) (acpproto.ReadTextFileResponse, error) {
 	if h == nil {
 		return acpproto.ReadTextFileResponse{}, errors.New("acp handler is nil")
@@ -161,7 +176,8 @@ func (h *ACPHandler) RequestPermission(_ context.Context, req acpproto.RequestPe
 	if h == nil {
 		return acpproto.RequestPermissionResponse{}, errors.New("acp handler is nil")
 	}
-	if selected := selectPermissionOptionID(req.Options); selected != "" {
+	decisionAction := h.resolvePermissionPolicy(req)
+	if selected := selectPermissionOptionID(req.Options, decisionAction); selected != "" {
 		return acpproto.RequestPermissionResponse{
 			Outcome: acpproto.RequestPermissionOutcome{
 				Selected: &acpproto.RequestPermissionOutcomeSelected{
@@ -560,25 +576,268 @@ func applyReadLineWindow(content string, line *int, limit *int) string {
 	return strings.Join(lines[from:to], "\n")
 }
 
-func selectPermissionOptionID(options []acpproto.PermissionOption) string {
-	if len(options) == 0 {
-		return ""
+func (h *ACPHandler) resolvePermissionPolicy(req acpproto.RequestPermissionRequest) string {
+	action, resource := permissionRequestContext(req)
+	policy := h.permissionPolicySnapshot()
+	matchedRule := false
+
+	for i := range policy {
+		rule := policy[i]
+		if !matchPermissionPattern(action, rule.Pattern) {
+			continue
+		}
+		if !h.permissionScopeAllowed(resource, rule.Scope) {
+			continue
+		}
+		matchedRule = true
+		ruleAction := normalizePermissionAction(rule.Action)
+		if ruleAction != "" {
+			return ruleAction
+		}
+	}
+	if matchedRule {
+		return "cancelled"
+	}
+	if !isKnownPermissionAction(action) {
+		if len(req.Options) == 0 {
+			return "allow_once"
+		}
+		if hasPermissionOptionPrefix(req.Options, "allow") {
+			return "allow_once"
+		}
+		if hasPermissionOptionPrefix(req.Options, "reject") {
+			return "cancelled"
+		}
+		// Unknown tool kinds default to allow-once to avoid accidental disruption.
+		return "allow_once"
 	}
 
-	preferred := []string{"allow_once", "allow_always"}
-	for _, want := range preferred {
-		for _, option := range options {
-			if strings.EqualFold(strings.TrimSpace(string(option.OptionId)), want) {
-				return strings.TrimSpace(string(option.OptionId))
+	return "allow_once"
+}
+
+func permissionRequestContext(req acpproto.RequestPermissionRequest) (string, string) {
+	action := ""
+	if value, ok := req.Meta["action"]; ok {
+		if s, ok := value.(string); ok {
+			action = s
+		}
+	}
+	if strings.TrimSpace(action) == "" {
+		if value, ok := req.ToolCall.Meta["action"]; ok {
+			if s, ok := value.(string); ok {
+				action = s
 			}
 		}
 	}
-	for _, option := range options {
-		if id := strings.TrimSpace(string(option.OptionId)); id != "" {
-			return id
+	if strings.TrimSpace(action) == "" && req.ToolCall.Kind != nil {
+		switch *req.ToolCall.Kind {
+		case acpproto.ToolKindRead:
+			action = "fs/read_text_file"
+		case acpproto.ToolKindEdit, acpproto.ToolKindDelete, acpproto.ToolKindMove:
+			action = "fs/write_text_file"
+		case acpproto.ToolKindExecute:
+			action = "terminal/create"
+		default:
+			action = string(*req.ToolCall.Kind)
+		}
+	}
+
+	resource := ""
+	if value, ok := req.Meta["resource"]; ok {
+		if s, ok := value.(string); ok {
+			resource = s
+		}
+	}
+	if strings.TrimSpace(resource) == "" {
+		if value, ok := req.ToolCall.Meta["resource"]; ok {
+			if s, ok := value.(string); ok {
+				resource = s
+			}
+		}
+	}
+	if strings.TrimSpace(resource) == "" && len(req.ToolCall.Locations) > 0 {
+		resource = strings.TrimSpace(req.ToolCall.Locations[0].Path)
+	}
+	if strings.TrimSpace(resource) == "" {
+		resource = permissionResourceFromRawInput(req.ToolCall.RawInput)
+	}
+
+	return normalizePermissionPattern(action), strings.TrimSpace(resource)
+}
+
+func permissionResourceFromRawInput(raw any) string {
+	readPath := func(values map[string]any) string {
+		if path, ok := values["path"].(string); ok {
+			return strings.TrimSpace(path)
+		}
+		if path, ok := values["filePath"].(string); ok {
+			return strings.TrimSpace(path)
+		}
+		return ""
+	}
+
+	switch value := raw.(type) {
+	case map[string]any:
+		return readPath(value)
+	case json.RawMessage:
+		decoded := map[string]any{}
+		if err := json.Unmarshal(value, &decoded); err == nil {
+			return readPath(decoded)
+		}
+	case []byte:
+		decoded := map[string]any{}
+		if err := json.Unmarshal(value, &decoded); err == nil {
+			return readPath(decoded)
 		}
 	}
 	return ""
+}
+
+func (h *ACPHandler) permissionPolicySnapshot() []acpclient.PermissionRule {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.permissionPolicy) == 0 {
+		return nil
+	}
+	out := make([]acpclient.PermissionRule, len(h.permissionPolicy))
+	copy(out, h.permissionPolicy)
+	return out
+}
+
+func (h *ACPHandler) permissionScopeAllowed(resource string, scope string) bool {
+	normalizedScope := strings.ToLower(strings.TrimSpace(scope))
+	switch normalizedScope {
+	case "", "global":
+		return true
+	case "cwd":
+		trimmedResource := strings.TrimSpace(resource)
+		if trimmedResource == "" {
+			return true
+		}
+		_, _, err := h.normalizePathInScope(trimmedResource)
+		return err == nil
+	default:
+		return false
+	}
+}
+
+func normalizePermissionPattern(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "write_file", "write_text_file", "fs/write_file", "fs/write_text_file":
+		return "fs/write_text_file"
+	case "read_file", "read_text_file", "fs/read_file", "fs/read_text_file":
+		return "fs/read_text_file"
+	case "terminal_create", "terminal/create":
+		return "terminal/create"
+	default:
+		return normalized
+	}
+}
+
+func normalizePermissionAction(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "allow_once":
+		return "allow_once"
+	case "allow_always":
+		return "allow_always"
+	case "reject_once":
+		return "reject_once"
+	case "reject_always":
+		return "reject_always"
+	case "cancelled":
+		return "cancelled"
+	default:
+		return ""
+	}
+}
+
+func isKnownPermissionAction(action string) bool {
+	switch action {
+	case "fs/read_text_file", "fs/write_text_file", "terminal/create":
+		return true
+	default:
+		return false
+	}
+}
+
+func matchPermissionPattern(action string, pattern string) bool {
+	normalizedPattern := normalizePermissionPattern(pattern)
+	if normalizedPattern == "*" {
+		return true
+	}
+	if normalizedPattern == "" {
+		return false
+	}
+	return normalizedPattern == action
+}
+
+func selectPermissionOptionID(options []acpproto.PermissionOption, action string) string {
+	preferredKinds := []string{}
+	fallbackPrefix := ""
+	switch action {
+	case "allow_always":
+		preferredKinds = []string{"allow_always", "allow_once"}
+		fallbackPrefix = "allow"
+	case "allow_once":
+		preferredKinds = []string{"allow_once", "allow_always"}
+		fallbackPrefix = "allow"
+	case "reject_always":
+		preferredKinds = []string{"reject_always", "reject_once"}
+		fallbackPrefix = "reject"
+	case "reject_once":
+		preferredKinds = []string{"reject_once", "reject_always"}
+		fallbackPrefix = "reject"
+	default:
+		return ""
+	}
+
+	for _, wantedKind := range preferredKinds {
+		for i := range options {
+			kind := strings.TrimSpace(string(options[i].Kind))
+			optionID := strings.TrimSpace(string(options[i].OptionId))
+			if strings.EqualFold(kind, wantedKind) || strings.EqualFold(optionID, wantedKind) {
+				if optionID := strings.TrimSpace(string(options[i].OptionId)); optionID != "" {
+					return optionID
+				}
+			}
+		}
+	}
+
+	if fallbackPrefix != "" {
+		for i := range options {
+			kind := strings.ToLower(strings.TrimSpace(string(options[i].Kind)))
+			optionID := strings.TrimSpace(string(options[i].OptionId))
+			if optionID == "" {
+				continue
+			}
+			if strings.HasPrefix(kind, fallbackPrefix) {
+				return optionID
+			}
+		}
+	}
+
+	for i := range options {
+		if optionID := strings.TrimSpace(string(options[i].OptionId)); optionID != "" {
+			return optionID
+		}
+	}
+
+	return ""
+}
+
+func hasPermissionOptionPrefix(options []acpproto.PermissionOption, prefix string) bool {
+	normalizedPrefix := strings.ToLower(strings.TrimSpace(prefix))
+	if normalizedPrefix == "" {
+		return false
+	}
+	for i := range options {
+		kind := strings.ToLower(strings.TrimSpace(string(options[i].Kind)))
+		if strings.HasPrefix(kind, normalizedPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *ACPHandler) getTerminal(terminalID string) (*acpTerminalState, bool) {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,54 +23,59 @@ type eventPublisher interface {
 }
 
 type pipelineRef struct {
-	planID string
-	taskID string
+	sessionID string
+	issueID   string
 }
 
 type readyDispatch struct {
-	planID string
-	taskID string
+	sessionID string
+	issueID   string
 }
 
-type runningPlan struct {
-	Plan      *core.TaskPlan
+type runningSession struct {
+	SessionID string
+	ProjectID string
 	Graph     *DAG
 	Running   map[string]string
-	TaskByID  map[string]*core.TaskItem
+	IssueByID map[string]*core.Issue
 	Parents   map[string][]string
 	HaltNew   bool
 	Recovered bool
 }
 
-func newRunningPlan(plan *core.TaskPlan, graph *DAG) *runningPlan {
-	taskByID := make(map[string]*core.TaskItem, len(plan.Tasks))
-	for i := range plan.Tasks {
-		taskByID[plan.Tasks[i].ID] = &plan.Tasks[i]
+func newRunningSession(sessionID, projectID string, issues []*core.Issue, graph *DAG) *runningSession {
+	issueByID := make(map[string]*core.Issue, len(issues))
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		issueByID[issue.ID] = issue
 	}
 
 	parents := make(map[string][]string, len(graph.Nodes))
-	for taskID := range graph.Nodes {
-		parents[taskID] = []string{}
+	for issueID := range graph.Nodes {
+		parents[issueID] = []string{}
 	}
 	for from, downstream := range graph.Downstream {
 		for _, to := range downstream {
 			parents[to] = append(parents[to], from)
 		}
 	}
-	for taskID := range parents {
-		sort.Strings(parents[taskID])
+	for issueID := range parents {
+		sort.Strings(parents[issueID])
 	}
 
-	return &runningPlan{
-		Plan:     plan,
-		Graph:    graph,
-		Running:  make(map[string]string),
-		TaskByID: taskByID,
-		Parents:  parents,
+	return &runningSession{
+		SessionID: sessionID,
+		ProjectID: projectID,
+		Graph:     graph,
+		Running:   make(map[string]string),
+		IssueByID: issueByID,
+		Parents:   parents,
 	}
 }
 
-// DepScheduler schedules TaskItems by DAG dependencies and maps each task to one pipeline.
+// DepScheduler schedules Issues by DAG dependencies and maps each issue to one pipeline.
 type DepScheduler struct {
 	store   core.Store
 	bus     eventSubscriber
@@ -82,9 +86,9 @@ type DepScheduler struct {
 	sem         chan struct{}
 
 	mu            sync.Mutex
-	plans         map[string]*runningPlan
+	sessions      map[string]*runningSession
 	pipelineIndex map[string]pipelineRef
-	lastPlanID    string
+	lastSessionID string
 
 	loopCancel  context.CancelFunc
 	loopWG      sync.WaitGroup
@@ -107,6 +111,7 @@ func NewDepScheduler(
 	if runPipeline == nil {
 		runPipeline = func(context.Context, string) error { return nil }
 	}
+
 	var pub eventPublisher
 	if typed, ok := bus.(eventPublisher); ok {
 		pub = typed
@@ -119,7 +124,7 @@ func NewDepScheduler(
 		tracker:       tracker,
 		runPipeline:   runPipeline,
 		sem:           make(chan struct{}, maxConcurrent),
-		plans:         make(map[string]*runningPlan),
+		sessions:      make(map[string]*runningSession),
 		pipelineIndex: make(map[string]pipelineRef),
 	}
 }
@@ -174,6 +179,7 @@ func (s *DepScheduler) Start(ctx context.Context) error {
 			}
 		}
 	}()
+
 	if reconcileRun != nil {
 		s.reconcileWG.Add(1)
 		go func(runCtx context.Context, interval time.Duration, runFn func(context.Context) error) {
@@ -185,13 +191,12 @@ func (s *DepScheduler) Start(ctx context.Context) error {
 				case <-runCtx.Done():
 					return
 				case <-ticker.C:
-					if err := runFn(context.Background()); err != nil {
-						// Best-effort reconcile hook; scheduler loop keeps running.
-					}
+					_ = runFn(context.Background())
 				}
 			}
 		}(runCtx, reconcileInterval, reconcileRun)
 	}
+
 	return nil
 }
 
@@ -224,126 +229,276 @@ func (s *DepScheduler) Stop(ctx context.Context) error {
 	}
 }
 
-// StartPlan builds DAG, validates and transitive-reduces it, then dispatches initial ready tasks.
-func (s *DepScheduler) StartPlan(ctx context.Context, plan *core.TaskPlan) error {
+// StartPlan is a compatibility wrapper. New code should call ScheduleIssues.
+func (s *DepScheduler) StartPlan(ctx context.Context, legacy any) error {
+	switch v := legacy.(type) {
+	case nil:
+		return errors.New("legacy start payload is nil")
+	case *core.Issue:
+		return s.ScheduleIssues(ctx, []*core.Issue{v})
+	case core.Issue:
+		issue := v
+		return s.ScheduleIssues(ctx, []*core.Issue{&issue})
+	case []*core.Issue:
+		return s.ScheduleIssues(ctx, v)
+	case []core.Issue:
+		ptrs := make([]*core.Issue, 0, len(v))
+		for i := range v {
+			ptrs = append(ptrs, &v[i])
+		}
+		return s.ScheduleIssues(ctx, ptrs)
+	default:
+		return fmt.Errorf("unsupported legacy start payload type: %T", legacy)
+	}
+}
+
+// RecoverExecutingPlans is a compatibility wrapper. New code should call RecoverExecutingIssues.
+func (s *DepScheduler) RecoverExecutingPlans(ctx context.Context) error {
+	return s.RecoverExecutingIssues(ctx, "")
+}
+
+// RecoverPlan is a compatibility wrapper retained for older call sites.
+func (s *DepScheduler) RecoverPlan(ctx context.Context, _ string) error {
+	return s.RecoverExecutingIssues(ctx, "")
+}
+
+// ScheduleIssues builds DAG, validates and transitive-reduces it, then dispatches initial ready issues.
+func (s *DepScheduler) ScheduleIssues(ctx context.Context, issues []*core.Issue) error {
 	if s == nil || s.store == nil {
 		return errors.New("scheduler store is not configured")
 	}
-	if plan == nil {
-		return errors.New("plan is nil")
-	}
-	if plan.ID == "" {
-		return errors.New("plan id is required")
-	}
-	s.publishPlanEvent(core.EventSecretaryThinking, plan, map[string]string{
-		"phase": "start_plan",
-	})
-
-	s.mu.Lock()
-	_, alreadyRunning := s.plans[plan.ID]
-	s.mu.Unlock()
-	if alreadyRunning {
-		// Idempotent re-entry: the plan is already managed by this scheduler instance.
+	if len(issues) == 0 {
 		return nil
 	}
-	if plan.Status == core.PlanExecuting {
-		// Re-entry after process restart should go through recovery path.
-		return s.RecoverPlan(ctx, plan.ID)
-	}
-	if err := validateStartPlanState(plan); err != nil {
-		return err
-	}
 
-	tasks, err := s.loadPlanTasks(plan)
+	grouped, err := groupIssuesBySession(issues)
 	if err != nil {
 		return err
 	}
-	plan.Tasks = tasks
-	if plan.FailPolicy == "" {
-		plan.FailPolicy = core.FailBlock
+
+	for _, sessionID := range sortedSessionIDs(grouped) {
+		if err := s.scheduleSession(ctx, sessionID, grouped[sessionID]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *DepScheduler) scheduleSession(ctx context.Context, sessionID string, issues []*core.Issue) error {
+	if len(issues) == 0 {
+		return nil
 	}
 
-	graph := Build(plan.Tasks)
+	s.mu.Lock()
+	if _, exists := s.sessions[sessionID]; exists {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+
+	projectID := strings.TrimSpace(issues[0].ProjectID)
+	graph := Build(issues)
 	if err := graph.Validate(); err != nil {
-		plan.Status = core.PlanWaitingHuman
-		plan.WaitReason = core.WaitFeedbackReq
-		if saveErr := s.savePlan(plan); saveErr != nil {
-			return fmt.Errorf("validate dag: %w (save plan: %v)", err, saveErr)
-		}
-		s.publishEvent(core.Event{
-			Type:      core.EventPlanWaitingHuman,
-			ProjectID: plan.ProjectID,
-			PlanID:    plan.ID,
-			Data: map[string]string{
-				"wait_reason": string(plan.WaitReason),
-			},
-			Error:     err.Error(),
-			Timestamp: time.Now(),
-		})
 		return err
 	}
 	graph.TransitiveReduce()
 	if err := graph.Validate(); err != nil {
-		plan.Status = core.PlanWaitingHuman
-		plan.WaitReason = core.WaitFeedbackReq
-		if saveErr := s.savePlan(plan); saveErr != nil {
-			return fmt.Errorf("validate reduced dag: %w (save plan: %v)", err, saveErr)
-		}
-		s.publishEvent(core.Event{
-			Type:      core.EventPlanWaitingHuman,
-			ProjectID: plan.ProjectID,
-			PlanID:    plan.ID,
-			Data: map[string]string{
-				"wait_reason": string(plan.WaitReason),
-			},
-			Error:     err.Error(),
-			Timestamp: time.Now(),
-		})
 		return err
 	}
 
-	rp := newRunningPlan(plan, graph)
-	for _, taskID := range sortedTaskIDs(rp.TaskByID) {
-		item := rp.TaskByID[taskID]
-		if isTaskTerminal(item.Status) {
+	rs := newRunningSession(sessionID, projectID, issues, graph)
+
+	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
+		issue := rs.IssueByID[issueID]
+		if issue == nil {
 			continue
 		}
-		item.Status = core.ItemPending
-		item.PipelineID = ""
-		if err := s.saveTask(item); err != nil {
+		if issue.FailPolicy == "" {
+			issue.FailPolicy = core.FailBlock
+		}
+		if isIssueTerminal(issue.Status) {
+			continue
+		}
+
+		switch issue.Status {
+		case core.IssueStatusExecuting:
+			if strings.TrimSpace(issue.PipelineID) == "" {
+				issue.Status = core.IssueStatusQueued
+			} else {
+				rs.Running[issueID] = issue.PipelineID
+			}
+		case core.IssueStatusReady, core.IssueStatusQueued:
+		default:
+			issue.Status = core.IssueStatusQueued
+			issue.PipelineID = ""
+		}
+
+		if err := s.saveIssue(issue); err != nil {
 			return err
 		}
+		if issue.Status == core.IssueStatusQueued {
+			s.publishIssueEvent(core.EventIssueQueued, issue, nil, "")
+		}
 	}
+	s.syncIssueDependencies(issues)
 
-	plan.Status = core.PlanExecuting
-	plan.WaitReason = core.WaitNone
-	if err := s.savePlan(plan); err != nil {
+	if err := s.markReadyByInDegreeLocked(rs); err != nil {
 		return err
 	}
-	s.publishPlanEvent(core.EventPlanApproved, plan, map[string]string{
-		"phase": "start_plan",
-	})
 
-	for _, taskID := range graph.ReadyNodes() {
-		task := rp.TaskByID[taskID]
-		if task == nil || task.Status != core.ItemPending {
-			continue
-		}
-		task.Status = core.ItemReady
-		if err := s.saveTask(task); err != nil {
-			return err
-		}
-		s.publishTaskEvent(core.EventTaskReady, plan, task, "")
+	if err := s.registerSessionRuntime(sessionID, rs); err != nil {
+		return err
 	}
-
-	s.mu.Lock()
-	s.plans[plan.ID] = rp
-	s.mu.Unlock()
-
-	return s.dispatchReadyAcrossPlans(ctx)
+	return s.dispatchReadyAcrossSessions(ctx)
 }
 
-// OnEvent handles pipeline_done/pipeline_failed events and advances TaskItem/TaskPlan state.
+// RecoverExecutingIssues is the crash-recovery entrypoint in issue semantics.
+func (s *DepScheduler) RecoverExecutingIssues(ctx context.Context, projectID string) error {
+	if s == nil || s.store == nil {
+		return errors.New("scheduler store is not configured")
+	}
+
+	active, err := s.store.GetActiveIssues(strings.TrimSpace(projectID))
+	if err != nil {
+		return err
+	}
+	if len(active) == 0 {
+		return nil
+	}
+
+	ptrs := make([]*core.Issue, 0, len(active))
+	for i := range active {
+		ptrs = append(ptrs, &active[i])
+	}
+
+	grouped, err := groupIssuesBySession(ptrs)
+	if err != nil {
+		return err
+	}
+
+	for _, sessionID := range sortedSessionIDs(grouped) {
+		if err := s.recoverSession(ctx, sessionID, grouped[sessionID]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *DepScheduler) recoverSession(ctx context.Context, sessionID string, issues []*core.Issue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+
+	projectID := strings.TrimSpace(issues[0].ProjectID)
+	graph := Build(issues)
+	if err := graph.Validate(); err != nil {
+		return err
+	}
+	graph.TransitiveReduce()
+	if err := graph.Validate(); err != nil {
+		return err
+	}
+
+	rs := newRunningSession(sessionID, projectID, issues, graph)
+	rs.Recovered = true
+	replayEvents := make([]core.Event, 0)
+
+	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
+		issue := rs.IssueByID[issueID]
+		if issue == nil {
+			continue
+		}
+		if issue.FailPolicy == "" {
+			issue.FailPolicy = core.FailBlock
+		}
+
+		switch issue.Status {
+		case core.IssueStatusDone:
+			rs.unlockDownstream(issueID)
+		case core.IssueStatusExecuting:
+			if strings.TrimSpace(issue.PipelineID) == "" {
+				issue.Status = core.IssueStatusQueued
+				if err := s.saveIssue(issue); err != nil {
+					return err
+				}
+				continue
+			}
+			pipeline, getErr := s.store.GetPipeline(issue.PipelineID)
+			if getErr != nil {
+				return fmt.Errorf("recover issue %s pipeline %s: %w", issueID, issue.PipelineID, getErr)
+			}
+			rs.Running[issueID] = issue.PipelineID
+			if evtType, terminal := pipelineRecoveryEvent(pipeline.Status); terminal {
+				replayEvents = append(replayEvents, core.Event{
+					Type:       evtType,
+					PipelineID: issue.PipelineID,
+					Error:      pipeline.ErrorMessage,
+					Timestamp:  time.Now(),
+				})
+			}
+		case core.IssueStatusReady, core.IssueStatusQueued:
+		default:
+			if isIssueTerminal(issue.Status) {
+				continue
+			}
+			issue.Status = core.IssueStatusQueued
+			issue.PipelineID = ""
+			if err := s.saveIssue(issue); err != nil {
+				return err
+			}
+			s.publishIssueEvent(core.EventIssueQueued, issue, nil, "")
+		}
+	}
+
+	if err := s.markReadyByInDegreeLocked(rs); err != nil {
+		return err
+	}
+	if err := s.registerSessionRuntime(sessionID, rs); err != nil {
+		return err
+	}
+
+	for i := range replayEvents {
+		if err := s.OnEvent(ctx, replayEvents[i]); err != nil {
+			return err
+		}
+	}
+	if rs.HaltNew {
+		return nil
+	}
+	return s.dispatchReadyAcrossSessions(ctx)
+}
+
+func (s *DepScheduler) registerSessionRuntime(sessionID string, rs *runningSession) error {
+	if rs == nil {
+		return nil
+	}
+
+	acquired := 0
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.sessions[sessionID]; exists {
+		return nil
+	}
+
+	s.sessions[sessionID] = rs
+	for issueID, pipelineID := range rs.Running {
+		s.pipelineIndex[pipelineID] = pipelineRef{sessionID: sessionID, issueID: issueID}
+		if !s.tryAcquireSlot() {
+			delete(s.pipelineIndex, pipelineID)
+			delete(s.sessions, sessionID)
+			for acquired > 0 {
+				s.releaseSlot()
+				acquired--
+			}
+			return fmt.Errorf("recover session %s exceeds max concurrency %d", sessionID, cap(s.sem))
+		}
+		acquired++
+	}
+	return nil
+}
+
+// OnEvent handles pipeline_done/pipeline_failed events and advances Issue state.
 func (s *DepScheduler) OnEvent(ctx context.Context, evt core.Event) error {
 	if s == nil {
 		return nil
@@ -351,7 +506,7 @@ func (s *DepScheduler) OnEvent(ctx context.Context, evt core.Event) error {
 	if evt.Type != core.EventPipelineDone && evt.Type != core.EventPipelineFailed {
 		return nil
 	}
-	if evt.PipelineID == "" {
+	if strings.TrimSpace(evt.PipelineID) == "" {
 		return nil
 	}
 
@@ -361,161 +516,164 @@ func (s *DepScheduler) OnEvent(ctx context.Context, evt core.Event) error {
 	if err != nil {
 		return err
 	}
-	return s.dispatchReadyAcrossPlans(ctx)
+	return s.dispatchReadyAcrossSessions(ctx)
 }
 
-// RecoverExecutingPlans is the minimal crash-recovery entrypoint.
-func (s *DepScheduler) RecoverExecutingPlans(ctx context.Context) error {
-	if s == nil || s.store == nil {
-		return errors.New("scheduler store is not configured")
+func (s *DepScheduler) handlePipelineEventLocked(evt core.Event) error {
+	ref, ok := s.pipelineIndex[evt.PipelineID]
+	if !ok {
+		issue, err := s.store.GetIssueByPipeline(evt.PipelineID)
+		if err != nil || issue == nil {
+			return err
+		}
+		sessionID := makeSessionID(issue.ProjectID, issue.SessionID)
+		rs := s.sessions[sessionID]
+		if rs == nil {
+			return nil
+		}
+		if _, exists := rs.IssueByID[issue.ID]; !exists {
+			return nil
+		}
+		ref = pipelineRef{sessionID: sessionID, issueID: issue.ID}
+		s.pipelineIndex[evt.PipelineID] = ref
 	}
 
-	plans, err := s.store.GetActiveTaskPlans()
-	if err != nil {
+	rs := s.sessions[ref.sessionID]
+	if rs == nil {
+		delete(s.pipelineIndex, evt.PipelineID)
+		return nil
+	}
+
+	issue := rs.IssueByID[ref.issueID]
+	if issue == nil {
+		delete(s.pipelineIndex, evt.PipelineID)
+		delete(rs.Running, ref.issueID)
+		s.releaseSlot()
+		return nil
+	}
+
+	switch evt.Type {
+	case core.EventPipelineDone:
+		issue.Status = core.IssueStatusDone
+		if err := s.saveIssue(issue); err != nil {
+			return err
+		}
+		s.publishIssueEvent(core.EventIssueDone, issue, nil, "")
+		rs.unlockDownstream(issue.ID)
+	case core.EventPipelineFailed:
+		issue.Status = core.IssueStatusFailed
+		if err := s.saveIssue(issue); err != nil {
+			return err
+		}
+		s.publishIssueEvent(core.EventIssueFailed, issue, nil, evt.Error)
+		switch issue.FailPolicy {
+		case core.FailSkip:
+			rs.unlockDownstream(issue.ID)
+		case core.FailHuman:
+			rs.HaltNew = true
+		default:
+			if err := s.applyBlockPolicyLocked(rs, issue.ID); err != nil {
+				return err
+			}
+		}
+	default:
+		return nil
+	}
+
+	if err := s.markReadyByInDegreeLocked(rs); err != nil {
 		return err
 	}
-	for i := range plans {
-		if plans[i].Status != core.PlanExecuting {
-			continue
-		}
-		if err := s.RecoverPlan(ctx, plans[i].ID); err != nil {
-			return err
+
+	if _, running := rs.Running[ref.issueID]; running {
+		delete(rs.Running, ref.issueID)
+		s.releaseSlot()
+	}
+	delete(s.pipelineIndex, evt.PipelineID)
+	return nil
+}
+
+func (s *DepScheduler) applyBlockPolicyLocked(rs *runningSession, failedIssueID string) error {
+	queue := []string{failedIssueID}
+	seen := map[string]struct{}{failedIssueID: {}}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		for _, downID := range rs.Graph.Downstream[current] {
+			if _, ok := seen[downID]; !ok {
+				seen[downID] = struct{}{}
+				queue = append(queue, downID)
+			}
+
+			downIssue := rs.IssueByID[downID]
+			if downIssue == nil || isIssueTerminal(downIssue.Status) || downIssue.Status == core.IssueStatusExecuting {
+				continue
+			}
+
+			downIssue.Status = core.IssueStatusFailed
+			if err := s.saveIssue(downIssue); err != nil {
+				return err
+			}
+			s.publishIssueEvent(core.EventIssueFailed, downIssue, map[string]string{
+				"reason":          "blocked_by_dependency_failure",
+				"cause_issue_id":  failedIssueID,
+				"dependency_mode": "hard",
+			}, "")
 		}
 	}
 	return nil
 }
 
-func (s *DepScheduler) RecoverPlan(ctx context.Context, planID string) error {
-	if s == nil || s.store == nil {
-		return errors.New("scheduler store is not configured")
-	}
-	if planID == "" {
-		return errors.New("plan id is required")
-	}
-
-	plan, err := s.store.GetTaskPlan(planID)
-	if err != nil {
-		return err
-	}
-	s.publishPlanEvent(core.EventSecretaryThinking, plan, map[string]string{
-		"phase": "recover_plan",
-	})
-	if plan.FailPolicy == "" {
-		plan.FailPolicy = core.FailBlock
-	}
-	tasks, err := s.store.GetTaskItemsByPlan(planID)
-	if err != nil {
-		return err
-	}
-	plan.Tasks = tasks
-
-	graph := Build(plan.Tasks)
-	if err := graph.Validate(); err != nil {
-		return err
-	}
-	graph.TransitiveReduce()
-	if err := graph.Validate(); err != nil {
-		return err
-	}
-
-	rp := newRunningPlan(plan, graph)
-	rp.Recovered = true
-	if plan.Status == core.PlanWaitingHuman {
-		rp.HaltNew = true
-	}
-	replayEvents := make([]core.Event, 0)
-
-	// Recompute remaining in-degree by replaying completed/skipped tasks.
-	for _, taskID := range sortedTaskIDs(rp.TaskByID) {
-		task := rp.TaskByID[taskID]
-		switch task.Status {
-		case core.ItemDone, core.ItemSkipped:
-			rp.unlockDownstream(taskID)
-		case core.ItemRunning:
-			if task.PipelineID == "" {
-				continue
-			}
-			pipeline, getErr := s.store.GetPipeline(task.PipelineID)
-			if getErr != nil {
-				return fmt.Errorf("recover plan %s task %s pipeline %s: %w", planID, taskID, task.PipelineID, getErr)
-			}
-			rp.Running[taskID] = task.PipelineID
-			evtType, terminal := pipelineRecoveryEvent(pipeline.Status)
-			if terminal {
-				replayEvents = append(replayEvents, core.Event{
-					Type:       evtType,
-					PipelineID: task.PipelineID,
-					Error:      pipeline.ErrorMessage,
-					Timestamp:  time.Now(),
-				})
-			}
-		}
-	}
-
-	for _, taskID := range sortedTaskIDs(rp.TaskByID) {
-		task := rp.TaskByID[taskID]
-		if task.Status != core.ItemPending {
-			continue
-		}
-		if rp.Graph.InDegree[taskID] == 0 {
-			task.Status = core.ItemReady
-			if err := s.saveTask(task); err != nil {
-				return err
-			}
-			s.publishTaskEvent(core.EventTaskReady, plan, task, "")
-		}
-	}
-
-	s.mu.Lock()
-	s.plans[plan.ID] = rp
-	for taskID, pipelineID := range rp.Running {
-		s.pipelineIndex[pipelineID] = pipelineRef{planID: plan.ID, taskID: taskID}
-		if !s.tryAcquireSlot() {
-			s.mu.Unlock()
-			return fmt.Errorf("recover plan %s exceeds max concurrency %d", plan.ID, cap(s.sem))
-		}
-	}
-	s.mu.Unlock()
-
-	for i := range replayEvents {
-		if err := s.OnEvent(ctx, replayEvents[i]); err != nil {
-			return err
-		}
-	}
-	if rp.HaltNew {
+func (s *DepScheduler) markReadyByInDegreeLocked(rs *runningSession) error {
+	if rs == nil {
 		return nil
 	}
-	return s.dispatchReadyAcrossPlans(ctx)
+	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
+		issue := rs.IssueByID[issueID]
+		if issue == nil || issue.Status != core.IssueStatusQueued {
+			continue
+		}
+		if rs.Graph.InDegree[issueID] != 0 {
+			continue
+		}
+		issue.Status = core.IssueStatusReady
+		if err := s.saveIssue(issue); err != nil {
+			return err
+		}
+		s.publishIssueEvent(core.EventIssueReady, issue, nil, "")
+	}
+	return nil
 }
 
-func (s *DepScheduler) dispatchTask(ctx context.Context, planID, taskID string) (bool, error) {
+func (s *DepScheduler) dispatchIssue(ctx context.Context, sessionID, issueID string) (bool, error) {
 	if s == nil || s.store == nil {
 		return false, errors.New("scheduler store is not configured")
 	}
-	if planID == "" || taskID == "" {
-		return false, errors.New("plan id and task id are required")
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(issueID) == "" {
+		return false, errors.New("session id and issue id are required")
 	}
 
 	s.mu.Lock()
-	rp := s.plans[planID]
-	if rp == nil {
+	rs := s.sessions[sessionID]
+	if rs == nil {
 		s.mu.Unlock()
-		return false, fmt.Errorf("plan %s is not running", planID)
+		return false, fmt.Errorf("session %s is not running", sessionID)
 	}
-	if rp.HaltNew {
-		s.mu.Unlock()
-		return false, nil
-	}
-	task := rp.TaskByID[taskID]
-	if task == nil {
-		s.mu.Unlock()
-		return false, fmt.Errorf("task %s not found in plan %s", taskID, planID)
-	}
-	if task.Status != core.ItemReady {
+	if rs.HaltNew {
 		s.mu.Unlock()
 		return false, nil
 	}
-	if _, running := rp.Running[taskID]; running {
+	issue := rs.IssueByID[issueID]
+	if issue == nil {
+		s.mu.Unlock()
+		return false, fmt.Errorf("issue %s not found in session %s", issueID, sessionID)
+	}
+	if issue.Status != core.IssueStatusReady {
+		s.mu.Unlock()
+		return false, nil
+	}
+	if _, running := rs.Running[issueID]; running {
 		s.mu.Unlock()
 		return false, nil
 	}
@@ -524,29 +682,29 @@ func (s *DepScheduler) dispatchTask(ctx context.Context, planID, taskID string) 
 		return false, nil
 	}
 
-	pipeline, err := buildPipelineFromTask(rp.Plan, task)
+	pipeline, err := buildPipelineFromIssue(issue)
 	if err != nil {
 		s.releaseSlot()
 		s.mu.Unlock()
 		return false, err
 	}
 
-	task.Status = core.ItemRunning
-	task.PipelineID = pipeline.ID
-	rp.Running[taskID] = pipeline.ID
-	s.pipelineIndex[pipeline.ID] = pipelineRef{planID: planID, taskID: taskID}
-	s.lastPlanID = planID
+	issue.Status = core.IssueStatusExecuting
+	issue.PipelineID = pipeline.ID
+	rs.Running[issueID] = pipeline.ID
+	s.pipelineIndex[pipeline.ID] = pipelineRef{sessionID: sessionID, issueID: issueID}
+	s.lastSessionID = sessionID
 	s.mu.Unlock()
 
 	if err := s.store.SavePipeline(pipeline); err != nil {
-		s.rollbackDispatch(planID, taskID, pipeline.ID)
+		s.rollbackDispatch(sessionID, issueID, pipeline.ID)
 		return false, err
 	}
-	if err := s.saveTask(task); err != nil {
-		s.rollbackDispatch(planID, taskID, pipeline.ID)
+	if err := s.saveIssue(issue); err != nil {
+		s.rollbackDispatch(sessionID, issueID, pipeline.ID)
 		return false, err
 	}
-	s.publishTaskEvent(core.EventTaskRunning, rp.Plan, task, "")
+	s.publishIssueEvent(core.EventIssueExecuting, issue, nil, "")
 
 	runCtx := context.Background()
 	if ctx != nil {
@@ -566,27 +724,35 @@ func (s *DepScheduler) dispatchTask(ctx context.Context, planID, taskID string) 
 	return true, nil
 }
 
-func (s *DepScheduler) rollbackDispatch(planID, taskID, pipelineID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *DepScheduler) rollbackDispatch(sessionID, issueID, pipelineID string) {
+	var issue *core.Issue
 
-	rp := s.plans[planID]
-	if rp != nil {
-		if task := rp.TaskByID[taskID]; task != nil && task.Status == core.ItemRunning && task.PipelineID == pipelineID {
-			task.Status = core.ItemReady
-			task.PipelineID = ""
-			_ = s.saveTask(task)
+	s.mu.Lock()
+	rs := s.sessions[sessionID]
+	if rs != nil {
+		if candidate := rs.IssueByID[issueID]; candidate != nil &&
+			candidate.Status == core.IssueStatusExecuting &&
+			candidate.PipelineID == pipelineID {
+			candidate.Status = core.IssueStatusReady
+			candidate.PipelineID = ""
+			issue = candidate
 		}
-		delete(rp.Running, taskID)
+		delete(rs.Running, issueID)
 	}
 	delete(s.pipelineIndex, pipelineID)
 	s.releaseSlot()
+	s.mu.Unlock()
+
+	if issue != nil {
+		_ = s.saveIssue(issue)
+	}
 }
 
-func (s *DepScheduler) dispatchReadyAcrossPlans(ctx context.Context) error {
+func (s *DepScheduler) dispatchReadyAcrossSessions(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+
 	for {
 		s.mu.Lock()
 		if cap(s.sem) > 0 && len(s.sem) >= cap(s.sem) {
@@ -601,7 +767,7 @@ func (s *DepScheduler) dispatchReadyAcrossPlans(ctx context.Context) error {
 
 		dispatchedAny := false
 		for _, candidate := range candidates {
-			dispatched, err := s.dispatchTask(ctx, candidate.planID, candidate.taskID)
+			dispatched, err := s.dispatchIssue(ctx, candidate.sessionID, candidate.issueID)
 			if err != nil {
 				return err
 			}
@@ -616,333 +782,93 @@ func (s *DepScheduler) dispatchReadyAcrossPlans(ctx context.Context) error {
 }
 
 func (s *DepScheduler) globalReadyCandidatesLocked() []readyDispatch {
-	planIDs := make([]string, 0, len(s.plans))
-	readyByPlan := make(map[string][]string, len(s.plans))
+	sessionIDs := make([]string, 0, len(s.sessions))
+	readyBySession := make(map[string][]string, len(s.sessions))
 	maxReady := 0
 
-	for planID, rp := range s.plans {
-		if rp == nil || rp.HaltNew {
+	for sessionID, rs := range s.sessions {
+		if rs == nil || rs.HaltNew {
 			continue
 		}
-		ready := rp.readyToDispatchIDs()
+		ready := rs.readyToDispatchIDs()
 		if len(ready) == 0 {
 			continue
 		}
-		planIDs = append(planIDs, planID)
-		readyByPlan[planID] = ready
+		sessionIDs = append(sessionIDs, sessionID)
+		readyBySession[sessionID] = ready
 		if len(ready) > maxReady {
 			maxReady = len(ready)
 		}
 	}
-	if len(planIDs) == 0 {
+	if len(sessionIDs) == 0 {
 		return nil
 	}
 
-	sort.Strings(planIDs)
+	sort.Strings(sessionIDs)
 	start := 0
-	if s.lastPlanID != "" {
-		idx := sort.SearchStrings(planIDs, s.lastPlanID)
-		if idx < len(planIDs) && planIDs[idx] == s.lastPlanID {
-			start = (idx + 1) % len(planIDs)
-		} else if idx < len(planIDs) {
+	if s.lastSessionID != "" {
+		idx := sort.SearchStrings(sessionIDs, s.lastSessionID)
+		if idx < len(sessionIDs) && sessionIDs[idx] == s.lastSessionID {
+			start = (idx + 1) % len(sessionIDs)
+		} else if idx < len(sessionIDs) {
 			start = idx
 		}
 	}
-	orderedPlanIDs := append([]string{}, planIDs[start:]...)
-	orderedPlanIDs = append(orderedPlanIDs, planIDs[:start]...)
 
-	candidates := make([]readyDispatch, 0, len(planIDs))
+	orderedSessionIDs := append([]string{}, sessionIDs[start:]...)
+	orderedSessionIDs = append(orderedSessionIDs, sessionIDs[:start]...)
+
+	candidates := make([]readyDispatch, 0, len(sessionIDs))
 	for i := 0; i < maxReady; i++ {
-		for _, planID := range orderedPlanIDs {
-			ready := readyByPlan[planID]
+		for _, sessionID := range orderedSessionIDs {
+			ready := readyBySession[sessionID]
 			if i >= len(ready) {
 				continue
 			}
-			candidates = append(candidates, readyDispatch{planID: planID, taskID: ready[i]})
+			candidates = append(candidates, readyDispatch{sessionID: sessionID, issueID: ready[i]})
 		}
 	}
 	return candidates
 }
 
-func (s *DepScheduler) handlePipelineEventLocked(evt core.Event) error {
-	ref, ok := s.pipelineIndex[evt.PipelineID]
-	if !ok {
+func (s *DepScheduler) saveIssue(issue *core.Issue) error {
+	if issue == nil {
 		return nil
 	}
-	rp := s.plans[ref.planID]
-	if rp == nil {
-		delete(s.pipelineIndex, evt.PipelineID)
-		return nil
-	}
-	task := rp.TaskByID[ref.taskID]
-	if task == nil {
-		delete(s.pipelineIndex, evt.PipelineID)
-		delete(rp.Running, ref.taskID)
-		s.releaseSlot()
-		return nil
-	}
-	s.publishPlanEvent(core.EventSecretaryThinking, rp.Plan, map[string]string{
-		"phase":       "pipeline_event",
-		"pipeline_id": evt.PipelineID,
-	})
-
-	snapshot := capturePlanState(rp)
-
-	switch evt.Type {
-	case core.EventPipelineDone:
-		task.Status = core.ItemDone
-		if err := s.saveTask(task); err != nil {
-			snapshot.restore(rp)
-			return err
-		}
-		s.publishTaskEvent(core.EventTaskDone, rp.Plan, task, "")
-		rp.unlockDownstream(task.ID)
-	case core.EventPipelineFailed:
-		task.Status = core.ItemFailed
-		if err := s.saveTask(task); err != nil {
-			snapshot.restore(rp)
-			return err
-		}
-		s.publishTaskEvent(core.EventTaskFailed, rp.Plan, task, evt.Error)
-		switch rp.Plan.FailPolicy {
-		case core.FailSkip:
-			if err := s.applySkipPolicyLocked(rp, task.ID); err != nil {
-				snapshot.restore(rp)
-				return err
-			}
-		case core.FailHuman:
-			rp.HaltNew = true
-			rp.Plan.WaitReason = core.WaitFeedbackReq
-		default:
-			if err := s.applyBlockPolicyLocked(rp, task.ID); err != nil {
-				snapshot.restore(rp)
-				return err
-			}
-		}
-	default:
-		return nil
-	}
-	if err := s.markReadyByInDegreeLocked(rp); err != nil {
-		snapshot.restore(rp)
-		return err
-	}
-
-	if err := s.refreshPlanStatusLocked(rp); err != nil {
-		snapshot.restore(rp)
-		return err
-	}
-
-	if _, running := rp.Running[ref.taskID]; running {
-		delete(rp.Running, ref.taskID)
-		s.releaseSlot()
-	}
-	delete(s.pipelineIndex, evt.PipelineID)
-	return nil
-}
-
-func (s *DepScheduler) applyBlockPolicyLocked(rp *runningPlan, failedTaskID string) error {
-	queue := []string{failedTaskID}
-	seen := map[string]struct{}{failedTaskID: {}}
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		for _, downID := range rp.Graph.Downstream[current] {
-			if _, ok := seen[downID]; !ok {
-				seen[downID] = struct{}{}
-				queue = append(queue, downID)
-			}
-			downTask := rp.TaskByID[downID]
-			if downTask == nil {
-				continue
-			}
-			if isTaskTerminal(downTask.Status) || downTask.Status == core.ItemRunning {
-				continue
-			}
-			downTask.Status = core.ItemBlockedByFailure
-			if err := s.saveTask(downTask); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (s *DepScheduler) applySkipPolicyLocked(rp *runningPlan, failedTaskID string) error {
-	queue := []string{failedTaskID}
-	seen := map[string]struct{}{failedTaskID: {}}
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		for _, downID := range rp.Graph.Downstream[current] {
-			downTask := rp.TaskByID[downID]
-			if downTask == nil {
-				continue
-			}
-			if isTaskTerminal(downTask.Status) || downTask.Status == core.ItemRunning {
-				continue
-			}
-
-			// Skip strategy defaults to hard dependencies.
-			// Only weak failed edge + other unfailed upstream can degrade and continue.
-			if !isWeakDependencyEdge(downTask, current) || !rp.hasOtherUnfailedParent(downID, current) {
-				downTask.Status = core.ItemSkipped
-				if err := s.saveTask(downTask); err != nil {
-					return err
-				}
-				if _, ok := seen[downID]; !ok {
-					seen[downID] = struct{}{}
-					queue = append(queue, downID)
-				}
-				continue
-			}
-
-			rp.decrementInDegree(downID)
-			if rp.Graph.InDegree[downID] == 0 && downTask.Status == core.ItemPending {
-				downTask.Status = core.ItemReady
-				if err := s.saveTask(downTask); err != nil {
-					return err
-				}
-				s.publishTaskEvent(core.EventTaskReady, rp.Plan, downTask, "")
-			}
-		}
-	}
-	return nil
-}
-
-func (s *DepScheduler) refreshPlanStatusLocked(rp *runningPlan) error {
-	if rp == nil || rp.Plan == nil {
-		return nil
-	}
-	prevStatus := rp.Plan.Status
-	prevWaitReason := rp.Plan.WaitReason
-
-	stats := collectPlanTaskStats(rp.TaskByID)
-	hasPending := stats.pending > 0 || stats.ready > 0 || stats.running > 0
-	hasRunning := stats.running > 0
-	hasDone := stats.done > 0
-	hasFailed := stats.failed > 0
-	hasSkipped := stats.skipped > 0
-	hasBlocked := stats.blocked > 0
-
-	switch {
-	case rp.HaltNew:
-		rp.Plan.Status = core.PlanWaitingHuman
-		if rp.Plan.WaitReason == core.WaitNone {
-			rp.Plan.WaitReason = core.WaitFeedbackReq
-		}
-	case hasPending || hasRunning:
-		rp.Plan.Status = core.PlanExecuting
-		rp.Plan.WaitReason = core.WaitNone
-	case hasFailed || hasSkipped || hasBlocked:
-		if hasDone {
-			rp.Plan.Status = core.PlanPartial
-		} else {
-			rp.Plan.Status = core.PlanFailed
-		}
-		rp.Plan.WaitReason = core.WaitNone
-	default:
-		rp.Plan.Status = core.PlanDone
-		rp.Plan.WaitReason = core.WaitNone
-	}
-	if err := s.savePlan(rp.Plan); err != nil {
-		return err
-	}
-	if rp.Plan.Status == prevStatus && rp.Plan.WaitReason == prevWaitReason {
-		return nil
-	}
-
-	switch rp.Plan.Status {
-	case core.PlanWaitingHuman:
-		s.publishPlanEvent(core.EventPlanWaitingHuman, rp.Plan, map[string]string{
-			"wait_reason": string(rp.Plan.WaitReason),
-		})
-	case core.PlanDone:
-		s.publishPlanEvent(core.EventPlanDone, rp.Plan, stats.eventData())
-	case core.PlanFailed:
-		data := stats.eventData()
-		data["reason"] = deriveFailedPlanReason(stats)
-		s.publishPlanEvent(core.EventPlanFailed, rp.Plan, data)
-	case core.PlanPartial:
-		data := stats.eventData()
-		data["reason"] = "partial_failures"
-		s.publishPlanEvent(core.EventPlanPartiallyDone, rp.Plan, data)
-	}
-	return nil
-}
-
-func (s *DepScheduler) markReadyByInDegreeLocked(rp *runningPlan) error {
-	if rp == nil {
-		return nil
-	}
-	for _, taskID := range sortedTaskIDs(rp.TaskByID) {
-		task := rp.TaskByID[taskID]
-		if task == nil || task.Status != core.ItemPending {
-			continue
-		}
-		if rp.Graph.InDegree[taskID] != 0 {
-			continue
-		}
-		task.Status = core.ItemReady
-		if err := s.saveTask(task); err != nil {
-			return err
-		}
-		s.publishTaskEvent(core.EventTaskReady, rp.Plan, task, "")
-	}
-	return nil
-}
-
-func (s *DepScheduler) loadPlanTasks(plan *core.TaskPlan) ([]core.TaskItem, error) {
-	if len(plan.Tasks) > 0 {
-		return plan.Tasks, nil
-	}
-	if s.store == nil {
-		return nil, errors.New("scheduler store is not configured")
-	}
-	tasks, err := s.store.GetTaskItemsByPlan(plan.ID)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
-func (s *DepScheduler) savePlan(plan *core.TaskPlan) error {
-	if plan == nil {
-		return nil
-	}
-	plan.UpdatedAt = time.Now()
-	return s.store.SaveTaskPlan(plan)
-}
-
-func (s *DepScheduler) saveTask(task *core.TaskItem) error {
-	if task == nil {
-		return nil
-	}
-	task.UpdatedAt = time.Now()
-	if err := s.store.SaveTaskItem(task); err != nil {
+	issue.UpdatedAt = time.Now()
+	if err := s.store.SaveIssue(issue); err != nil {
 		return err
 	}
 
 	if s.tracker == nil {
 		return nil
 	}
-	if task.ExternalID == "" {
-		externalID, err := s.tracker.CreateTask(context.Background(), task)
-		if err == nil && externalID != "" {
-			task.ExternalID = externalID
-			task.UpdatedAt = time.Now()
-			if saveErr := s.store.SaveTaskItem(task); saveErr != nil {
+	if strings.TrimSpace(issue.ExternalID) == "" {
+		externalID, err := s.tracker.CreateIssue(context.Background(), issue)
+		if err == nil && strings.TrimSpace(externalID) != "" {
+			issue.ExternalID = externalID
+			issue.UpdatedAt = time.Now()
+			if saveErr := s.store.SaveIssue(issue); saveErr != nil {
 				return saveErr
 			}
 		}
 	}
-	if task.ExternalID != "" {
-		_ = s.tracker.UpdateStatus(context.Background(), task.ExternalID, task.Status)
+	if strings.TrimSpace(issue.ExternalID) != "" {
+		_ = s.tracker.UpdateStatus(context.Background(), issue.ExternalID, issue.Status)
 	}
 	return nil
+}
+
+func (s *DepScheduler) syncIssueDependencies(issues []*core.Issue) {
+	if s == nil || s.tracker == nil {
+		return
+	}
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		_ = s.tracker.SyncDependencies(context.Background(), issue, issues)
+	}
 }
 
 func (s *DepScheduler) publishEvent(evt core.Event) {
@@ -955,46 +881,27 @@ func (s *DepScheduler) publishEvent(evt core.Event) {
 	s.pub.Publish(evt)
 }
 
-func (s *DepScheduler) publishPlanEvent(eventType core.EventType, plan *core.TaskPlan, data map[string]string) {
-	if plan == nil {
-		return
-	}
-	evt := core.Event{
-		Type:      eventType,
-		ProjectID: plan.ProjectID,
-		PlanID:    plan.ID,
-		Timestamp: time.Now(),
-	}
-	if len(data) > 0 {
-		evt.Data = data
-	}
-	s.publishEvent(evt)
-}
-
-func (s *DepScheduler) publishTaskEvent(
-	eventType core.EventType,
-	plan *core.TaskPlan,
-	task *core.TaskItem,
-	eventErr string,
-) {
-	if plan == nil || task == nil {
+func (s *DepScheduler) publishIssueEvent(eventType core.EventType, issue *core.Issue, data map[string]string, eventErr string) {
+	if issue == nil {
 		return
 	}
 
-	data := map[string]string{
-		"task_id":     task.ID,
-		"task_status": string(task.Status),
+	evtData := map[string]string{
+		"issue_status": string(issue.Status),
+	}
+	for k, v := range data {
+		evtData[k] = v
 	}
 	if eventErr != "" {
-		data["error"] = eventErr
+		evtData["error"] = eventErr
 	}
 
 	s.publishEvent(core.Event{
 		Type:       eventType,
-		PipelineID: task.PipelineID,
-		ProjectID:  plan.ProjectID,
-		PlanID:     plan.ID,
-		Data:       data,
+		PipelineID: issue.PipelineID,
+		ProjectID:  issue.ProjectID,
+		IssueID:    issue.ID,
+		Data:       evtData,
 		Error:      eventErr,
 		Timestamp:  time.Now(),
 	})
@@ -1016,52 +923,6 @@ func (s *DepScheduler) releaseSlot() {
 	}
 }
 
-type planStateSnapshot struct {
-	inDegree       map[string]int
-	taskStatus     map[string]core.TaskItemStatus
-	planStatus     core.TaskPlanStatus
-	planWaitReason core.WaitReason
-	haltNew        bool
-}
-
-func capturePlanState(rp *runningPlan) planStateSnapshot {
-	snapshot := planStateSnapshot{
-		inDegree:   copyInDegree(rp.Graph.InDegree),
-		taskStatus: make(map[string]core.TaskItemStatus, len(rp.TaskByID)),
-		haltNew:    rp.HaltNew,
-	}
-	if rp.Plan != nil {
-		snapshot.planStatus = rp.Plan.Status
-		snapshot.planWaitReason = rp.Plan.WaitReason
-	}
-	for taskID, task := range rp.TaskByID {
-		if task == nil {
-			continue
-		}
-		snapshot.taskStatus[taskID] = task.Status
-	}
-	return snapshot
-}
-
-func (snapshot planStateSnapshot) restore(rp *runningPlan) {
-	if rp == nil {
-		return
-	}
-	rp.Graph.InDegree = copyInDegree(snapshot.inDegree)
-	for taskID, status := range snapshot.taskStatus {
-		task := rp.TaskByID[taskID]
-		if task == nil {
-			continue
-		}
-		task.Status = status
-	}
-	rp.HaltNew = snapshot.haltNew
-	if rp.Plan != nil {
-		rp.Plan.Status = snapshot.planStatus
-		rp.Plan.WaitReason = snapshot.planWaitReason
-	}
-}
-
 func pipelineRecoveryEvent(status core.PipelineStatus) (core.EventType, bool) {
 	switch status {
 	case core.StatusDone:
@@ -1073,82 +934,42 @@ func pipelineRecoveryEvent(status core.PipelineStatus) (core.EventType, bool) {
 	}
 }
 
-func isWeakDependencyEdge(task *core.TaskItem, upstreamID string) bool {
-	if task == nil || upstreamID == "" {
-		return false
-	}
-	weakDepToken := "weak_dep:" + strings.ToLower(upstreamID)
-	weakToken := "weak:" + strings.ToLower(upstreamID)
-	for _, label := range task.Labels {
-		normalized := strings.ToLower(strings.TrimSpace(label))
-		if normalized == weakDepToken || normalized == weakToken {
-			return true
-		}
-	}
-	return false
-}
-
-func (rp *runningPlan) unlockDownstream(taskID string) {
-	for _, downID := range rp.Graph.Downstream[taskID] {
-		rp.decrementInDegree(downID)
+func (rs *runningSession) unlockDownstream(issueID string) {
+	for _, downID := range rs.Graph.Downstream[issueID] {
+		rs.decrementInDegree(downID)
 	}
 }
 
-func (rp *runningPlan) decrementInDegree(taskID string) {
-	if rp.Graph.InDegree[taskID] > 0 {
-		rp.Graph.InDegree[taskID]--
+func (rs *runningSession) decrementInDegree(issueID string) {
+	if rs.Graph.InDegree[issueID] > 0 {
+		rs.Graph.InDegree[issueID]--
 	}
 }
 
-func (rp *runningPlan) hasOtherUnfailedParent(taskID, failedParentID string) bool {
-	for _, parentID := range rp.Parents[taskID] {
-		if parentID == failedParentID {
+func (rs *runningSession) readyToDispatchIDs() []string {
+	ready := make([]string, 0, len(rs.IssueByID))
+	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
+		issue := rs.IssueByID[issueID]
+		if issue == nil {
 			continue
 		}
-		parent := rp.TaskByID[parentID]
-		if parent == nil {
+		if issue.Status != core.IssueStatusReady {
 			continue
 		}
-		if isParentStillViable(parent.Status) {
-			return true
-		}
-	}
-	return false
-}
-
-func isParentStillViable(status core.TaskItemStatus) bool {
-	switch status {
-	case core.ItemPending, core.ItemReady, core.ItemRunning, core.ItemDone:
-		return true
-	default:
-		return false
-	}
-}
-
-func (rp *runningPlan) readyToDispatchIDs() []string {
-	ready := make([]string, 0, len(rp.TaskByID))
-	for _, taskID := range sortedTaskIDs(rp.TaskByID) {
-		task := rp.TaskByID[taskID]
-		if task == nil {
+		if _, running := rs.Running[issueID]; running {
 			continue
 		}
-		if task.Status != core.ItemReady {
-			continue
-		}
-		if _, running := rp.Running[taskID]; running {
-			continue
-		}
-		ready = append(ready, taskID)
+		ready = append(ready, issueID)
 	}
 	return ready
 }
 
-func buildPipelineFromTask(plan *core.TaskPlan, task *core.TaskItem) (*core.Pipeline, error) {
-	if plan == nil || task == nil {
-		return nil, errors.New("plan/task cannot be nil")
+func buildPipelineFromIssue(issue *core.Issue) (*core.Pipeline, error) {
+	if issue == nil {
+		return nil, errors.New("issue cannot be nil")
 	}
 
-	template := task.Template
+	template := strings.TrimSpace(issue.Template)
 	if template == "" {
 		template = "standard"
 	}
@@ -1157,22 +978,23 @@ func buildPipelineFromTask(plan *core.TaskPlan, task *core.TaskItem) (*core.Pipe
 		return nil, err
 	}
 
-	name := task.Title
+	name := strings.TrimSpace(issue.Title)
 	if name == "" {
-		name = task.ID
+		name = issue.ID
 	}
 
 	now := time.Now()
 	return &core.Pipeline{
 		ID:              engine.NewPipelineID(),
-		ProjectID:       plan.ProjectID,
+		ProjectID:       issue.ProjectID,
 		Name:            name,
-		Description:     task.Description,
+		Description:     issue.Body,
 		Template:        template,
 		Status:          core.StatusCreated,
 		Stages:          stages,
 		Artifacts:       map[string]string{},
 		Config:          map[string]any{},
+		IssueID:         issue.ID,
 		MaxTotalRetries: 5,
 		QueuedAt:        now,
 		CreatedAt:       now,
@@ -1216,109 +1038,71 @@ func schedulerDefaultStageConfig(id core.StageID) core.StageConfig {
 	return cfg
 }
 
-func isTaskTerminal(status core.TaskItemStatus) bool {
+func isIssueTerminal(status core.IssueStatus) bool {
 	switch status {
-	case core.ItemDone, core.ItemFailed, core.ItemSkipped, core.ItemBlockedByFailure:
+	case core.IssueStatusDone, core.IssueStatusFailed, core.IssueStatusSuperseded, core.IssueStatusAbandoned:
 		return true
 	default:
 		return false
 	}
 }
 
-func validateStartPlanState(plan *core.TaskPlan) error {
-	if plan == nil {
-		return errors.New("plan is nil")
+func makeSessionID(projectID, sessionID string) string {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID != "" {
+		return trimmedSessionID
 	}
-
-	switch plan.Status {
-	case core.PlanApproved:
-		return nil
-	case core.PlanWaitingHuman:
-		if plan.WaitReason != core.WaitFinalApproval {
-			return fmt.Errorf(
-				"start plan requires waiting_human/final_approval, got %s/%s",
-				plan.Status,
-				plan.WaitReason,
-			)
-		}
-		return nil
-	default:
-		return fmt.Errorf(
-			"start plan requires approved or waiting_human/final_approval, got %s/%s",
-			plan.Status,
-			plan.WaitReason,
-		)
-	}
+	return "project:" + strings.TrimSpace(projectID)
 }
 
-type planTaskStats struct {
-	total   int
-	pending int
-	ready   int
-	running int
-	done    int
-	failed  int
-	skipped int
-	blocked int
-}
+func groupIssuesBySession(issues []*core.Issue) (map[string][]*core.Issue, error) {
+	grouped := make(map[string][]*core.Issue)
+	sessionProject := make(map[string]string)
 
-func collectPlanTaskStats(tasks map[string]*core.TaskItem) planTaskStats {
-	stats := planTaskStats{}
-	for _, task := range tasks {
-		if task == nil {
+	for _, issue := range issues {
+		if issue == nil {
 			continue
 		}
-		stats.total++
-		switch task.Status {
-		case core.ItemPending:
-			stats.pending++
-		case core.ItemReady:
-			stats.ready++
-		case core.ItemRunning:
-			stats.running++
-		case core.ItemDone:
-			stats.done++
-		case core.ItemFailed:
-			stats.failed++
-		case core.ItemSkipped:
-			stats.skipped++
-		case core.ItemBlockedByFailure:
-			stats.blocked++
+		issueID := strings.TrimSpace(issue.ID)
+		projectID := strings.TrimSpace(issue.ProjectID)
+		if issueID == "" {
+			return nil, errors.New("issue id is required")
 		}
+		if projectID == "" {
+			return nil, fmt.Errorf("issue %s project id is required", issueID)
+		}
+
+		issue.ID = issueID
+		issue.ProjectID = projectID
+		issue.SessionID = strings.TrimSpace(issue.SessionID)
+
+		sessionID := makeSessionID(projectID, issue.SessionID)
+		if existingProjectID, ok := sessionProject[sessionID]; ok && existingProjectID != projectID {
+			return nil, fmt.Errorf("session %s has mixed project ids: %s vs %s", sessionID, existingProjectID, projectID)
+		}
+		sessionProject[sessionID] = projectID
+		grouped[sessionID] = append(grouped[sessionID], issue)
 	}
-	return stats
+
+	if len(grouped) == 0 {
+		return nil, errors.New("no issues provided")
+	}
+	return grouped, nil
 }
 
-func (s planTaskStats) eventData() map[string]string {
-	return map[string]string{
-		"stats_total":   strconv.Itoa(s.total),
-		"stats_pending": strconv.Itoa(s.pending),
-		"stats_ready":   strconv.Itoa(s.ready),
-		"stats_running": strconv.Itoa(s.running),
-		"stats_done":    strconv.Itoa(s.done),
-		"stats_failed":  strconv.Itoa(s.failed),
-		"stats_skipped": strconv.Itoa(s.skipped),
-		"stats_blocked": strconv.Itoa(s.blocked),
+func sortedSessionIDs(grouped map[string][]*core.Issue) []string {
+	sessionIDs := make([]string, 0, len(grouped))
+	for sessionID := range grouped {
+		sessionIDs = append(sessionIDs, sessionID)
 	}
+	sort.Strings(sessionIDs)
+	return sessionIDs
 }
 
-func deriveFailedPlanReason(stats planTaskStats) string {
-	switch {
-	case stats.failed > 0 && stats.done == 0 && stats.skipped == 0 && stats.blocked == 0:
-		return "all_tasks_failed"
-	case stats.blocked > 0 && stats.failed == 0:
-		return "blocked_by_failure"
-	case stats.skipped > 0 && stats.failed == 0:
-		return "all_tasks_skipped"
-	default:
-		return "task_failures"
-	}
-}
-
-func sortedTaskIDs(taskByID map[string]*core.TaskItem) []string {
-	ids := make([]string, 0, len(taskByID))
-	for taskID := range taskByID {
-		ids = append(ids, taskID)
+func sortedIssueIDs(issueByID map[string]*core.Issue) []string {
+	ids := make([]string, 0, len(issueByID))
+	for issueID := range issueByID {
+		ids = append(ids, issueID)
 	}
 	sort.Strings(ids)
 	return ids

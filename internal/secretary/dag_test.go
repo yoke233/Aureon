@@ -10,11 +10,11 @@ import (
 )
 
 func TestDAGBuildValidateReadyNodes(t *testing.T) {
-	dag := Build([]core.TaskItem{
-		task("A"),
-		task("B", "A"),
-		task("C", "A"),
-		task("D", "B", "C"),
+	dag := Build([]*core.Issue{
+		issue("A"),
+		issue("B", "A"),
+		issue("C", "A"),
+		issue("D", "B", "C"),
 	})
 
 	if err := dag.Validate(); err != nil {
@@ -37,10 +37,10 @@ func TestDAGBuildValidateReadyNodes(t *testing.T) {
 }
 
 func TestDAGValidateCycle(t *testing.T) {
-	dag := Build([]core.TaskItem{
-		task("A", "C"),
-		task("B", "A"),
-		task("C", "B"),
+	dag := Build([]*core.Issue{
+		issue("A", "C"),
+		issue("B", "A"),
+		issue("C", "B"),
 	})
 
 	err := dag.Validate()
@@ -48,9 +48,9 @@ func TestDAGValidateCycle(t *testing.T) {
 }
 
 func TestDAGValidateMissingNode(t *testing.T) {
-	dag := Build([]core.TaskItem{
-		task("A", "Z"),
-		task("B", "A"),
+	dag := Build([]*core.Issue{
+		issue("A", "Z"),
+		issue("B", "A"),
 	})
 
 	err := dag.Validate()
@@ -61,9 +61,9 @@ func TestDAGValidateMissingNode(t *testing.T) {
 }
 
 func TestDAGValidateSelfDependency(t *testing.T) {
-	dag := Build([]core.TaskItem{
-		task("A", "A"),
-		task("B", "A"),
+	dag := Build([]*core.Issue{
+		issue("A", "A"),
+		issue("B", "A"),
 	})
 
 	err := dag.Validate()
@@ -88,9 +88,9 @@ func TestDAGEmptyGraph(t *testing.T) {
 }
 
 func TestDAGBuildDeduplicatesEdges(t *testing.T) {
-	dag := Build([]core.TaskItem{
-		task("A"),
-		task("B", "A", "A", "A"),
+	dag := Build([]*core.Issue{
+		issue("A"),
+		issue("B", "A", "A", "A"),
 	})
 
 	if err := dag.Validate(); err != nil {
@@ -106,10 +106,10 @@ func TestDAGBuildDeduplicatesEdges(t *testing.T) {
 }
 
 func TestDAGTransitiveReduceRemovesRedundantEdge(t *testing.T) {
-	dag := Build([]core.TaskItem{
-		task("A"),
-		task("B", "A"),
-		task("C", "A", "B"),
+	dag := Build([]*core.Issue{
+		issue("A"),
+		issue("B", "A"),
+		issue("C", "A", "B"),
 	})
 
 	if err := dag.Validate(); err != nil {
@@ -136,10 +136,10 @@ func TestDAGTransitiveReduceRemovesRedundantEdge(t *testing.T) {
 }
 
 func TestDAGReadyNodesSorted(t *testing.T) {
-	dag := Build([]core.TaskItem{
-		task("B"),
-		task("A"),
-		task("C", "A"),
+	dag := Build([]*core.Issue{
+		issue("B"),
+		issue("A"),
+		issue("C", "A"),
 	})
 
 	if err := dag.Validate(); err != nil {
@@ -151,10 +151,11 @@ func TestDAGReadyNodesSorted(t *testing.T) {
 	}
 }
 
-func task(id string, dependsOn ...string) core.TaskItem {
-	return core.TaskItem{
+func issue(id string, dependsOn ...string) *core.Issue {
+	return &core.Issue{
 		ID:        id,
 		DependsOn: dependsOn,
+		Status:    core.IssueStatusQueued,
 	}
 }
 

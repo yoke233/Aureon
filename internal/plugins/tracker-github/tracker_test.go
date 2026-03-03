@@ -2,49 +2,53 @@ package trackergithub
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/yoke233/ai-workflow/internal/core"
 )
 
-func TestGitHubTracker_CreateTask_CreatesIssueAndExternalID(t *testing.T) {
+func TestGitHubTracker_CreateIssue_CreatesIssueAndExternalID(t *testing.T) {
 	stub := &stubIssueService{
 		createIssueNumber: 101,
 	}
 	tracker := newWithIssueService(stub)
 
-	item := &core.TaskItem{
-		ID:          "task-gh-5",
-		PlanID:      "plan-wave2",
+	issue := &core.Issue{
+		ID:          "issue-gh-5",
 		Title:       "实现 tracker-github",
-		Description: "把 task 状态镜像到 GitHub issue",
+		Body:        "把 issue 状态镜像到 GitHub issue",
 		Template:    "standard",
-		Status:      core.ItemReady,
+		Status:      core.IssueStatusReady,
 		Labels:      []string{"type:feature"},
+		Attachments: []string{"logs/build.log", "artifacts/report.json"},
 	}
 
-	externalID, err := tracker.CreateTask(context.Background(), item)
+	externalID, err := tracker.CreateIssue(context.Background(), issue)
 	if err != nil {
-		t.Fatalf("CreateTask() error = %v", err)
+		t.Fatalf("CreateIssue() error = %v", err)
 	}
 	if externalID != "101" {
-		t.Fatalf("CreateTask() externalID = %q, want %q", externalID, "101")
+		t.Fatalf("CreateIssue() externalID = %q, want %q", externalID, "101")
 	}
 
-	if stub.createTitle != item.Title {
-		t.Fatalf("CreateTask() title = %q, want %q", stub.createTitle, item.Title)
+	if stub.createTitle != issue.Title {
+		t.Fatalf("CreateIssue() title = %q, want %q", stub.createTitle, issue.Title)
 	}
-	if stub.createBody != item.Description {
-		t.Fatalf("CreateTask() body = %q, want %q", stub.createBody, item.Description)
+	if !strings.Contains(stub.createBody, issue.Body) {
+		t.Fatalf("CreateIssue() body = %q, should contain %q", stub.createBody, issue.Body)
 	}
-	assertLabelsContain(t, stub.createLabels, "type:feature", "plan: plan-wave2", "template: standard", "status: ready")
+	if !strings.Contains(stub.createBody, "Attachments:") {
+		t.Fatalf("CreateIssue() body = %q, should contain attachment summary", stub.createBody)
+	}
+	assertLabelsContain(t, stub.createLabels, "type:feature", "template: standard", "status: ready")
 }
 
 func TestGitHubTracker_UpdateStatus_Done_ClosesIssue(t *testing.T) {
 	stub := &stubIssueService{}
 	tracker := newWithIssueService(stub)
 
-	if err := tracker.UpdateStatus(context.Background(), "42", core.ItemDone); err != nil {
+	if err := tracker.UpdateStatus(context.Background(), "42", core.IssueStatusDone); err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
 
@@ -69,7 +73,7 @@ func TestGitHubTracker_UpdateStatus_Failed_SetsFailedLabel(t *testing.T) {
 	stub := &stubIssueService{}
 	tracker := newWithIssueService(stub)
 
-	if err := tracker.UpdateStatus(context.Background(), "77", core.ItemFailed); err != nil {
+	if err := tracker.UpdateStatus(context.Background(), "77", core.IssueStatusFailed); err != nil {
 		t.Fatalf("UpdateStatus() error = %v", err)
 	}
 
@@ -91,18 +95,18 @@ func TestGitHubTracker_SyncDependencies_ReadyAndBlockedLabels(t *testing.T) {
 	stub := &stubIssueService{}
 	tracker := newWithIssueService(stub)
 
-	item := &core.TaskItem{
+	issue := &core.Issue{
 		ID:         "task-main",
 		ExternalID: "200",
 		DependsOn:  []string{"task-a", "task-b"},
 	}
-	allItems := []core.TaskItem{
-		{ID: "task-a", ExternalID: "11", Status: core.ItemDone},
-		{ID: "task-b", ExternalID: "12", Status: core.ItemPending},
-		{ID: "task-main", ExternalID: "200", Status: core.ItemPending},
+	allIssues := []*core.Issue{
+		{ID: "task-a", ExternalID: "11", Status: core.IssueStatusDone},
+		{ID: "task-b", ExternalID: "12", Status: core.IssueStatusQueued},
+		{ID: "task-main", ExternalID: "200", Status: core.IssueStatusQueued},
 	}
 
-	if err := tracker.SyncDependencies(context.Background(), item, allItems); err != nil {
+	if err := tracker.SyncDependencies(context.Background(), issue, allIssues); err != nil {
 		t.Fatalf("SyncDependencies(blocked) error = %v", err)
 	}
 
@@ -112,8 +116,8 @@ func TestGitHubTracker_SyncDependencies_ReadyAndBlockedLabels(t *testing.T) {
 	first := stub.updateLabelsCalls[0]
 	assertLabelsContain(t, first.labels, "depends-on-#11", "depends-on-#12", "status: blocked")
 
-	allItems[1].Status = core.ItemDone
-	if err := tracker.SyncDependencies(context.Background(), item, allItems); err != nil {
+	allIssues[1].Status = core.IssueStatusDone
+	if err := tracker.SyncDependencies(context.Background(), issue, allIssues); err != nil {
 		t.Fatalf("SyncDependencies(ready) error = %v", err)
 	}
 

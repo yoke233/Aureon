@@ -23,7 +23,7 @@ const (
 	statusFailed     = "status: failed"
 )
 
-// GitHubTracker mirrors TaskItem status into GitHub issues.
+// GitHubTracker mirrors Issue status into GitHub issues.
 type GitHubTracker struct {
 	issues         issueService
 	warningWriter  io.Writer
@@ -100,27 +100,27 @@ func (t *GitHubTracker) Close() error {
 	return nil
 }
 
-func (t *GitHubTracker) CreateTask(ctx context.Context, item *core.TaskItem) (string, error) {
-	if item == nil {
+func (t *GitHubTracker) CreateIssue(ctx context.Context, issue *core.Issue) (string, error) {
+	if issue == nil {
 		return "", nil
 	}
-	if strings.TrimSpace(item.ExternalID) != "" {
-		return item.ExternalID, nil
+	if strings.TrimSpace(issue.ExternalID) != "" {
+		return issue.ExternalID, nil
 	}
 	if t.issues == nil {
 		return "", t.warning("create issue", t.unavailableReason())
 	}
 
-	title := strings.TrimSpace(item.Title)
+	title := strings.TrimSpace(issue.Title)
 	if title == "" {
-		title = strings.TrimSpace(item.ID)
+		title = strings.TrimSpace(issue.ID)
 	}
 
 	issueNumber, err := t.issues.CreateIssue(
 		ctx,
 		title,
-		strings.TrimSpace(item.Description),
-		buildCreateLabels(item),
+		buildCreateBody(issue),
+		buildCreateLabels(issue),
 	)
 	if err != nil {
 		return "", t.warning("create issue", err)
@@ -131,7 +131,7 @@ func (t *GitHubTracker) CreateTask(ctx context.Context, item *core.TaskItem) (st
 	return strconv.Itoa(issueNumber), nil
 }
 
-func (t *GitHubTracker) UpdateStatus(ctx context.Context, externalID string, status core.TaskItemStatus) error {
+func (t *GitHubTracker) UpdateStatus(ctx context.Context, externalID string, status core.IssueStatus) error {
 	issueNumber, err := parseIssueNumber(externalID)
 	if err != nil {
 		return t.warning("update status", err)
@@ -143,7 +143,7 @@ func (t *GitHubTracker) UpdateStatus(ctx context.Context, externalID string, sta
 	if err := t.issues.UpdateIssueLabels(ctx, issueNumber, []string{statusLabelForStatus(status)}); err != nil {
 		return t.warning("update labels", err)
 	}
-	if status == core.ItemDone {
+	if status == core.IssueStatusDone {
 		if err := t.issues.CloseIssue(ctx, issueNumber); err != nil {
 			return t.warning("close issue", err)
 		}
@@ -151,12 +151,12 @@ func (t *GitHubTracker) UpdateStatus(ctx context.Context, externalID string, sta
 	return nil
 }
 
-func (t *GitHubTracker) SyncDependencies(ctx context.Context, item *core.TaskItem, allItems []core.TaskItem) error {
-	if item == nil {
+func (t *GitHubTracker) SyncDependencies(ctx context.Context, issue *core.Issue, allIssues []*core.Issue) error {
+	if issue == nil {
 		return nil
 	}
 
-	issueNumber, err := parseIssueNumber(item.ExternalID)
+	issueNumber, err := parseIssueNumber(issue.ExternalID)
 	if err != nil {
 		return t.warning("sync dependencies", err)
 	}
@@ -164,7 +164,7 @@ func (t *GitHubTracker) SyncDependencies(ctx context.Context, item *core.TaskIte
 		return t.warning("sync dependencies", t.unavailableReason())
 	}
 
-	labels := makeDependencyLabels(item, allItems)
+	labels := makeDependencyLabels(issue, allIssues)
 	if err := t.issues.UpdateIssueLabels(ctx, issueNumber, labels); err != nil {
 		return t.warning("sync dependencies", err)
 	}
@@ -172,7 +172,7 @@ func (t *GitHubTracker) SyncDependencies(ctx context.Context, item *core.TaskIte
 }
 
 func (t *GitHubTracker) OnExternalComplete(ctx context.Context, externalID string) error {
-	return t.UpdateStatus(ctx, externalID, core.ItemDone)
+	return t.UpdateStatus(ctx, externalID, core.IssueStatusDone)
 }
 
 func (t *GitHubTracker) unavailableReason() error {
@@ -232,37 +232,67 @@ func (s *githubIssueService) CloseIssue(ctx context.Context, issueNumber int) er
 	return nil
 }
 
-func buildCreateLabels(item *core.TaskItem) []string {
-	if item == nil {
+func buildCreateBody(issue *core.Issue) string {
+	if issue == nil {
+		return ""
+	}
+
+	body := strings.TrimSpace(issue.Body)
+	attachments := normalizeAttachments(issue.Attachments)
+	if len(attachments) == 0 {
+		return body
+	}
+
+	var b strings.Builder
+	if body != "" {
+		b.WriteString(body)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Attachments:\n")
+	for _, attachment := range attachments {
+		b.WriteString("- ")
+		b.WriteString(attachment)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func buildCreateLabels(issue *core.Issue) []string {
+	if issue == nil {
 		return nil
 	}
-	labels := make([]string, 0, len(item.Labels)+3)
-	labels = append(labels, item.Labels...)
-	if planID := strings.TrimSpace(item.PlanID); planID != "" {
-		labels = append(labels, fmt.Sprintf("plan: %s", planID))
+	labels := make([]string, 0, len(issue.Labels)+3)
+	labels = append(labels, issue.Labels...)
+	if sessionID := strings.TrimSpace(issue.SessionID); sessionID != "" {
+		labels = append(labels, fmt.Sprintf("session: %s", sessionID))
 	}
-	if template := strings.TrimSpace(item.Template); template != "" {
+	if template := strings.TrimSpace(issue.Template); template != "" {
 		labels = append(labels, fmt.Sprintf("template: %s", template))
 	}
-	labels = append(labels, statusLabelForStatus(item.Status))
+	labels = append(labels, statusLabelForStatus(issue.Status))
 	return normalizeLabels(labels)
 }
 
-func makeDependencyLabels(item *core.TaskItem, allItems []core.TaskItem) []string {
-	labels := make([]string, 0, len(item.DependsOn)+1)
-	byID := make(map[string]core.TaskItem, len(allItems))
-	for _, it := range allItems {
+func makeDependencyLabels(issue *core.Issue, allIssues []*core.Issue) []string {
+	labels := make([]string, 0, len(issue.DependsOn)+1)
+	byID := make(map[string]*core.Issue, len(allIssues))
+	for _, it := range allIssues {
+		if it == nil {
+			continue
+		}
 		byID[it.ID] = it
 	}
 
 	blocked := false
-	for _, depID := range item.DependsOn {
+	for _, depID := range issue.DependsOn {
 		dep, ok := byID[depID]
-		if !ok || !isDependencyFinished(dep.Status) {
+		if !ok || dep == nil || !isDependencyFinished(dep.Status) {
 			blocked = true
 		}
-		if depIssueNumber, err := parseIssueNumber(dep.ExternalID); err == nil {
-			labels = append(labels, fmt.Sprintf("depends-on-#%d", depIssueNumber))
+		if ok && dep != nil {
+			if depIssueNumber, err := parseIssueNumber(dep.ExternalID); err == nil {
+				labels = append(labels, fmt.Sprintf("depends-on-#%d", depIssueNumber))
+			}
 		}
 	}
 
@@ -274,28 +304,50 @@ func makeDependencyLabels(item *core.TaskItem, allItems []core.TaskItem) []strin
 	return normalizeLabels(labels)
 }
 
-func isDependencyFinished(status core.TaskItemStatus) bool {
+func isDependencyFinished(status core.IssueStatus) bool {
 	switch status {
-	case core.ItemDone, core.ItemSkipped:
+	case core.IssueStatusDone, core.IssueStatusSuperseded, core.IssueStatusAbandoned:
 		return true
 	default:
 		return false
 	}
 }
 
-func statusLabelForStatus(status core.TaskItemStatus) string {
+func statusLabelForStatus(status core.IssueStatus) string {
 	switch status {
-	case core.ItemReady:
+	case core.IssueStatusReady:
 		return statusReady
-	case core.ItemRunning:
+	case core.IssueStatusExecuting:
 		return statusInProgress
-	case core.ItemDone:
+	case core.IssueStatusDone:
 		return statusDone
-	case core.ItemFailed:
+	case core.IssueStatusFailed:
 		return statusFailed
 	default:
 		return statusBlocked
 	}
+}
+
+func normalizeAttachments(attachments []string) []string {
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(attachments))
+	seen := make(map[string]struct{}, len(attachments))
+	for _, attachment := range attachments {
+		trimmed := strings.TrimSpace(attachment)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func parseIssueNumber(externalID string) (int, error) {

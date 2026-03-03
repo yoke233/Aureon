@@ -22,14 +22,14 @@ type WSMessage struct {
 	Type       string         `json:"type"`
 	PipelineID string         `json:"pipeline_id,omitempty"`
 	ProjectID  string         `json:"project_id,omitempty"`
-	PlanID     string         `json:"plan_id,omitempty"`
+	IssueID    string         `json:"issue_id,omitempty"`
 	Data       map[string]any `json:"data,omitempty"`
 }
 
 type wsClientMessage struct {
 	Type       string `json:"type"`
 	PipelineID string `json:"pipeline_id,omitempty"`
-	PlanID     string `json:"plan_id,omitempty"`
+	IssueID    string `json:"issue_id,omitempty"`
 }
 
 type Hub struct {
@@ -46,7 +46,7 @@ type wsClient struct {
 
 	subMu        sync.RWMutex
 	pipelineSubs map[string]struct{}
-	planSubs     map[string]struct{}
+	issueSubs    map[string]struct{}
 }
 
 func NewHub() *Hub {
@@ -73,7 +73,7 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		conn:         conn,
 		send:         make(chan []byte, 64),
 		pipelineSubs: make(map[string]struct{}),
-		planSubs:     make(map[string]struct{}),
+		issueSubs:    make(map[string]struct{}),
 	}
 
 	h.register(client)
@@ -153,16 +153,16 @@ func (h *Hub) BroadcastCoreEvent(evt core.Event) {
 	if evt.Error != "" {
 		data["error"] = evt.Error
 	}
-	planID := strings.TrimSpace(evt.PlanID)
-	if planID == "" && evt.Data != nil {
-		planID = strings.TrimSpace(evt.Data["plan_id"])
+	issueID := strings.TrimSpace(evt.IssueID)
+	if issueID == "" && evt.Data != nil {
+		issueID = strings.TrimSpace(evt.Data["issue_id"])
 	}
 
 	h.Broadcast(WSMessage{
 		Type:       string(evt.Type),
 		PipelineID: evt.PipelineID,
 		ProjectID:  evt.ProjectID,
-		PlanID:     planID,
+		IssueID:    issueID,
 		Data:       data,
 	})
 }
@@ -237,26 +237,26 @@ func (c *wsClient) handleClientMessage(msg wsClientMessage) {
 		delete(c.pipelineSubs, id)
 		c.subMu.Unlock()
 		c.sendJSON(WSMessage{Type: "unsubscribed", PipelineID: id})
-	case "subscribe_plan":
-		id := strings.TrimSpace(msg.PlanID)
+	case "subscribe_issue":
+		id := strings.TrimSpace(msg.IssueID)
 		if id == "" {
-			c.sendError("plan_id is required")
+			c.sendError("issue_id is required")
 			return
 		}
 		c.subMu.Lock()
-		c.planSubs[id] = struct{}{}
+		c.issueSubs[id] = struct{}{}
 		c.subMu.Unlock()
-		c.sendJSON(WSMessage{Type: "subscribed", PlanID: id})
-	case "unsubscribe_plan":
-		id := strings.TrimSpace(msg.PlanID)
+		c.sendJSON(WSMessage{Type: "subscribed", IssueID: id})
+	case "unsubscribe_issue":
+		id := strings.TrimSpace(msg.IssueID)
 		if id == "" {
-			c.sendError("plan_id is required")
+			c.sendError("issue_id is required")
 			return
 		}
 		c.subMu.Lock()
-		delete(c.planSubs, id)
+		delete(c.issueSubs, id)
 		c.subMu.Unlock()
-		c.sendJSON(WSMessage{Type: "unsubscribed", PlanID: id})
+		c.sendJSON(WSMessage{Type: "unsubscribed", IssueID: id})
 	default:
 		c.sendError("unsupported message type")
 	}
@@ -278,15 +278,15 @@ func (c *wsClient) shouldReceive(msg WSMessage) bool {
 	}
 
 	eventType := core.EventType(msg.Type)
-	if core.IsAlwaysBroadcastPlanEvent(eventType) {
+	if core.IsAlwaysBroadcastIssueEvent(eventType) {
 		return true
 	}
-	if core.IsPlanScopedEvent(eventType) {
-		if msg.PlanID == "" {
+	if core.IsIssueScopedEvent(eventType) {
+		if msg.IssueID == "" {
 			return false
 		}
 		c.subMu.RLock()
-		_, ok := c.planSubs[msg.PlanID]
+		_, ok := c.issueSubs[msg.IssueID]
 		c.subMu.RUnlock()
 		return ok
 	}

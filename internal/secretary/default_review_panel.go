@@ -3,6 +3,7 @@ package secretary
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -11,15 +12,15 @@ import (
 )
 
 const (
-	defaultCompletenessReviewerName = "completeness"
-	defaultDependencyReviewerName   = "dependency"
-	defaultFeasibilityReviewerName  = "feasibility"
-	defaultReviewerRoleID           = "reviewer"
-	defaultAggregatorRoleID         = "aggregator"
+	defaultDemandReviewerName     = "completeness"
+	defaultDependencyAnalyzerName = "dependency"
+	defaultTemplateReviewerName   = "feasibility"
+	defaultReviewerRoleID         = "reviewer"
+	defaultAggregatorRoleID       = "aggregator"
 )
 
-// NewDefaultReviewOrchestrator builds a runnable review orchestrator with rule-based reviewers.
-// This keeps P2 production path working without requiring external AI backends.
+// NewDefaultReviewOrchestrator builds a runnable review orchestrator with built-in Issue analyzers.
+// This keeps local runtime path working without requiring external AI backends.
 func NewDefaultReviewOrchestrator(store ReviewStore) *ReviewOrchestrator {
 	return newDefaultReviewOrchestrator(store, defaultReviewRoleRuntime())
 }
@@ -44,11 +45,11 @@ func newDefaultReviewOrchestrator(store ReviewStore, runtime *ReviewRoleRuntime)
 	return &ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
-			newCompletenessReviewer(),
-			newDependencyReviewer(),
-			newFeasibilityReviewer(),
+			newDefaultDemandReviewer(),
+			newDefaultDependencyAnalyzer(),
+			newDefaultTemplateReviewer(),
 		},
-		Aggregator:  newRuleAggregator(),
+		Aggregator:  newDefaultIssueAggregator(),
 		MaxRounds:   defaultReviewMaxRounds,
 		RoleRuntime: cloneReviewRoleRuntime(effectiveRuntime),
 	}
@@ -57,9 +58,9 @@ func newDefaultReviewOrchestrator(store ReviewStore, runtime *ReviewRoleRuntime)
 func defaultReviewRoleBindings() ReviewRoleBindingInput {
 	return ReviewRoleBindingInput{
 		Reviewers: map[string]string{
-			defaultCompletenessReviewerName: defaultReviewerRoleID,
-			defaultDependencyReviewerName:   defaultReviewerRoleID,
-			defaultFeasibilityReviewerName:  defaultReviewerRoleID,
+			defaultDemandReviewerName:     defaultReviewerRoleID,
+			defaultDependencyAnalyzerName: defaultReviewerRoleID,
+			defaultTemplateReviewerName:   defaultReviewerRoleID,
 		},
 		Aggregator: defaultAggregatorRoleID,
 	}
@@ -70,14 +71,14 @@ func defaultReviewRoleRuntime() *ReviewRoleRuntime {
 	if err != nil {
 		return &ReviewRoleRuntime{
 			ReviewerRoles: map[string]string{
-				defaultCompletenessReviewerName: defaultReviewerRoleID,
-				defaultDependencyReviewerName:   defaultReviewerRoleID,
-				defaultFeasibilityReviewerName:  defaultReviewerRoleID,
+				defaultDemandReviewerName:     defaultReviewerRoleID,
+				defaultDependencyAnalyzerName: defaultReviewerRoleID,
+				defaultTemplateReviewerName:   defaultReviewerRoleID,
 			},
 			ReviewerSessionPolicies: map[string]acpclient.SessionPolicy{
-				defaultCompletenessReviewerName: defaultReviewSessionPolicy,
-				defaultDependencyReviewerName:   defaultReviewSessionPolicy,
-				defaultFeasibilityReviewerName:  defaultReviewSessionPolicy,
+				defaultDemandReviewerName:     defaultReviewSessionPolicy,
+				defaultDependencyAnalyzerName: defaultReviewSessionPolicy,
+				defaultTemplateReviewerName:   defaultReviewSessionPolicy,
 			},
 			AggregatorRole:          defaultAggregatorRoleID,
 			AggregatorSessionPolicy: defaultReviewSessionPolicy,
@@ -86,158 +87,240 @@ func defaultReviewRoleRuntime() *ReviewRoleRuntime {
 	return runtime
 }
 
-type ruleReviewer struct {
-	name string
-	run  func(input ReviewerInput) []core.ReviewIssue
+type defaultDemandReviewer struct{}
+
+func newDefaultDemandReviewer() Reviewer {
+	return defaultDemandReviewer{}
 }
 
-func (r ruleReviewer) Name() string {
-	return r.name
+func (r defaultDemandReviewer) Name() string {
+	return defaultDemandReviewerName
 }
 
-func (r ruleReviewer) Review(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
+func (r defaultDemandReviewer) Review(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
 	if input.Plan == nil {
-		return core.ReviewVerdict{}, fmt.Errorf("reviewer %s: plan is nil", r.name)
+		return core.ReviewVerdict{}, fmt.Errorf("reviewer %s: plan is nil", r.Name())
 	}
-	issues := r.run(input)
-	status := "pass"
-	score := 100
-	if len(issues) > 0 {
-		status = "issues_found"
-		score = 60
-	}
-	return core.ReviewVerdict{
-		Reviewer: r.name,
-		Status:   status,
-		Issues:   issues,
-		Score:    score,
-	}, nil
+
+	issues := validateDemand(input)
+	return buildReviewVerdict(r.Name(), issues), nil
 }
 
-func newCompletenessReviewer() Reviewer {
-	return ruleReviewer{
-		name: defaultCompletenessReviewerName,
-		run: func(input ReviewerInput) []core.ReviewIssue {
-			plan := input.Plan
-			issues := make([]core.ReviewIssue, 0)
-			if isFileBasedPlan(plan, input.PlanFileContents) {
-				fileContents := cloneStringMap(input.PlanFileContents)
-				if len(fileContents) == 0 {
-					fileContents = loadPlanFileContents(plan)
-				}
-				if len(fileContents) == 0 {
-					return []core.ReviewIssue{
-						{
-							Severity:    "error",
-							Description: "file-based plan has no file contents",
-							Suggestion:  "provide non-empty file contents for parser input",
-						},
-					}
-				}
-				paths := make([]string, 0, len(fileContents))
-				for path := range fileContents {
-					paths = append(paths, path)
-				}
-				slices.Sort(paths)
-				for _, path := range paths {
-					if strings.TrimSpace(fileContents[path]) != "" {
-						continue
-					}
-					issues = append(issues, core.ReviewIssue{
-						Severity:    "error",
-						Description: fmt.Sprintf("file content is empty: %s", path),
-						Suggestion:  "provide non-empty file content for each source file",
-					})
-				}
-				return issues
+func validateDemand(input ReviewerInput) []core.ReviewIssue {
+	plan := input.Plan
+	issues := make([]core.ReviewIssue, 0)
+	if isFileBasedPlan(plan, input.PlanFileContents) {
+		fileContents := cloneStringMap(input.PlanFileContents)
+		if len(fileContents) == 0 {
+			fileContents = loadPlanFileContents(plan)
+		}
+		if len(fileContents) == 0 {
+			return []core.ReviewIssue{
+				{
+					Severity:    "error",
+					Description: "file-based plan has no file contents",
+					Suggestion:  "provide non-empty file contents for parser input",
+				},
 			}
-			if len(plan.Tasks) == 0 {
-				return []core.ReviewIssue{
-					{
-						Severity:    "error",
-						Description: "task plan has no tasks",
-						Suggestion:  "add at least one executable task",
-						TaskID:      "",
-					},
-				}
-			}
+		}
 
-			for i := range plan.Tasks {
-				task := plan.Tasks[i]
-				if strings.TrimSpace(task.Title) == "" {
-					issues = append(issues, core.ReviewIssue{
-						Severity:    "error",
-						Description: "task title is required",
-						Suggestion:  "provide a clear task title",
-						TaskID:      strings.TrimSpace(task.ID),
-					})
-				}
-				if strings.TrimSpace(task.Description) == "" {
-					issues = append(issues, core.ReviewIssue{
-						Severity:    "error",
-						Description: "task description is required",
-						Suggestion:  "provide acceptance criteria in description",
-						TaskID:      strings.TrimSpace(task.ID),
-					})
-				}
+		paths := make([]string, 0, len(fileContents))
+		for path := range fileContents {
+			paths = append(paths, path)
+		}
+		slices.Sort(paths)
+		for _, path := range paths {
+			if strings.TrimSpace(fileContents[path]) != "" {
+				continue
 			}
-
-			return issues
-		},
+			issues = append(issues, core.ReviewIssue{
+				Severity:    "error",
+				Description: fmt.Sprintf("file content is empty: %s", path),
+				Suggestion:  "provide non-empty file content for each source file",
+			})
+		}
+		return issues
 	}
-}
 
-func newDependencyReviewer() Reviewer {
-	return ruleReviewer{
-		name: defaultDependencyReviewerName,
-		run: func(input ReviewerInput) []core.ReviewIssue {
-			if isFileBasedPlan(input.Plan, input.PlanFileContents) {
-				return nil
-			}
-			plan := input.Plan
-			dag := Build(plan.Tasks)
-			if err := dag.Validate(); err != nil {
-				return []core.ReviewIssue{
-					{
-						Severity:    "error",
-						Description: err.Error(),
-						Suggestion:  "fix dependency graph to satisfy DAG constraints",
-					},
-				}
-			}
-			return nil
-		},
+	planIssues := collectPlanIssueViews(plan)
+	if len(planIssues) == 0 {
+		return []core.ReviewIssue{
+			{
+				Severity:    "error",
+				Description: "issue plan has no issues",
+				Suggestion:  "add at least one executable issue",
+			},
+		}
 	}
-}
 
-func newFeasibilityReviewer() Reviewer {
-	return ruleReviewer{
-		name: defaultFeasibilityReviewerName,
-		run: func(input ReviewerInput) []core.ReviewIssue {
-			if isFileBasedPlan(input.Plan, input.PlanFileContents) {
-				return nil
+	for i := range planIssues {
+		issue := planIssues[i]
+		issueID := strings.TrimSpace(issue.ID)
+
+		title := strings.TrimSpace(issue.Title)
+		if title == "" {
+			issues = append(issues, core.ReviewIssue{
+				Severity:    "error",
+				IssueID:     issueID,
+				Description: "issue title is required",
+				Suggestion:  "provide a clear issue title",
+			})
+		}
+
+		body := strings.TrimSpace(issue.Body)
+		if body == "" {
+			issues = append(issues, core.ReviewIssue{
+				Severity:    "error",
+				IssueID:     issueID,
+				Description: "issue body is required",
+				Suggestion:  "describe scope, acceptance, and constraints in body",
+			})
+		}
+
+		template := strings.TrimSpace(issue.Template)
+		if template == "" {
+			issues = append(issues, core.ReviewIssue{
+				Severity:    "error",
+				IssueID:     issueID,
+				Description: "issue template is required",
+				Suggestion:  "set a valid template name",
+			})
+		} else if strings.ContainsAny(template, " \t\r\n") {
+			issues = append(issues, core.ReviewIssue{
+				Severity:    "error",
+				IssueID:     issueID,
+				Description: "issue template must not contain spaces",
+				Suggestion:  "use one token template id such as standard/full/quick/hotfix",
+			})
+		}
+
+		seenAttachments := make(map[string]struct{}, len(issue.Attachments))
+		for idx, rawAttachment := range issue.Attachments {
+			attachment := strings.TrimSpace(rawAttachment)
+			if attachment == "" {
+				issues = append(issues, core.ReviewIssue{
+					Severity:    "error",
+					IssueID:     issueID,
+					Description: fmt.Sprintf("issue attachment[%d] is empty", idx),
+					Suggestion:  "remove empty attachment or provide a valid path/url",
+				})
+				continue
 			}
-			plan := input.Plan
-			issues := make([]core.ReviewIssue, 0)
-			for i := range plan.Tasks {
-				task := plan.Tasks[i]
-				template := strings.TrimSpace(task.Template)
-				if template == "" {
-					continue
-				}
-				if _, ok := allowedPipelineTemplates[template]; ok {
-					continue
-				}
+			if _, duplicated := seenAttachments[attachment]; duplicated {
 				issues = append(issues, core.ReviewIssue{
 					Severity:    "warning",
-					Description: fmt.Sprintf("unknown template %q", template),
-					Suggestion:  "use one of: full/standard/quick/hotfix",
-					TaskID:      strings.TrimSpace(task.ID),
+					IssueID:     issueID,
+					Description: fmt.Sprintf("issue attachment is duplicated: %s", attachment),
+					Suggestion:  "deduplicate repeated attachment entries",
 				})
+				continue
 			}
-			return issues
-		},
+			seenAttachments[attachment] = struct{}{}
+		}
 	}
+
+	return issues
+}
+
+type defaultDependencyAnalyzer struct{}
+
+func newDefaultDependencyAnalyzer() Reviewer {
+	return defaultDependencyAnalyzer{}
+}
+
+func (r defaultDependencyAnalyzer) Name() string {
+	return defaultDependencyAnalyzerName
+}
+
+func (r defaultDependencyAnalyzer) Review(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
+	if input.Plan == nil {
+		return core.ReviewVerdict{}, fmt.Errorf("reviewer %s: plan is nil", r.Name())
+	}
+	if isFileBasedPlan(input.Plan, input.PlanFileContents) {
+		return buildReviewVerdict(r.Name(), nil), nil
+	}
+
+	planIssues := collectPlanIssueViews(input.Plan)
+	if len(planIssues) == 0 {
+		return buildReviewVerdict(r.Name(), nil), nil
+	}
+
+	issues := make([]core.ReviewIssue, 0)
+	graphNodes := make([]*core.Issue, 0, len(planIssues))
+	for i := range planIssues {
+		issue := planIssues[i]
+		issueID := strings.TrimSpace(issue.ID)
+		if issueID == "" {
+			issues = append(issues, core.ReviewIssue{
+				Severity:    "error",
+				Description: "issue id is required for dependency analysis",
+				Suggestion:  "assign stable issue IDs before declaring dependencies",
+			})
+			continue
+		}
+		graphNodes = append(graphNodes, &core.Issue{
+			ID:        issueID,
+			DependsOn: normalizeStringList(issue.DependsOn),
+		})
+	}
+
+	if len(issues) == 0 {
+		dag := Build(graphNodes)
+		if err := dag.Validate(); err != nil {
+			issueID := ""
+			if dagErr, ok := err.(*DAGError); ok {
+				issueID = strings.TrimSpace(dagErr.NodeID)
+			}
+			issues = append(issues, core.ReviewIssue{
+				Severity:    "error",
+				IssueID:     issueID,
+				Description: err.Error(),
+				Suggestion:  "fix issue dependencies to keep DAG acyclic and references valid",
+			})
+		}
+	}
+
+	return buildReviewVerdict(r.Name(), issues), nil
+}
+
+type defaultTemplateReviewer struct{}
+
+func newDefaultTemplateReviewer() Reviewer {
+	return defaultTemplateReviewer{}
+}
+
+func (r defaultTemplateReviewer) Name() string {
+	return defaultTemplateReviewerName
+}
+
+func (r defaultTemplateReviewer) Review(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
+	if input.Plan == nil {
+		return core.ReviewVerdict{}, fmt.Errorf("reviewer %s: plan is nil", r.Name())
+	}
+	if isFileBasedPlan(input.Plan, input.PlanFileContents) {
+		return buildReviewVerdict(r.Name(), nil), nil
+	}
+
+	planIssues := collectPlanIssueViews(input.Plan)
+	issues := make([]core.ReviewIssue, 0)
+	for i := range planIssues {
+		issue := planIssues[i]
+		template := strings.TrimSpace(issue.Template)
+		if template == "" {
+			continue
+		}
+		if _, ok := allowedPipelineTemplates[template]; ok {
+			continue
+		}
+		issues = append(issues, core.ReviewIssue{
+			Severity:    "warning",
+			IssueID:     strings.TrimSpace(issue.ID),
+			Description: fmt.Sprintf("unknown template %q", template),
+			Suggestion:  "use one of: full/standard/quick/hotfix",
+		})
+	}
+
+	return buildReviewVerdict(r.Name(), issues), nil
 }
 
 var allowedPipelineTemplates = map[string]struct{}{
@@ -247,13 +330,13 @@ var allowedPipelineTemplates = map[string]struct{}{
 	"hotfix":   {},
 }
 
-type ruleAggregator struct{}
+type defaultIssueAggregator struct{}
 
-func newRuleAggregator() Aggregator {
-	return ruleAggregator{}
+func newDefaultIssueAggregator() Aggregator {
+	return defaultIssueAggregator{}
 }
 
-func (a ruleAggregator) Decide(_ context.Context, input AggregatorInput) (AggregatorDecision, error) {
+func (a defaultIssueAggregator) Decide(_ context.Context, input AggregatorInput) (AggregatorDecision, error) {
 	allIssues := collectAllIssues(input.Verdicts)
 	if len(allIssues) == 0 {
 		return AggregatorDecision{
@@ -275,4 +358,141 @@ func (a ruleAggregator) Decide(_ context.Context, input AggregatorInput) (Aggreg
 		Decision: DecisionEscalate,
 		Reason:   reason,
 	}, nil
+}
+
+type issueView struct {
+	ID          string
+	Title       string
+	Body        string
+	Template    string
+	Attachments []string
+	DependsOn   []string
+}
+
+func collectPlanIssueViews(plan any) []issueView {
+	if plan == nil {
+		return nil
+	}
+
+	planValue, ok := derefStructValue(reflect.ValueOf(plan))
+	if !ok {
+		return nil
+	}
+
+	issueSlice := planValue.FieldByName("Tasks")
+	if !issueSlice.IsValid() {
+		issueSlice = planValue.FieldByName("Issues")
+	}
+	if !issueSlice.IsValid() || issueSlice.Kind() != reflect.Slice {
+		return nil
+	}
+
+	out := make([]issueView, 0, issueSlice.Len())
+	for i := 0; i < issueSlice.Len(); i++ {
+		itemValue, ok := derefStructValue(issueSlice.Index(i))
+		if !ok {
+			continue
+		}
+
+		out = append(out, issueView{
+			ID:          readStructStringField(itemValue, "ID"),
+			Title:       readStructStringField(itemValue, "Title"),
+			Body:        coalesceStringField(itemValue, "Body", "Description"),
+			Template:    readStructStringField(itemValue, "Template"),
+			Attachments: readStructStringSliceField(itemValue, "Attachments"),
+			DependsOn:   readStructStringSliceField(itemValue, "DependsOn"),
+		})
+	}
+
+	return out
+}
+
+func derefStructValue(v reflect.Value) (reflect.Value, bool) {
+	for v.IsValid() {
+		switch v.Kind() {
+		case reflect.Interface, reflect.Pointer:
+			if v.IsNil() {
+				return reflect.Value{}, false
+			}
+			v = v.Elem()
+		default:
+			if v.Kind() != reflect.Struct {
+				return reflect.Value{}, false
+			}
+			return v, true
+		}
+	}
+	return reflect.Value{}, false
+}
+
+func readStructStringField(v reflect.Value, name string) string {
+	field := v.FieldByName(name)
+	if !field.IsValid() || field.Kind() != reflect.String {
+		return ""
+	}
+	return field.String()
+}
+
+func coalesceStringField(v reflect.Value, names ...string) string {
+	for _, name := range names {
+		value := strings.TrimSpace(readStructStringField(v, name))
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func readStructStringSliceField(v reflect.Value, name string) []string {
+	field := v.FieldByName(name)
+	if !field.IsValid() || field.Kind() != reflect.Slice {
+		return nil
+	}
+	out := make([]string, 0, field.Len())
+	for i := 0; i < field.Len(); i++ {
+		item := field.Index(i)
+		if item.Kind() == reflect.String {
+			out = append(out, item.String())
+		}
+	}
+	return out
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if _, duplicated := seen[value]; duplicated {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func buildReviewVerdict(name string, issues []core.ReviewIssue) core.ReviewVerdict {
+	status := "pass"
+	score := 100
+	if len(issues) > 0 {
+		status = "issues_found"
+		score = 60
+	}
+	summary := defaultVerdictSummary(status, score, len(issues))
+	return core.ReviewVerdict{
+		Reviewer:  name,
+		Status:    status,
+		Summary:   summary,
+		RawOutput: formatReviewRawOutput(summary, status, score, issues),
+		Issues:    issues,
+		Score:     score,
+	}
 }

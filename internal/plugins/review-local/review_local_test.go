@@ -2,14 +2,16 @@ package reviewlocal
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/yoke233/ai-workflow/internal/core"
-	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 )
 
 func TestLocalReviewGate_NameInitClose(t *testing.T) {
-	store, _ := newTestStoreWithPlan(t)
+	store, _ := newTestStoreWithIssue(t)
 	gate := New(store)
 
 	if got := gate.Name(); got != "local" {
@@ -24,15 +26,15 @@ func TestLocalReviewGate_NameInitClose(t *testing.T) {
 }
 
 func TestLocalReviewGate_SubmitCheckCancelFlow(t *testing.T) {
-	store, plan := newTestStoreWithPlan(t)
+	store, issue := newTestStoreWithIssue(t)
 	gate := New(store)
 
-	reviewID, err := gate.Submit(context.Background(), plan)
+	reviewID, err := gate.Submit(context.Background(), []*core.Issue{issue})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if reviewID != plan.ID {
-		t.Fatalf("Submit() reviewID = %q, want %q", reviewID, plan.ID)
+	if reviewID != issue.ID {
+		t.Fatalf("Submit() reviewID = %q, want %q", reviewID, issue.ID)
 	}
 
 	pending, err := gate.Check(context.Background(), reviewID)
@@ -49,12 +51,15 @@ func TestLocalReviewGate_SubmitCheckCancelFlow(t *testing.T) {
 		t.Fatalf("pending verdicts = %#v, want one pending verdict", pending.Verdicts)
 	}
 
-	records, err := store.GetReviewRecords(plan.ID)
+	records, err := store.GetReviewRecords(issue.ID)
 	if err != nil {
 		t.Fatalf("GetReviewRecords() after submit error = %v", err)
 	}
 	if len(records) != 1 || records[0].Verdict != "pending" {
 		t.Fatalf("review records after submit = %#v, want one pending record", records)
+	}
+	if records[0].IssueID != issue.ID {
+		t.Fatalf("review record issueID = %q, want %q", records[0].IssueID, issue.ID)
 	}
 
 	if err := gate.Cancel(context.Background(), reviewID); err != nil {
@@ -74,16 +79,16 @@ func TestLocalReviewGate_SubmitCheckCancelFlow(t *testing.T) {
 }
 
 func TestLocalReviewGate_CheckReadsLatestVerdict(t *testing.T) {
-	store, plan := newTestStoreWithPlan(t)
+	store, issue := newTestStoreWithIssue(t)
 	gate := New(store)
 
-	reviewID, err := gate.Submit(context.Background(), plan)
+	reviewID, err := gate.Submit(context.Background(), []*core.Issue{issue})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
 
 	if err := store.SaveReviewRecord(&core.ReviewRecord{
-		PlanID:   plan.ID,
+		IssueID:  issue.ID,
 		Round:    1,
 		Reviewer: "local_human",
 		Verdict:  "approved",
@@ -104,63 +109,91 @@ func TestLocalReviewGate_CheckReadsLatestVerdict(t *testing.T) {
 }
 
 func TestLocalReviewGate_Boundaries(t *testing.T) {
-	store, plan := newTestStoreWithPlan(t)
+	store, issue := newTestStoreWithIssue(t)
 	gate := New(store)
 
 	if _, err := gate.Submit(context.Background(), nil); err == nil {
 		t.Fatalf("expected Submit(nil) to fail")
 	}
-	if _, err := gate.Submit(context.Background(), &core.TaskPlan{}); err == nil {
-		t.Fatalf("expected Submit(empty plan) to fail")
+	if _, err := gate.Submit(context.Background(), []*core.Issue{}); err == nil {
+		t.Fatalf("expected Submit(empty issues) to fail")
+	}
+	if _, err := gate.Submit(context.Background(), []*core.Issue{nil}); err == nil {
+		t.Fatalf("expected Submit(nil issue) to fail")
+	}
+	if _, err := gate.Submit(context.Background(), []*core.Issue{{}}); err == nil {
+		t.Fatalf("expected Submit(issue without id) to fail")
 	}
 	if _, err := gate.Check(context.Background(), ""); err == nil {
 		t.Fatalf("expected Check(empty reviewID) to fail")
 	}
-	if _, err := gate.Check(context.Background(), "plan-unknown"); err == nil {
+	if _, err := gate.Check(context.Background(), "issue-unknown"); err == nil {
 		t.Fatalf("expected Check(unknown reviewID) to fail")
 	}
 	if err := gate.Cancel(context.Background(), ""); err == nil {
 		t.Fatalf("expected Cancel(empty reviewID) to fail")
 	}
-	if err := gate.Cancel(context.Background(), "plan-unknown"); err == nil {
+	if err := gate.Cancel(context.Background(), "issue-unknown"); err == nil {
 		t.Fatalf("expected Cancel(unknown reviewID) to fail")
 	}
-	if err := gate.Cancel(context.Background(), plan.ID); err == nil {
+	if err := gate.Cancel(context.Background(), issue.ID); err == nil {
 		t.Fatalf("expected Cancel(review without submit) to fail")
 	}
 }
 
-func newTestStoreWithPlan(t *testing.T) (core.Store, *core.TaskPlan) {
+func newTestStoreWithIssue(t *testing.T) (*fakeReviewStore, *core.Issue) {
 	t.Helper()
 
-	store, err := storesqlite.New(":memory:")
-	if err != nil {
-		t.Fatalf("storesqlite.New(:memory:) error = %v", err)
+	store := newFakeReviewStore()
+	issue := &core.Issue{
+		ID:        "issue-20260302-localreview",
+		SessionID: "sess-localreview",
+		Title:     "local review issue",
+		Template:  "default",
 	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
+	return store, issue
+}
 
-	project := &core.Project{
-		ID:       "proj-review-local",
-		Name:     "review-local",
-		RepoPath: t.TempDir(),
+type fakeReviewStore struct {
+	mu      sync.Mutex
+	records map[string][]core.ReviewRecord
+}
+
+func newFakeReviewStore() *fakeReviewStore {
+	return &fakeReviewStore{
+		records: make(map[string][]core.ReviewRecord),
 	}
-	if err := store.CreateProject(project); err != nil {
-		t.Fatalf("CreateProject() error = %v", err)
+}
+
+func (s *fakeReviewStore) SaveReviewRecord(record *core.ReviewRecord) error {
+	if record == nil {
+		return errors.New("record is nil")
+	}
+	issueID := strings.TrimSpace(record.IssueID)
+	if issueID == "" {
+		return errors.New("issue id is required")
 	}
 
-	plan := &core.TaskPlan{
-		ID:         "plan-20260301-reviewlocal",
-		ProjectID:  project.ID,
-		Name:       "local-review",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("CreateTaskPlan() error = %v", err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cloned := *record
+	cloned.IssueID = issueID
+	s.records[issueID] = append(s.records[issueID], cloned)
+	return nil
+}
+
+func (s *fakeReviewStore) GetReviewRecords(issueID string) ([]core.ReviewRecord, error) {
+	normalized := strings.TrimSpace(issueID)
+	if normalized == "" {
+		return nil, errors.New("issue id is required")
 	}
 
-	return store, plan
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records := s.records[normalized]
+	out := make([]core.ReviewRecord, len(records))
+	copy(out, records)
+	return out, nil
 }

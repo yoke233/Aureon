@@ -12,14 +12,19 @@ import (
 
 const localReviewer = "local_human"
 
+type reviewRecordStore interface {
+	SaveReviewRecord(record *core.ReviewRecord) error
+	GetReviewRecords(issueID string) ([]core.ReviewRecord, error)
+}
+
 // LocalReviewGate stores local human review states in review_records.
 type LocalReviewGate struct {
-	store  core.Store
+	store  reviewRecordStore
 	mu     sync.RWMutex
 	closed bool
 }
 
-func New(store core.Store) *LocalReviewGate {
+func New(store reviewRecordStore) *LocalReviewGate {
 	return &LocalReviewGate{
 		store: store,
 	}
@@ -53,7 +58,7 @@ func (g *LocalReviewGate) Close() error {
 	return nil
 }
 
-func (g *LocalReviewGate) Submit(ctx context.Context, plan *core.TaskPlan) (string, error) {
+func (g *LocalReviewGate) Submit(ctx context.Context, issues []*core.Issue) (string, error) {
 	if err := g.ensureReady(); err != nil {
 		return "", err
 	}
@@ -63,35 +68,37 @@ func (g *LocalReviewGate) Submit(ctx context.Context, plan *core.TaskPlan) (stri
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if plan == nil {
-		return "", errors.New("review-local submit: plan is nil")
+	if len(issues) == 0 {
+		return "", errors.New("review-local submit: issues are required")
+	}
+	if issues[0] == nil {
+		return "", errors.New("review-local submit: first issue is nil")
 	}
 
-	planID := strings.TrimSpace(plan.ID)
-	if planID == "" {
-		return "", errors.New("review-local submit: plan id is required")
+	issueID := strings.TrimSpace(issues[0].ID)
+	if issueID == "" {
+		return "", errors.New("review-local submit: first issue id is required")
 	}
 
-	records, err := g.store.GetReviewRecords(planID)
+	records, err := g.store.GetReviewRecords(issueID)
 	if err != nil {
 		return "", fmt.Errorf("review-local submit list records: %w", err)
 	}
 	round := nextRound(records)
-	if plan.ReviewRound > round {
-		round = plan.ReviewRound
-	}
 
 	record := &core.ReviewRecord{
-		PlanID:   planID,
-		Round:    round,
-		Reviewer: localReviewer,
-		Verdict:  "pending",
+		IssueID:   issueID,
+		Round:     round,
+		Reviewer:  localReviewer,
+		Verdict:   "pending",
+		Summary:   "等待人工评审",
+		RawOutput: "local review submitted and waiting for human decision",
 	}
 	if err := g.store.SaveReviewRecord(record); err != nil {
 		return "", fmt.Errorf("review-local submit save record: %w", err)
 	}
 
-	return planID, nil
+	return issueID, nil
 }
 
 func (g *LocalReviewGate) Check(ctx context.Context, reviewID string) (*core.ReviewResult, error) {
@@ -105,17 +112,17 @@ func (g *LocalReviewGate) Check(ctx context.Context, reviewID string) (*core.Rev
 		return nil, err
 	}
 
-	planID := strings.TrimSpace(reviewID)
-	if planID == "" {
+	issueID := strings.TrimSpace(reviewID)
+	if issueID == "" {
 		return nil, errors.New("review-local check: review id is required")
 	}
 
-	records, err := g.store.GetReviewRecords(planID)
+	records, err := g.store.GetReviewRecords(issueID)
 	if err != nil {
 		return nil, fmt.Errorf("review-local check list records: %w", err)
 	}
 	if len(records) == 0 {
-		return nil, fmt.Errorf("review-local check: review %q not found", planID)
+		return nil, fmt.Errorf("review-local check: review %q not found", issueID)
 	}
 
 	latest := records[len(records)-1]
@@ -127,10 +134,12 @@ func (g *LocalReviewGate) Check(ctx context.Context, reviewID string) (*core.Rev
 	}
 
 	verdict := core.ReviewVerdict{
-		Reviewer: latest.Reviewer,
-		Status:   strings.TrimSpace(latest.Verdict),
-		Issues:   append([]core.ReviewIssue(nil), latest.Issues...),
-		Score:    score,
+		Reviewer:  latest.Reviewer,
+		Status:    strings.TrimSpace(latest.Verdict),
+		Summary:   strings.TrimSpace(latest.Summary),
+		RawOutput: strings.TrimSpace(latest.RawOutput),
+		Issues:    append([]core.ReviewIssue(nil), latest.Issues...),
+		Score:     score,
 	}
 
 	return &core.ReviewResult{
@@ -151,17 +160,17 @@ func (g *LocalReviewGate) Cancel(ctx context.Context, reviewID string) error {
 		return err
 	}
 
-	planID := strings.TrimSpace(reviewID)
-	if planID == "" {
+	issueID := strings.TrimSpace(reviewID)
+	if issueID == "" {
 		return errors.New("review-local cancel: review id is required")
 	}
 
-	records, err := g.store.GetReviewRecords(planID)
+	records, err := g.store.GetReviewRecords(issueID)
 	if err != nil {
 		return fmt.Errorf("review-local cancel list records: %w", err)
 	}
 	if len(records) == 0 {
-		return fmt.Errorf("review-local cancel: review %q not found", planID)
+		return fmt.Errorf("review-local cancel: review %q not found", issueID)
 	}
 
 	latest := records[len(records)-1]
@@ -175,10 +184,12 @@ func (g *LocalReviewGate) Cancel(ctx context.Context, reviewID string) error {
 	}
 
 	record := &core.ReviewRecord{
-		PlanID:   planID,
-		Round:    round,
-		Reviewer: localReviewer,
-		Verdict:  "cancelled",
+		IssueID:   issueID,
+		Round:     round,
+		Reviewer:  localReviewer,
+		Verdict:   "cancelled",
+		Summary:   "人工评审已取消",
+		RawOutput: "local review cancelled",
 	}
 	if err := g.store.SaveReviewRecord(record); err != nil {
 		return fmt.Errorf("review-local cancel save record: %w", err)

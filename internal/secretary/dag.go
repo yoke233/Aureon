@@ -40,23 +40,22 @@ func (e *DAGError) Error() string {
 }
 
 type DAG struct {
-	Nodes      map[string]*core.TaskItem
+	Nodes      map[string]*core.Issue
 	Downstream map[string][]string
 	InDegree   map[string]int
 }
 
-func Build(tasks []core.TaskItem) *DAG {
+func Build(tasks []*core.Issue) *DAG {
 	d := &DAG{
-		Nodes:      make(map[string]*core.TaskItem, len(tasks)),
+		Nodes:      make(map[string]*core.Issue, len(tasks)),
 		Downstream: make(map[string][]string, len(tasks)),
 		InDegree:   make(map[string]int, len(tasks)),
 	}
 
 	for _, task := range tasks {
-		item := task
-		d.Nodes[item.ID] = &item
-		d.Downstream[item.ID] = []string{}
-		d.InDegree[item.ID] = 0
+		d.Nodes[task.ID] = task
+		d.Downstream[task.ID] = []string{}
+		d.InDegree[task.ID] = 0
 	}
 
 	for _, taskID := range sortedNodeIDs(d.Nodes) {
@@ -93,7 +92,7 @@ func (d *DAG) Validate() error {
 	}
 
 	if d.Nodes == nil {
-		d.Nodes = map[string]*core.TaskItem{}
+		d.Nodes = map[string]*core.Issue{}
 	}
 	if d.Downstream == nil {
 		d.Downstream = map[string][]string{}
@@ -280,7 +279,7 @@ func (d *DAG) normalizeDownstream() (map[string][]string, error) {
 	return normalized, nil
 }
 
-func buildInDegree(nodes map[string]*core.TaskItem, downstream map[string][]string) map[string]int {
+func buildInDegree(nodes map[string]*core.Issue, downstream map[string][]string) map[string]int {
 	inDegree := make(map[string]int, len(nodes))
 	for nodeID := range nodes {
 		inDegree[nodeID] = 0
@@ -328,7 +327,7 @@ func reachable(adjacency map[string]map[string]struct{}, from, target string) bo
 	return false
 }
 
-func sortedNodeIDs(nodes map[string]*core.TaskItem) []string {
+func sortedNodeIDs(nodes map[string]*core.Issue) []string {
 	ids := make([]string, 0, len(nodes))
 	for taskID := range nodes {
 		ids = append(ids, taskID)

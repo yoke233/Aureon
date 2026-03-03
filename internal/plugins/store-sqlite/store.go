@@ -114,12 +114,13 @@ func (s *SQLiteStore) SavePipeline(p *core.Pipeline) error {
 	if err != nil {
 		return err
 	}
+	issueColumn := s.pipelineIssueColumn()
 
-	_, err = s.db.Exec(`
+	query := fmt.Sprintf(`
 INSERT INTO pipelines (
 	id, project_id, name, description, template, status, current_stage,
 	stages_json, artifacts_json, config_json, branch_name, worktree_path,
-	error_message, max_total_retries, total_retries, run_count, last_error_type, task_item_id,
+	error_message, max_total_retries, total_retries, run_count, last_error_type, %s,
 	queued_at, last_heartbeat_at, started_at, finished_at
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
@@ -139,15 +140,16 @@ ON CONFLICT(id) DO UPDATE SET
 	total_retries=excluded.total_retries,
 	run_count=excluded.run_count,
 	last_error_type=excluded.last_error_type,
-	task_item_id=excluded.task_item_id,
+	%[1]s=excluded.%[1]s,
 	queued_at=excluded.queued_at,
 	last_heartbeat_at=excluded.last_heartbeat_at,
 	started_at=excluded.started_at,
 	finished_at=excluded.finished_at,
-	updated_at=CURRENT_TIMESTAMP`,
+	updated_at=CURRENT_TIMESTAMP`, issueColumn)
+	_, err = s.db.Exec(query,
 		p.ID, p.ProjectID, p.Name, p.Description, p.Template, p.Status, p.CurrentStage,
 		string(stagesJSON), string(artifactsJSON), string(configJSON), p.BranchName, p.WorktreePath,
-		p.ErrorMessage, p.MaxTotalRetries, p.TotalRetries, p.RunCount, p.LastErrorType, nullableString(p.TaskItemID),
+		p.ErrorMessage, p.MaxTotalRetries, p.TotalRetries, p.RunCount, p.LastErrorType, nullableString(p.IssueID),
 		nullableTime(p.QueuedAt), nullableTime(p.LastHeartbeatAt), nullableTime(p.StartedAt), nullableTime(p.FinishedAt),
 	)
 	return err
@@ -164,18 +166,20 @@ func (s *SQLiteStore) GetPipeline(id string) (*core.Pipeline, error) {
 		startedAt     sql.NullTime
 		finishedAt    sql.NullTime
 	)
+	issueExpr := s.pipelineIssueSelectExpr()
 
-	err := s.db.QueryRow(`
+	query := fmt.Sprintf(`
 SELECT id, project_id, name, description, template, status, current_stage,
        stages_json, artifacts_json, config_json, branch_name, worktree_path, error_message,
-       max_total_retries, total_retries, run_count, last_error_type, COALESCE(task_item_id, ''), queued_at, last_heartbeat_at,
+       max_total_retries, total_retries, run_count, last_error_type, %s, queued_at, last_heartbeat_at,
 	   started_at, finished_at, created_at, updated_at
-FROM pipelines WHERE id=?`,
+FROM pipelines WHERE id=?`, issueExpr)
+	err := s.db.QueryRow(query,
 		id,
 	).Scan(
 		&p.ID, &p.ProjectID, &p.Name, &p.Description, &p.Template, &p.Status, &p.CurrentStage,
 		&stagesJSON, &artifactsJSON, &configJSON, &p.BranchName, &p.WorktreePath, &p.ErrorMessage,
-		&p.MaxTotalRetries, &p.TotalRetries, &p.RunCount, &p.LastErrorType, &p.TaskItemID, &queuedAt, &lastHeartbeat,
+		&p.MaxTotalRetries, &p.TotalRetries, &p.RunCount, &p.LastErrorType, &p.IssueID, &queuedAt, &lastHeartbeat,
 		&startedAt, &finishedAt, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -210,7 +214,10 @@ FROM pipelines WHERE id=?`,
 }
 
 func (s *SQLiteStore) ListPipelines(projectID string, filter core.PipelineFilter) ([]core.Pipeline, error) {
-	query := `SELECT id, project_id, name, template, status, current_stage, COALESCE(task_item_id, ''), created_at FROM pipelines WHERE project_id=?`
+	query := fmt.Sprintf(
+		`SELECT id, project_id, name, template, status, current_stage, %s, created_at FROM pipelines WHERE project_id=?`,
+		s.pipelineIssueSelectExpr(),
+	)
 	args := []any{projectID}
 	if filter.Status != "" {
 		query += ` AND status=?`
@@ -235,7 +242,7 @@ func (s *SQLiteStore) ListPipelines(projectID string, filter core.PipelineFilter
 	var out []core.Pipeline
 	for rows.Next() {
 		var p core.Pipeline
-		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Name, &p.Template, &p.Status, &p.CurrentStage, &p.TaskItemID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Name, &p.Template, &p.Status, &p.CurrentStage, &p.IssueID, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -686,217 +693,200 @@ func (s *SQLiteStore) DeleteChatSession(id string) error {
 	return nil
 }
 
-func (s *SQLiteStore) CreateTaskPlan(plan *core.TaskPlan) error {
-	sourceFilesJSON, err := marshalJSON(plan.SourceFiles)
+func (s *SQLiteStore) CreateIssue(issue *core.Issue) error {
+	if err := s.ensureIssueTables(); err != nil {
+		return err
+	}
+
+	normalized := normalizeIssueForPersist(issue)
+	if err := normalized.Validate(); err != nil {
+		return err
+	}
+
+	labelsJSON, err := marshalJSON(normalized.Labels)
 	if err != nil {
 		return err
 	}
-	fileContentsJSON, err := marshalJSON(plan.FileContents)
+	attachmentsJSON, err := marshalJSON(normalized.Attachments)
+	if err != nil {
+		return err
+	}
+	dependsOnJSON, err := marshalJSON(normalized.DependsOn)
+	if err != nil {
+		return err
+	}
+	blocksJSON, err := marshalJSON(normalized.Blocks)
 	if err != nil {
 		return err
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO task_plans (
-			id, project_id, session_id, name, status, wait_reason, fail_policy, review_round,
-			spec_profile, contract_version, contract_checksum, source_files, file_contents
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
-		plan.SpecProfile, plan.ContractVersion, plan.ContractChecksum, sourceFilesJSON, fileContentsJSON,
+		`INSERT INTO issues (
+			id, project_id, session_id, title, body, labels, milestone_id, attachments, depends_on, blocks,
+			priority, template, state, status, pipeline_id, version, superseded_by, external_id, fail_policy, closed_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		normalized.ID, normalized.ProjectID, nullableString(normalized.SessionID), normalized.Title, normalized.Body, labelsJSON,
+		normalized.MilestoneID, attachmentsJSON, dependsOnJSON, blocksJSON, normalized.Priority, normalized.Template,
+		string(normalized.State), string(normalized.Status), nullableString(normalized.PipelineID), normalized.Version,
+		normalized.SupersededBy, normalized.ExternalID, string(normalized.FailPolicy), nullableTimePointer(normalized.ClosedAt),
 	)
-	return err
-}
-
-func (s *SQLiteStore) GetTaskPlan(id string) (*core.TaskPlan, error) {
-	plan := &core.TaskPlan{}
-	var (
-		sourceFilesJSON  string
-		fileContentsJSON string
-	)
-	err := s.db.QueryRow(
-		`SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round,
-		        COALESCE(spec_profile, ''), COALESCE(contract_version, ''), COALESCE(contract_checksum, ''),
-		        COALESCE(source_files, '[]'), COALESCE(file_contents, '{}'), created_at, updated_at
-		 FROM task_plans WHERE id=?`,
-		id,
-	).Scan(
-		&plan.ID, &plan.ProjectID, &plan.SessionID, &plan.Name, &plan.Status, &plan.WaitReason, &plan.FailPolicy,
-		&plan.ReviewRound, &plan.SpecProfile, &plan.ContractVersion, &plan.ContractChecksum,
-		&sourceFilesJSON, &fileContentsJSON, &plan.CreatedAt, &plan.UpdatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("task plan %s not found", id)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSON(sourceFilesJSON, &plan.SourceFiles); err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSONObject(fileContentsJSON, &plan.FileContents); err != nil {
-		return nil, err
-	}
-	tasks, err := s.GetTaskItemsByPlan(plan.ID)
-	if err != nil {
-		return nil, err
-	}
-	plan.Tasks = tasks
-	return plan, nil
-}
-
-func (s *SQLiteStore) SaveTaskPlan(plan *core.TaskPlan) error {
-	sourceFilesJSON, err := marshalJSON(plan.SourceFiles)
 	if err != nil {
 		return err
 	}
-	fileContentsJSON, err := marshalJSON(plan.FileContents)
+	return s.bindPipelineIssueLink(normalized.PipelineID, normalized.ID)
+}
+
+func (s *SQLiteStore) GetIssue(id string) (*core.Issue, error) {
+	if err := s.ensureIssueTables(); err != nil {
+		return nil, err
+	}
+
+	issue := &core.Issue{}
+	var (
+		labelsJSON      string
+		attachmentsJSON string
+		dependsOnJSON   string
+		blocksJSON      string
+		closedAt        sql.NullTime
+	)
+	err := s.db.QueryRow(
+		`SELECT id, project_id, COALESCE(session_id, ''), title, COALESCE(body, ''), COALESCE(labels, '[]'),
+		        COALESCE(milestone_id, ''), COALESCE(attachments, '[]'), COALESCE(depends_on, '[]'), COALESCE(blocks, '[]'),
+		        priority, template, state, status, COALESCE(pipeline_id, ''), version, COALESCE(superseded_by, ''),
+		        COALESCE(external_id, ''), COALESCE(fail_policy, ''), closed_at, created_at, updated_at
+		 FROM issues WHERE id=?`,
+		id,
+	).Scan(
+		&issue.ID, &issue.ProjectID, &issue.SessionID, &issue.Title, &issue.Body, &labelsJSON,
+		&issue.MilestoneID, &attachmentsJSON, &dependsOnJSON, &blocksJSON, &issue.Priority,
+		&issue.Template, &issue.State, &issue.Status, &issue.PipelineID, &issue.Version, &issue.SupersededBy,
+		&issue.ExternalID, &issue.FailPolicy, &closedAt, &issue.CreatedAt, &issue.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("issue %s not found", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := unmarshalJSON(labelsJSON, &issue.Labels); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(attachmentsJSON, &issue.Attachments); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(dependsOnJSON, &issue.DependsOn); err != nil {
+		return nil, err
+	}
+	if err := unmarshalJSON(blocksJSON, &issue.Blocks); err != nil {
+		return nil, err
+	}
+	if closedAt.Valid {
+		t := closedAt.Time
+		issue.ClosedAt = &t
+	}
+	return issue, nil
+}
+
+func (s *SQLiteStore) SaveIssue(issue *core.Issue) error {
+	if err := s.ensureIssueTables(); err != nil {
+		return err
+	}
+
+	normalized := normalizeIssueForPersist(issue)
+	if err := normalized.Validate(); err != nil {
+		return err
+	}
+
+	labelsJSON, err := marshalJSON(normalized.Labels)
+	if err != nil {
+		return err
+	}
+	attachmentsJSON, err := marshalJSON(normalized.Attachments)
+	if err != nil {
+		return err
+	}
+	dependsOnJSON, err := marshalJSON(normalized.DependsOn)
+	if err != nil {
+		return err
+	}
+	blocksJSON, err := marshalJSON(normalized.Blocks)
 	if err != nil {
 		return err
 	}
 
 	_, err = s.db.Exec(`
-INSERT INTO task_plans (
-	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round,
-	spec_profile, contract_version, contract_checksum, source_files, file_contents
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO issues (
+	id, project_id, session_id, title, body, labels, milestone_id, attachments, depends_on, blocks,
+	priority, template, state, status, pipeline_id, version, superseded_by, external_id, fail_policy, closed_at
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id,
 	session_id=excluded.session_id,
-	name=excluded.name,
+	title=excluded.title,
+	body=excluded.body,
+	labels=excluded.labels,
+	milestone_id=excluded.milestone_id,
+	attachments=excluded.attachments,
+	depends_on=excluded.depends_on,
+	blocks=excluded.blocks,
+	priority=excluded.priority,
+	template=excluded.template,
+	state=excluded.state,
 	status=excluded.status,
-	wait_reason=excluded.wait_reason,
+	pipeline_id=excluded.pipeline_id,
+	version=excluded.version,
+	superseded_by=excluded.superseded_by,
+	external_id=excluded.external_id,
 	fail_policy=excluded.fail_policy,
-	review_round=excluded.review_round,
-	spec_profile=excluded.spec_profile,
-	contract_version=excluded.contract_version,
-	contract_checksum=excluded.contract_checksum,
-	source_files=excluded.source_files,
-	file_contents=excluded.file_contents,
+	closed_at=excluded.closed_at,
 	updated_at=CURRENT_TIMESTAMP`,
-		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
-		plan.SpecProfile, plan.ContractVersion, plan.ContractChecksum, sourceFilesJSON, fileContentsJSON,
+		normalized.ID, normalized.ProjectID, nullableString(normalized.SessionID), normalized.Title, normalized.Body, labelsJSON,
+		normalized.MilestoneID, attachmentsJSON, dependsOnJSON, blocksJSON, normalized.Priority, normalized.Template,
+		string(normalized.State), string(normalized.Status), nullableString(normalized.PipelineID), normalized.Version,
+		normalized.SupersededBy, normalized.ExternalID, string(normalized.FailPolicy), nullableTimePointer(normalized.ClosedAt),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.bindPipelineIssueLink(normalized.PipelineID, normalized.ID)
 }
 
-// ReplaceTaskPlanAndItems atomically upserts a plan and replaces all its task_items.
-func (s *SQLiteStore) ReplaceTaskPlanAndItems(plan *core.TaskPlan, items []core.TaskItem) error {
-	sourceFilesJSON, err := marshalJSON(plan.SourceFiles)
-	if err != nil {
-		return err
-	}
-	fileContentsJSON, err := marshalJSON(plan.FileContents)
-	if err != nil {
-		return err
+func (s *SQLiteStore) ListIssues(projectID string, filter core.IssueFilter) ([]core.Issue, int, error) {
+	if err := s.ensureIssueTables(); err != nil {
+		return nil, 0, err
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-
-	rollback := true
-	defer func() {
-		if rollback {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if _, err := tx.Exec(`
-INSERT INTO task_plans (
-	id, project_id, session_id, name, status, wait_reason, fail_policy, review_round,
-	spec_profile, contract_version, contract_checksum, source_files, file_contents
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET
-	project_id=excluded.project_id,
-	session_id=excluded.session_id,
-	name=excluded.name,
-	status=excluded.status,
-	wait_reason=excluded.wait_reason,
-	fail_policy=excluded.fail_policy,
-	review_round=excluded.review_round,
-	spec_profile=excluded.spec_profile,
-	contract_version=excluded.contract_version,
-	contract_checksum=excluded.contract_checksum,
-	source_files=excluded.source_files,
-	file_contents=excluded.file_contents,
-	updated_at=CURRENT_TIMESTAMP`,
-		plan.ID, plan.ProjectID, nullableString(plan.SessionID), plan.Name, plan.Status, plan.WaitReason, plan.FailPolicy, plan.ReviewRound,
-		plan.SpecProfile, plan.ContractVersion, plan.ContractChecksum, sourceFilesJSON, fileContentsJSON,
-	); err != nil {
-		return err
-	}
-
-	if _, err := tx.Exec(`DELETE FROM task_items WHERE plan_id=?`, plan.ID); err != nil {
-		return err
-	}
-
-	for i := range items {
-		item := items[i]
-		if err := item.Validate(); err != nil {
-			return err
-		}
-
-		labelsJSON, err := marshalJSON(item.Labels)
-		if err != nil {
-			return err
-		}
-		dependsOnJSON, err := marshalJSON(item.DependsOn)
-		if err != nil {
-			return err
-		}
-		inputsJSON, err := marshalJSON(item.Inputs)
-		if err != nil {
-			return err
-		}
-		outputsJSON, err := marshalJSON(item.Outputs)
-		if err != nil {
-			return err
-		}
-		acceptanceJSON, err := marshalJSON(item.Acceptance)
-		if err != nil {
-			return err
-		}
-		constraintsJSON, err := marshalJSON(item.Constraints)
-		if err != nil {
-			return err
-		}
-		template := item.Template
-		if strings.TrimSpace(template) == "" {
-			template = "standard"
-		}
-
-		if _, err := tx.Exec(
-			`INSERT INTO task_items (
-				id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints,
-				template, pipeline_id, external_id, status
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON,
-			inputsJSON, outputsJSON, acceptanceJSON, constraintsJSON, template,
-			nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
-		); err != nil {
-			return err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	rollback = false
-	return nil
-}
-
-func (s *SQLiteStore) ListTaskPlans(projectID string, filter core.TaskPlanFilter) ([]core.TaskPlan, error) {
-	query := `SELECT id, project_id, COALESCE(session_id, ''), name, status, wait_reason, fail_policy, review_round,
-	                 COALESCE(spec_profile, ''), COALESCE(contract_version, ''), COALESCE(contract_checksum, ''),
-	                 COALESCE(source_files, '[]'), COALESCE(file_contents, '{}'), created_at, updated_at
-	          FROM task_plans WHERE project_id=?`
+	where := []string{"project_id=?"}
 	args := []any{projectID}
-	if filter.Status != "" {
-		query += ` AND status=?`
+	if strings.TrimSpace(filter.Status) != "" {
+		where = append(where, "status=?")
 		args = append(args, filter.Status)
 	}
-	query += ` ORDER BY created_at DESC`
+	if strings.TrimSpace(filter.SessionID) != "" {
+		where = append(where, "COALESCE(session_id, '')=?")
+		args = append(args, filter.SessionID)
+	}
+	if strings.TrimSpace(filter.State) != "" {
+		where = append(where, "state=?")
+		args = append(args, filter.State)
+	}
+
+	whereClause := strings.Join(where, " AND ")
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM issues WHERE %s`, whereClause)
+	var total int
+	if err := s.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := fmt.Sprintf(`
+SELECT id, project_id, COALESCE(session_id, ''), title, COALESCE(body, ''), COALESCE(labels, '[]'),
+       COALESCE(milestone_id, ''), COALESCE(attachments, '[]'), COALESCE(depends_on, '[]'), COALESCE(blocks, '[]'),
+       priority, template, state, status, COALESCE(pipeline_id, ''), version, COALESCE(superseded_by, ''),
+       COALESCE(external_id, ''), COALESCE(fail_policy, ''), closed_at, created_at, updated_at
+FROM issues
+WHERE %s
+ORDER BY created_at DESC`, whereClause)
 	if filter.Limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, filter.Limit)
@@ -908,58 +898,72 @@ func (s *SQLiteStore) ListTaskPlans(projectID string, filter core.TaskPlanFilter
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
-	var out []core.TaskPlan
+	out := make([]core.Issue, 0)
 	for rows.Next() {
 		var (
-			plan             core.TaskPlan
-			sourceFilesJSON  string
-			fileContentsJSON string
+			issue           core.Issue
+			labelsJSON      string
+			attachmentsJSON string
+			dependsOnJSON   string
+			blocksJSON      string
+			closedAt        sql.NullTime
 		)
 		if err := rows.Scan(
-			&plan.ID, &plan.ProjectID, &plan.SessionID, &plan.Name, &plan.Status, &plan.WaitReason, &plan.FailPolicy,
-			&plan.ReviewRound, &plan.SpecProfile, &plan.ContractVersion, &plan.ContractChecksum,
-			&sourceFilesJSON, &fileContentsJSON, &plan.CreatedAt, &plan.UpdatedAt,
+			&issue.ID, &issue.ProjectID, &issue.SessionID, &issue.Title, &issue.Body, &labelsJSON,
+			&issue.MilestoneID, &attachmentsJSON, &dependsOnJSON, &blocksJSON, &issue.Priority,
+			&issue.Template, &issue.State, &issue.Status, &issue.PipelineID, &issue.Version, &issue.SupersededBy,
+			&issue.ExternalID, &issue.FailPolicy, &closedAt, &issue.CreatedAt, &issue.UpdatedAt,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		if err := unmarshalJSON(sourceFilesJSON, &plan.SourceFiles); err != nil {
-			return nil, err
+		if err := unmarshalJSON(labelsJSON, &issue.Labels); err != nil {
+			return nil, 0, err
 		}
-		if err := unmarshalJSONObject(fileContentsJSON, &plan.FileContents); err != nil {
-			return nil, err
+		if err := unmarshalJSON(attachmentsJSON, &issue.Attachments); err != nil {
+			return nil, 0, err
 		}
-		out = append(out, plan)
+		if err := unmarshalJSON(dependsOnJSON, &issue.DependsOn); err != nil {
+			return nil, 0, err
+		}
+		if err := unmarshalJSON(blocksJSON, &issue.Blocks); err != nil {
+			return nil, 0, err
+		}
+		if closedAt.Valid {
+			t := closedAt.Time
+			issue.ClosedAt = &t
+		}
+		out = append(out, issue)
 	}
-	if err := rows.Err(); err != nil {
+	return out, total, rows.Err()
+}
+
+func (s *SQLiteStore) GetActiveIssues(projectID string) ([]core.Issue, error) {
+	if err := s.ensureIssueTables(); err != nil {
 		return nil, err
 	}
 
-	for i := range out {
-		tasks, err := s.GetTaskItemsByPlan(out[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		out[i].Tasks = tasks
+	query := `
+SELECT id
+FROM issues
+WHERE state='open' AND status IN ('reviewing','queued','ready','executing')`
+	args := []any{}
+	if strings.TrimSpace(projectID) != "" {
+		query += ` AND project_id=?`
+		args = append(args, projectID)
 	}
-	return out, nil
-}
+	query += ` ORDER BY created_at DESC`
 
-func (s *SQLiteStore) GetActiveTaskPlans() ([]core.TaskPlan, error) {
-	rows, err := s.db.Query(
-		`SELECT id FROM task_plans
-		 WHERE status IN ('reviewing','approved','waiting_human','executing')
-		 ORDER BY created_at DESC`,
-	)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var ids []string
+	ids := make([]string, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
@@ -971,262 +975,58 @@ func (s *SQLiteStore) GetActiveTaskPlans() ([]core.TaskPlan, error) {
 		return nil, err
 	}
 
-	out := make([]core.TaskPlan, 0, len(ids))
+	out := make([]core.Issue, 0, len(ids))
 	for _, id := range ids {
-		plan, err := s.GetTaskPlan(id)
+		issue, err := s.GetIssue(id)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *plan)
+		out = append(out, *issue)
 	}
 	return out, nil
 }
 
-func (s *SQLiteStore) DeleteTaskItemsByPlan(planID string) error {
-	_, err := s.db.Exec(`DELETE FROM task_items WHERE plan_id=?`, planID)
-	return err
-}
+func (s *SQLiteStore) GetIssueByPipeline(pipelineID string) (*core.Issue, error) {
+	if err := s.ensureIssueTables(); err != nil {
+		return nil, err
+	}
 
-func (s *SQLiteStore) CreateTaskItem(item *core.TaskItem) error {
-	if err := item.Validate(); err != nil {
-		return err
-	}
-	labelsJSON, err := marshalJSON(item.Labels)
-	if err != nil {
-		return err
-	}
-	dependsOnJSON, err := marshalJSON(item.DependsOn)
-	if err != nil {
-		return err
-	}
-	inputsJSON, err := marshalJSON(item.Inputs)
-	if err != nil {
-		return err
-	}
-	outputsJSON, err := marshalJSON(item.Outputs)
-	if err != nil {
-		return err
-	}
-	acceptanceJSON, err := marshalJSON(item.Acceptance)
-	if err != nil {
-		return err
-	}
-	constraintsJSON, err := marshalJSON(item.Constraints)
-	if err != nil {
-		return err
-	}
-	template := item.Template
-	if strings.TrimSpace(template) == "" {
-		template = "standard"
-	}
-	_, err = s.db.Exec(
-		`INSERT INTO task_items (
-			id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints,
-			template, pipeline_id, external_id, status
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON,
-		inputsJSON, outputsJSON, acceptanceJSON, constraintsJSON, template,
-		nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
-	)
-	if err != nil {
-		return err
-	}
-	return s.bindPipelineTaskItemLink(item.PipelineID, item.ID)
-}
-
-func (s *SQLiteStore) GetTaskItem(id string) (*core.TaskItem, error) {
-	item := &core.TaskItem{}
-	var (
-		labelsJSON      string
-		dependsOnJSON   string
-		inputsJSON      string
-		outputsJSON     string
-		acceptanceJSON  string
-		constraintsJSON string
-	)
-	err := s.db.QueryRow(
-		`SELECT id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
-		 FROM task_items WHERE id=?`,
-		id,
-	).Scan(
-		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON,
-		&inputsJSON, &outputsJSON, &acceptanceJSON, &constraintsJSON, &item.Template,
-		&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("task item %s not found", id)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSON(labelsJSON, &item.Labels); err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSON(inputsJSON, &item.Inputs); err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSON(outputsJSON, &item.Outputs); err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSON(acceptanceJSON, &item.Acceptance); err != nil {
-		return nil, err
-	}
-	if err := unmarshalJSON(constraintsJSON, &item.Constraints); err != nil {
-		return nil, err
-	}
-	return item, nil
-}
-
-func (s *SQLiteStore) SaveTaskItem(item *core.TaskItem) error {
-	if err := item.Validate(); err != nil {
-		return err
-	}
-	labelsJSON, err := marshalJSON(item.Labels)
-	if err != nil {
-		return err
-	}
-	dependsOnJSON, err := marshalJSON(item.DependsOn)
-	if err != nil {
-		return err
-	}
-	inputsJSON, err := marshalJSON(item.Inputs)
-	if err != nil {
-		return err
-	}
-	outputsJSON, err := marshalJSON(item.Outputs)
-	if err != nil {
-		return err
-	}
-	acceptanceJSON, err := marshalJSON(item.Acceptance)
-	if err != nil {
-		return err
-	}
-	constraintsJSON, err := marshalJSON(item.Constraints)
-	if err != nil {
-		return err
-	}
-	template := item.Template
-	if strings.TrimSpace(template) == "" {
-		template = "standard"
-	}
-	_, err = s.db.Exec(`
-INSERT INTO task_items (
-	id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, pipeline_id, external_id, status
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET
-	plan_id=excluded.plan_id,
-	title=excluded.title,
-	description=excluded.description,
-	labels=excluded.labels,
-	depends_on=excluded.depends_on,
-	inputs=excluded.inputs,
-	outputs=excluded.outputs,
-	acceptance=excluded.acceptance,
-	constraints=excluded.constraints,
-	template=excluded.template,
-	pipeline_id=excluded.pipeline_id,
-	external_id=excluded.external_id,
-	status=excluded.status,
-	updated_at=CURRENT_TIMESTAMP`,
-		item.ID, item.PlanID, item.Title, item.Description, labelsJSON, dependsOnJSON,
-		inputsJSON, outputsJSON, acceptanceJSON, constraintsJSON, template,
-		nullableString(item.PipelineID), nullableString(item.ExternalID), item.Status,
-	)
-	if err != nil {
-		return err
-	}
-	return s.bindPipelineTaskItemLink(item.PipelineID, item.ID)
-}
-
-func (s *SQLiteStore) GetTaskItemsByPlan(planID string) ([]core.TaskItem, error) {
-	rows, err := s.db.Query(
-		`SELECT id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
-		 FROM task_items WHERE plan_id=?
-		 ORDER BY created_at, id`,
-		planID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []core.TaskItem
-	for rows.Next() {
-		var (
-			item            core.TaskItem
-			labelsJSON      string
-			dependsOnJSON   string
-			inputsJSON      string
-			outputsJSON     string
-			acceptanceJSON  string
-			constraintsJSON string
-		)
-		if err := rows.Scan(
-			&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON,
-			&inputsJSON, &outputsJSON, &acceptanceJSON, &constraintsJSON, &item.Template,
-			&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		if err := unmarshalJSON(labelsJSON, &item.Labels); err != nil {
-			return nil, err
-		}
-		if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
-			return nil, err
-		}
-		if err := unmarshalJSON(inputsJSON, &item.Inputs); err != nil {
-			return nil, err
-		}
-		if err := unmarshalJSON(outputsJSON, &item.Outputs); err != nil {
-			return nil, err
-		}
-		if err := unmarshalJSON(acceptanceJSON, &item.Acceptance); err != nil {
-			return nil, err
-		}
-		if err := unmarshalJSON(constraintsJSON, &item.Constraints); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *SQLiteStore) GetTaskItemByPipeline(pipelineID string) (*core.TaskItem, error) {
-	var mappedTaskID string
-	err := s.db.QueryRow(`SELECT COALESCE(task_item_id, '') FROM pipelines WHERE id=?`, pipelineID).Scan(&mappedTaskID)
+	var mappedIssueID string
+	query := fmt.Sprintf(`SELECT %s FROM pipelines WHERE id=?`, s.pipelineIssueSelectExpr())
+	err := s.db.QueryRow(query, pipelineID).Scan(&mappedIssueID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if strings.TrimSpace(mappedTaskID) != "" {
-		item, getErr := s.GetTaskItem(mappedTaskID)
+	if strings.TrimSpace(mappedIssueID) != "" {
+		issue, getErr := s.GetIssue(mappedIssueID)
 		if getErr == nil {
-			return item, nil
+			return issue, nil
 		}
 		if !strings.Contains(getErr.Error(), "not found") {
 			return nil, getErr
 		}
 	}
 
-	item := &core.TaskItem{}
+	issue := &core.Issue{}
 	var (
 		labelsJSON      string
+		attachmentsJSON string
 		dependsOnJSON   string
-		inputsJSON      string
-		outputsJSON     string
-		acceptanceJSON  string
-		constraintsJSON string
+		blocksJSON      string
+		closedAt        sql.NullTime
 	)
 	err = s.db.QueryRow(
-		`SELECT id, plan_id, title, description, labels, depends_on, inputs, outputs, acceptance, constraints, template, COALESCE(pipeline_id, ''), COALESCE(external_id, ''), status, created_at, updated_at
-		 FROM task_items WHERE pipeline_id=? LIMIT 1`,
+		`SELECT id, project_id, COALESCE(session_id, ''), title, COALESCE(body, ''), COALESCE(labels, '[]'),
+		        COALESCE(milestone_id, ''), COALESCE(attachments, '[]'), COALESCE(depends_on, '[]'), COALESCE(blocks, '[]'),
+		        priority, template, state, status, COALESCE(pipeline_id, ''), version, COALESCE(superseded_by, ''),
+		        COALESCE(external_id, ''), COALESCE(fail_policy, ''), closed_at, created_at, updated_at
+		 FROM issues WHERE pipeline_id=? LIMIT 1`,
 		pipelineID,
 	).Scan(
-		&item.ID, &item.PlanID, &item.Title, &item.Description, &labelsJSON, &dependsOnJSON,
-		&inputsJSON, &outputsJSON, &acceptanceJSON, &constraintsJSON, &item.Template,
-		&item.PipelineID, &item.ExternalID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+		&issue.ID, &issue.ProjectID, &issue.SessionID, &issue.Title, &issue.Body, &labelsJSON,
+		&issue.MilestoneID, &attachmentsJSON, &dependsOnJSON, &blocksJSON, &issue.Priority,
+		&issue.Template, &issue.State, &issue.Status, &issue.PipelineID, &issue.Version, &issue.SupersededBy,
+		&issue.ExternalID, &issue.FailPolicy, &closedAt, &issue.CreatedAt, &issue.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -1234,25 +1034,124 @@ func (s *SQLiteStore) GetTaskItemByPipeline(pipelineID string) (*core.TaskItem, 
 	if err != nil {
 		return nil, err
 	}
-	if err := unmarshalJSON(labelsJSON, &item.Labels); err != nil {
+	if err := unmarshalJSON(labelsJSON, &issue.Labels); err != nil {
 		return nil, err
 	}
-	if err := unmarshalJSON(dependsOnJSON, &item.DependsOn); err != nil {
+	if err := unmarshalJSON(attachmentsJSON, &issue.Attachments); err != nil {
 		return nil, err
 	}
-	if err := unmarshalJSON(inputsJSON, &item.Inputs); err != nil {
+	if err := unmarshalJSON(dependsOnJSON, &issue.DependsOn); err != nil {
 		return nil, err
 	}
-	if err := unmarshalJSON(outputsJSON, &item.Outputs); err != nil {
+	if err := unmarshalJSON(blocksJSON, &issue.Blocks); err != nil {
 		return nil, err
 	}
-	if err := unmarshalJSON(acceptanceJSON, &item.Acceptance); err != nil {
+	if closedAt.Valid {
+		t := closedAt.Time
+		issue.ClosedAt = &t
+	}
+	return issue, nil
+}
+
+func (s *SQLiteStore) SaveIssueAttachment(issueID, path, content string) error {
+	if err := s.ensureIssueTables(); err != nil {
+		return err
+	}
+	trimmedIssueID := strings.TrimSpace(issueID)
+	if trimmedIssueID == "" {
+		return errors.New("issue attachment issue_id is required")
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO issue_attachments (issue_id, path, content) VALUES (?,?,?)`,
+		trimmedIssueID, path, content,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetIssueAttachments(issueID string) ([]core.IssueAttachment, error) {
+	if err := s.ensureIssueTables(); err != nil {
 		return nil, err
 	}
-	if err := unmarshalJSON(constraintsJSON, &item.Constraints); err != nil {
+
+	rows, err := s.db.Query(
+		`SELECT id, issue_id, path, content, created_at
+		 FROM issue_attachments
+		 WHERE issue_id=?
+		 ORDER BY id`,
+		issueID,
+	)
+	if err != nil {
 		return nil, err
 	}
-	return item, nil
+	defer rows.Close()
+
+	out := make([]core.IssueAttachment, 0)
+	for rows.Next() {
+		var (
+			attachment core.IssueAttachment
+			id         int64
+		)
+		if err := rows.Scan(&id, &attachment.IssueID, &attachment.Path, &attachment.Content, &attachment.CreatedAt); err != nil {
+			return nil, err
+		}
+		attachment.ID = fmt.Sprintf("%d", id)
+		out = append(out, attachment)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) SaveIssueChange(change *core.IssueChange) error {
+	if err := s.ensureIssueTables(); err != nil {
+		return err
+	}
+	if change == nil {
+		return errors.New("issue change is nil")
+	}
+	if strings.TrimSpace(change.IssueID) == "" {
+		return errors.New("issue change issue_id is required")
+	}
+
+	_, err := s.db.Exec(
+		`INSERT INTO issue_changes (issue_id, field, old_value, new_value, reason, changed_by)
+		 VALUES (?,?,?,?,?,?)`,
+		change.IssueID, change.Field, change.OldValue, change.NewValue, change.Reason, change.ChangedBy,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetIssueChanges(issueID string) ([]core.IssueChange, error) {
+	if err := s.ensureIssueTables(); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, issue_id, field, old_value, new_value, reason, changed_by, created_at
+		 FROM issue_changes
+		 WHERE issue_id=?
+		 ORDER BY id`,
+		issueID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]core.IssueChange, 0)
+	for rows.Next() {
+		var (
+			change core.IssueChange
+			id     int64
+		)
+		if err := rows.Scan(
+			&id, &change.IssueID, &change.Field, &change.OldValue, &change.NewValue,
+			&change.Reason, &change.ChangedBy, &change.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		change.ID = fmt.Sprintf("%d", id)
+		out = append(out, change)
+	}
+	return out, rows.Err()
 }
 
 func (s *SQLiteStore) SaveReviewRecord(record *core.ReviewRecord) error {
@@ -1268,10 +1167,15 @@ func (s *SQLiteStore) SaveReviewRecord(record *core.ReviewRecord) error {
 	if record.Score != nil {
 		score = *record.Score
 	}
-	result, err := s.db.Exec(
-		`INSERT INTO review_records (plan_id, round, reviewer, verdict, issues, fixes, score)
+	issueColumn := s.reviewRecordIssueColumn()
+	query := fmt.Sprintf(
+		`INSERT INTO review_records (%s, round, reviewer, verdict, issues, fixes, score)
 		 VALUES (?,?,?,?,?,?,?)`,
-		record.PlanID, record.Round, record.Reviewer, record.Verdict, issuesJSON, fixesJSON, score,
+		issueColumn,
+	)
+	result, err := s.db.Exec(
+		query,
+		record.IssueID, record.Round, record.Reviewer, record.Verdict, issuesJSON, fixesJSON, score,
 	)
 	if err != nil {
 		return err
@@ -1284,13 +1188,18 @@ func (s *SQLiteStore) SaveReviewRecord(record *core.ReviewRecord) error {
 	return nil
 }
 
-func (s *SQLiteStore) GetReviewRecords(planID string) ([]core.ReviewRecord, error) {
-	rows, err := s.db.Query(
-		`SELECT id, plan_id, round, reviewer, verdict, issues, fixes, score, created_at
+func (s *SQLiteStore) GetReviewRecords(issueID string) ([]core.ReviewRecord, error) {
+	issueColumn := s.reviewRecordIssueColumn()
+	query := fmt.Sprintf(
+		`SELECT id, %s, round, reviewer, verdict, issues, fixes, score, created_at
 		 FROM review_records
-		 WHERE plan_id=?
+		 WHERE %s=?
 		 ORDER BY id`,
-		planID,
+		issueColumn, issueColumn,
+	)
+	rows, err := s.db.Query(
+		query,
+		issueID,
 	)
 	if err != nil {
 		return nil, err
@@ -1306,7 +1215,7 @@ func (s *SQLiteStore) GetReviewRecords(planID string) ([]core.ReviewRecord, erro
 			score      sql.NullInt64
 		)
 		if err := rows.Scan(
-			&record.ID, &record.PlanID, &record.Round, &record.Reviewer, &record.Verdict,
+			&record.ID, &record.IssueID, &record.Round, &record.Reviewer, &record.Verdict,
 			&issuesJSON, &fixesJSON, &score, &record.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -1326,22 +1235,138 @@ func (s *SQLiteStore) GetReviewRecords(planID string) ([]core.ReviewRecord, erro
 	return out, rows.Err()
 }
 
-func (s *SQLiteStore) bindPipelineTaskItemLink(pipelineID, taskItemID string) error {
+func (s *SQLiteStore) bindPipelineIssueLink(pipelineID, issueID string) error {
 	pipelineID = strings.TrimSpace(pipelineID)
-	taskItemID = strings.TrimSpace(taskItemID)
-	if pipelineID == "" || taskItemID == "" {
+	issueID = strings.TrimSpace(issueID)
+	if pipelineID == "" || issueID == "" {
 		return nil
 	}
-	_, err := s.db.Exec(`
+	issueColumn := s.pipelineIssueColumn()
+	query := fmt.Sprintf(`
 UPDATE pipelines
-SET task_item_id = CASE
-	WHEN COALESCE(task_item_id, '') = '' THEN ?
-	ELSE task_item_id
+SET %[1]s = CASE
+	WHEN COALESCE(%[1]s, '') = '' THEN ?
+	ELSE %[1]s
 END
-WHERE id=?`,
-		taskItemID, pipelineID,
-	)
+WHERE id=?`, issueColumn)
+	_, err := s.db.Exec(query, issueID, pipelineID)
 	return err
+}
+
+func (s *SQLiteStore) ensureIssueTables() error {
+	_, err := s.db.Exec(`
+CREATE TABLE IF NOT EXISTS issues (
+	id            TEXT PRIMARY KEY,
+	project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	session_id    TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
+	title         TEXT NOT NULL,
+	body          TEXT NOT NULL DEFAULT '',
+	labels        TEXT NOT NULL DEFAULT '[]',
+	milestone_id  TEXT NOT NULL DEFAULT '',
+	attachments   TEXT NOT NULL DEFAULT '[]',
+	depends_on    TEXT NOT NULL DEFAULT '[]',
+	blocks        TEXT NOT NULL DEFAULT '[]',
+	priority      INTEGER NOT NULL DEFAULT 0,
+	template      TEXT NOT NULL DEFAULT 'standard',
+	state         TEXT NOT NULL DEFAULT 'open',
+	status        TEXT NOT NULL DEFAULT 'draft',
+	pipeline_id   TEXT REFERENCES pipelines(id) ON DELETE SET NULL,
+	version       INTEGER NOT NULL DEFAULT 1,
+	superseded_by TEXT NOT NULL DEFAULT '',
+	external_id   TEXT NOT NULL DEFAULT '',
+	fail_policy   TEXT NOT NULL DEFAULT 'block',
+	closed_at     DATETIME,
+	created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id);
+CREATE INDEX IF NOT EXISTS idx_issues_project_status ON issues(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_issues_pipeline ON issues(pipeline_id);
+
+CREATE TABLE IF NOT EXISTS issue_attachments (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	issue_id   TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	path       TEXT NOT NULL,
+	content    TEXT NOT NULL,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_issue_attachments_issue ON issue_attachments(issue_id);
+
+CREATE TABLE IF NOT EXISTS issue_changes (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	issue_id   TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	field      TEXT NOT NULL,
+	old_value  TEXT,
+	new_value  TEXT,
+	reason     TEXT,
+	changed_by TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_issue_changes_issue ON issue_changes(issue_id);
+`)
+	if err != nil {
+		return fmt.Errorf("ensure issue tables: %w", err)
+	}
+	return nil
+}
+
+func normalizeIssueForPersist(issue *core.Issue) core.Issue {
+	if issue == nil {
+		return core.Issue{}
+	}
+	normalized := *issue
+	if strings.TrimSpace(normalized.Template) == "" {
+		normalized.Template = "standard"
+	}
+	if strings.TrimSpace(string(normalized.State)) == "" {
+		normalized.State = core.IssueStateOpen
+	}
+	if strings.TrimSpace(string(normalized.Status)) == "" {
+		normalized.Status = core.IssueStatusDraft
+	}
+	if strings.TrimSpace(string(normalized.FailPolicy)) == "" {
+		normalized.FailPolicy = core.FailBlock
+	}
+	if normalized.Labels == nil {
+		normalized.Labels = []string{}
+	}
+	if normalized.Attachments == nil {
+		normalized.Attachments = []string{}
+	}
+	if normalized.DependsOn == nil {
+		normalized.DependsOn = []string{}
+	}
+	if normalized.Blocks == nil {
+		normalized.Blocks = []string{}
+	}
+	if normalized.Version <= 0 {
+		normalized.Version = 1
+	}
+	return normalized
+}
+
+func (s *SQLiteStore) pipelineIssueColumn() string {
+	exists, err := hasColumn(s.db, "pipelines", "issue_id")
+	if err == nil && exists {
+		return "issue_id"
+	}
+	return "task_item_id"
+}
+
+func (s *SQLiteStore) pipelineIssueSelectExpr() string {
+	exists, err := hasColumn(s.db, "pipelines", "issue_id")
+	if err == nil && exists {
+		return "COALESCE(issue_id, '')"
+	}
+	return "COALESCE(task_item_id, '')"
+}
+
+func (s *SQLiteStore) reviewRecordIssueColumn() string {
+	exists, err := hasColumn(s.db, "review_records", "issue_id")
+	if err == nil && exists {
+		return "issue_id"
+	}
+	return "plan_id"
 }
 
 func marshalJSON(v any) (string, error) {
@@ -1380,4 +1405,11 @@ func nullableTime(t time.Time) any {
 		return nil
 	}
 	return t
+}
+
+func nullableTimePointer(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return *t
 }

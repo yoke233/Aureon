@@ -9,12 +9,12 @@ import (
 func TestMCPToolsFromRoleConfig(t *testing.T) {
 	role := acpclient.RoleProfile{
 		MCPTools: []string{
-			" query_plans ",
-			"query_plan_detail",
+			" query_issues ",
+			"query_issue_detail",
 			"query_pipelines",
 			"query_pipeline_logs",
 			"query_project_stats",
-			"query_plans",
+			"query_issues",
 			"unknown_tool",
 		},
 	}
@@ -25,8 +25,8 @@ func TestMCPToolsFromRoleConfig(t *testing.T) {
 	}
 
 	wantByName := map[string]string{
-		"workflow-query-query_plans":         "query_plans",
-		"workflow-query-query_plan_detail":   "query_plan_detail",
+		"workflow-query-query_issues":        "query_issues",
+		"workflow-query-query_issue_detail":  "query_issue_detail",
 		"workflow-query-query_pipelines":     "query_pipelines",
 		"workflow-query-query_pipeline_logs": "query_pipeline_logs",
 		"workflow-query-query_project_stats": "query_project_stats",

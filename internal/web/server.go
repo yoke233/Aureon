@@ -12,23 +12,54 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/secretary"
 	webassets "github.com/yoke233/ai-workflow/web"
 )
 
-// PlanManager defines the task-plan orchestration APIs required by plan handlers.
-type PlanManager interface {
-	CreateDraft(ctx context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error)
-	CreateDraftFromFiles(ctx context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error)
-	SubmitReview(ctx context.Context, planID string, input secretary.ReviewInput) (*core.TaskPlan, error)
-	ApplyPlanAction(ctx context.Context, planID string, action secretary.PlanAction) (*core.TaskPlan, error)
+// IssueCreateRequest defines request context for issue generation.
+type IssueCreateRequest struct {
+	Conversation string
+	ProjectName  string
+	RepoPath     string
+	Role         string
+	WorkDir      string
 }
 
-// A2ABridge defines A2A task APIs required by A2A JSON-RPC handlers.
-type A2ABridge interface {
-	SendMessage(ctx context.Context, input secretary.A2ASendMessageInput) (*secretary.A2ATaskSnapshot, error)
-	GetTask(ctx context.Context, input secretary.A2AGetTaskInput) (*secretary.A2ATaskSnapshot, error)
-	CancelTask(ctx context.Context, input secretary.A2ACancelTaskInput) (*secretary.A2ATaskSnapshot, error)
+// IssueCreateInput defines issue generation input.
+type IssueCreateInput struct {
+	ProjectID    string
+	SessionID    string
+	Name         string
+	FailPolicy   core.FailurePolicy
+	Request      IssueCreateRequest
+	SourceFiles  []string
+	FileContents map[string]string
+}
+
+// IssueReviewInput defines issue review context input.
+type IssueReviewInput struct {
+	Conversation   string
+	ProjectContext string
+	FileContents   map[string]string
+}
+
+// IssueFeedback carries human feedback for issue action.
+type IssueFeedback struct {
+	Category          string
+	Detail            string
+	ExpectedDirection string
+}
+
+// IssueAction defines review decision action for issues.
+type IssueAction struct {
+	Action   string
+	Feedback *IssueFeedback
+}
+
+// IssueManager defines issue orchestration APIs required by issue handlers.
+type IssueManager interface {
+	CreateIssues(ctx context.Context, input IssueCreateInput) ([]core.Issue, error)
+	SubmitForReview(ctx context.Context, issueID string, input IssueReviewInput) (*core.Issue, error)
+	ApplyIssueAction(ctx context.Context, issueID string, action IssueAction) (*core.Issue, error)
 }
 
 // PipelineExecutor defines pipeline human-action entrypoints used by web handlers.
@@ -46,19 +77,17 @@ type Config struct {
 	Addr                   string
 	AuthEnabled            bool
 	BearerToken            string
-	A2AEnabled             bool
-	A2AToken               string
-	A2AVersion             string
 	WebhookSecret          string
 	AllowedOrigins         []string
 	Frontend               fs.FS
 	Store                  core.Store
-	PlanManager            PlanManager
-	A2ABridge              A2ABridge
+	IssueManager           IssueManager
+	PlanManager            IssueManager // deprecated: use IssueManager
 	ChatAssistant          ChatAssistant
 	EventPublisher         chatEventPublisher
 	PipelineExec           PipelineExecutor
 	PipelineStageRoles     map[string]string
+	IssueParserRoleID      string
 	PlanParserRoleID       string
 	WebhookReplayer        WebhookDeliveryReplayer
 	Hub                    *Hub
@@ -109,10 +138,17 @@ func NewServer(cfg Config) *Server {
 
 	r.Get("/health", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
-	registerA2ARoutes(r, cfg)
 	webhookReplayer := registerWebhookRoutes(r, cfg.Store, cfg.PipelineExec, strings.TrimSpace(cfg.WebhookSecret), cfg.PipelineStageRoles)
 	if cfg.WebhookReplayer != nil {
 		webhookReplayer = cfg.WebhookReplayer
+	}
+	issueManager := cfg.IssueManager
+	if issueManager == nil {
+		issueManager = cfg.PlanManager
+	}
+	issueParserRoleID := strings.TrimSpace(cfg.IssueParserRoleID)
+	if issueParserRoleID == "" {
+		issueParserRoleID = strings.TrimSpace(cfg.PlanParserRoleID)
 	}
 	r.Route("/api/v1", func(r chi.Router) {
 		if cfg.AuthEnabled {
@@ -123,8 +159,7 @@ func NewServer(cfg Config) *Server {
 		registerRepoRoutes(r, cfg.Store)
 		registerPipelineRoutes(r, cfg.Store, cfg.PipelineExec, cfg.PipelineStageRoles)
 		registerChatRoutes(r, cfg.Store, cfg.ChatAssistant, cfg.EventPublisher)
-		registerPlanRoutes(r, cfg.Store, cfg.PlanManager, cfg.PlanParserRoleID)
-		registerTaskRoutes(r, cfg.Store)
+		registerIssueRoutes(r, cfg.Store, issueManager, issueParserRoleID)
 		registerAdminOpsRoutes(r, cfg.Store, cfg.BearerToken, webhookReplayer)
 		r.Get("/ws", hub.HandleWS)
 	})

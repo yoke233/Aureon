@@ -13,23 +13,22 @@ func TestReconcileJob_FixesBlockedTaskWhenDependencyAlreadyDone(t *testing.T) {
 	store := newReconcileTestStore(t)
 	defer store.Close()
 
-	createTestPlanAndTasks(t, store,
-		core.TaskItem{
-			ID:          "task-upstream",
-			PlanID:      "plan-reconcile-1",
-			Title:       "upstream done",
-			Description: "upstream done",
-			Status:      core.ItemDone,
-			ExternalID:  "11",
+	createTestIssues(t, store,
+		core.Issue{
+			ID:         "issue-upstream",
+			Title:      "upstream done",
+			Body:       "upstream done",
+			Status:     core.IssueStatusDone,
+			State:      core.IssueStateClosed,
+			ExternalID: "11",
 		},
-		core.TaskItem{
-			ID:          "task-downstream",
-			PlanID:      "plan-reconcile-1",
-			Title:       "downstream blocked",
-			Description: "downstream blocked",
-			Status:      core.ItemBlockedByFailure,
-			DependsOn:   []string{"task-upstream"},
-			ExternalID:  "12",
+		core.Issue{
+			ID:         "issue-downstream",
+			Title:      "downstream blocked",
+			Body:       "downstream blocked",
+			Status:     core.IssueStatusQueued,
+			DependsOn:  []string{"issue-upstream"},
+			ExternalID: "12",
 		},
 	)
 
@@ -38,12 +37,12 @@ func TestReconcileJob_FixesBlockedTaskWhenDependencyAlreadyDone(t *testing.T) {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 
-	task, err := store.GetTaskItem("task-downstream")
+	issue, err := store.GetIssue("issue-downstream")
 	if err != nil {
-		t.Fatalf("GetTaskItem() error = %v", err)
+		t.Fatalf("GetIssue() error = %v", err)
 	}
-	if task.Status != core.ItemReady {
-		t.Fatalf("task status = %s, want %s", task.Status, core.ItemReady)
+	if issue.Status != core.IssueStatusReady {
+		t.Fatalf("issue status = %s, want %s", issue.Status, core.IssueStatusReady)
 	}
 }
 
@@ -51,14 +50,13 @@ func TestReconcileJob_RepairsIssueLabelDrift(t *testing.T) {
 	store := newReconcileTestStore(t)
 	defer store.Close()
 
-	createTestPlanAndTasks(t, store,
-		core.TaskItem{
-			ID:          "task-only",
-			PlanID:      "plan-reconcile-2",
-			Title:       "sync me",
-			Description: "sync me",
-			Status:      core.ItemRunning,
-			ExternalID:  "22",
+	createTestIssues(t, store,
+		core.Issue{
+			ID:         "issue-only",
+			Title:      "sync me",
+			Body:       "sync me",
+			Status:     core.IssueStatusExecuting,
+			ExternalID: "22",
 		},
 	)
 
@@ -131,7 +129,7 @@ func newReconcileTestStore(t *testing.T) *storesqlite.SQLiteStore {
 	return store
 }
 
-func createTestPlanAndTasks(t *testing.T, store core.Store, tasks ...core.TaskItem) {
+func createTestIssues(t *testing.T, store core.Store, issues ...core.Issue) {
 	t.Helper()
 
 	project := &core.Project{ID: "proj-reconcile", Name: "proj-reconcile", RepoPath: t.TempDir()}
@@ -139,27 +137,16 @@ func createTestPlanAndTasks(t *testing.T, store core.Store, tasks ...core.TaskIt
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 
-	plan := &core.TaskPlan{
-		ID:         tasks[0].PlanID,
-		ProjectID:  project.ID,
-		Name:       "reconcile",
-		Status:     core.PlanExecuting,
-		FailPolicy: core.FailBlock,
-	}
-	if err := store.SaveTaskPlan(plan); err != nil {
-		t.Fatalf("SaveTaskPlan() error = %v", err)
-	}
-
-	for i := range tasks {
-		task := tasks[i]
-		if task.PlanID == "" {
-			task.PlanID = plan.ID
+	for i := range issues {
+		issue := issues[i]
+		if issue.ProjectID == "" {
+			issue.ProjectID = project.ID
 		}
-		if task.Template == "" {
-			task.Template = "standard"
+		if issue.Template == "" {
+			issue.Template = "standard"
 		}
-		if err := store.SaveTaskItem(&task); err != nil {
-			t.Fatalf("SaveTaskItem(%s) error = %v", task.ID, err)
+		if err := store.SaveIssue(&issue); err != nil {
+			t.Fatalf("SaveIssue(%s) error = %v", issue.ID, err)
 		}
 	}
 }
@@ -169,12 +156,12 @@ type fakeTrackerMirror struct {
 	syncDependencyCalls int
 }
 
-func (f *fakeTrackerMirror) UpdateStatus(context.Context, string, core.TaskItemStatus) error {
+func (f *fakeTrackerMirror) UpdateStatus(context.Context, string, core.IssueStatus) error {
 	f.updateCalls++
 	return nil
 }
 
-func (f *fakeTrackerMirror) SyncDependencies(context.Context, *core.TaskItem, []core.TaskItem) error {
+func (f *fakeTrackerMirror) SyncDependencies(context.Context, *core.Issue, []*core.Issue) error {
 	f.syncDependencyCalls++
 	return nil
 }

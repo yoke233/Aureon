@@ -10,10 +10,31 @@ type PipelineFilter struct {
 	Offset int
 }
 
-type TaskPlanFilter struct {
-	Status string
-	Limit  int
-	Offset int
+type IssueFilter struct {
+	Status    string
+	SessionID string
+	State     string
+	Limit     int
+	Offset    int
+}
+
+type IssueAttachment struct {
+	ID        string `json:"id"`
+	IssueID   string `json:"issue_id"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
+}
+
+type IssueChange struct {
+	ID        string `json:"id"`
+	IssueID   string `json:"issue_id"`
+	Field     string `json:"field"`
+	OldValue  string `json:"old_value"`
+	NewValue  string `json:"new_value"`
+	Reason    string `json:"reason"`
+	ChangedBy string `json:"changed_by"`
+	CreatedAt string `json:"created_at"`
 }
 
 type LogEntry struct {
@@ -68,20 +89,19 @@ type Store interface {
 	UpdateChatSession(s *ChatSession) error
 	ListChatSessions(projectID string) ([]ChatSession, error)
 
-	CreateTaskPlan(p *TaskPlan) error
-	GetTaskPlan(id string) (*TaskPlan, error)
-	SaveTaskPlan(p *TaskPlan) error
-	ListTaskPlans(projectID string, filter TaskPlanFilter) ([]TaskPlan, error)
-	GetActiveTaskPlans() ([]TaskPlan, error)
-
-	CreateTaskItem(item *TaskItem) error
-	GetTaskItem(id string) (*TaskItem, error)
-	SaveTaskItem(item *TaskItem) error
-	GetTaskItemsByPlan(planID string) ([]TaskItem, error)
-	GetTaskItemByPipeline(pipelineID string) (*TaskItem, error)
+	CreateIssue(i *Issue) error
+	GetIssue(id string) (*Issue, error)
+	SaveIssue(i *Issue) error
+	ListIssues(projectID string, filter IssueFilter) ([]Issue, int, error)
+	GetActiveIssues(projectID string) ([]Issue, error)
+	GetIssueByPipeline(pipelineID string) (*Issue, error)
+	SaveIssueAttachment(issueID, path, content string) error
+	GetIssueAttachments(issueID string) ([]IssueAttachment, error)
+	SaveIssueChange(change *IssueChange) error
+	GetIssueChanges(issueID string) ([]IssueChange, error)
 
 	SaveReviewRecord(r *ReviewRecord) error
-	GetReviewRecords(planID string) ([]ReviewRecord, error)
+	GetReviewRecords(issueID string) ([]ReviewRecord, error)
 
 	Close() error
 }

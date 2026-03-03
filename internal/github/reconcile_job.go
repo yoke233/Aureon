@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,10 +13,10 @@ import (
 const defaultReconcileInterval = 10 * time.Minute
 
 type reconcileStatusSyncer interface {
-	RepairTask(ctx context.Context, item *core.TaskItem, allItems []core.TaskItem) error
+	RepairTask(ctx context.Context, issue *core.Issue, allIssues []*core.Issue) error
 }
 
-// ReconcileJob repairs task status drift and recovers missed webhook side effects periodically.
+// ReconcileJob repairs issue status drift and recovers missed webhook side effects periodically.
 type ReconcileJob struct {
 	Store                core.Store
 	Syncer               reconcileStatusSyncer
@@ -59,7 +60,7 @@ func (j *ReconcileJob) RunIfDue(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// RunOnce scans active task plans and repairs final-state drift.
+// RunOnce scans active issues and repairs final-state drift.
 func (j *ReconcileJob) RunOnce(ctx context.Context) error {
 	if j == nil {
 		return nil
@@ -68,40 +69,41 @@ func (j *ReconcileJob) RunOnce(ctx context.Context) error {
 		return errors.New("reconcile job store is required")
 	}
 
-	plans, err := j.Store.GetActiveTaskPlans()
+	activeIssues, err := j.Store.GetActiveIssues("")
 	if err != nil {
 		return err
 	}
 
-	for _, plan := range plans {
-		tasks, taskErr := j.Store.GetTaskItemsByPlan(plan.ID)
-		if taskErr != nil {
-			return taskErr
-		}
-		byID := make(map[string]core.TaskItem, len(tasks))
-		for _, task := range tasks {
-			byID[task.ID] = task
-		}
+	byID := make(map[string]*core.Issue, len(activeIssues))
+	allIssues := make([]*core.Issue, 0, len(activeIssues))
+	for i := range activeIssues {
+		issue := &activeIssues[i]
+		byID[issue.ID] = issue
+		allIssues = append(allIssues, issue)
+	}
 
-		for i := range tasks {
-			task := tasks[i]
-			if task.Status == core.ItemBlockedByFailure && dependenciesSatisfied(task, byID) {
-				task.Status = core.ItemReady
-				task.UpdatedAt = j.now()
-				if saveErr := j.Store.SaveTaskItem(&task); saveErr != nil {
-					return saveErr
-				}
-				tasks[i] = task
-				byID[task.ID] = task
-			}
+	for _, issue := range allIssues {
+		if issue.Status != core.IssueStatusQueued {
+			continue
 		}
+		satisfied, depErr := dependenciesSatisfied(issue, byID, j.Store)
+		if depErr != nil {
+			return depErr
+		}
+		if !satisfied {
+			continue
+		}
+		issue.Status = core.IssueStatusReady
+		issue.UpdatedAt = j.now()
+		if saveErr := j.Store.SaveIssue(issue); saveErr != nil {
+			return saveErr
+		}
+	}
 
-		if j.Syncer != nil {
-			for i := range tasks {
-				task := tasks[i]
-				if syncErr := j.Syncer.RepairTask(ctx, &task, tasks); syncErr != nil {
-					return syncErr
-				}
+	if j.Syncer != nil {
+		for _, issue := range allIssues {
+			if syncErr := j.Syncer.RepairTask(ctx, issue, allIssues); syncErr != nil {
+				return syncErr
 			}
 		}
 	}
@@ -114,20 +116,33 @@ func (j *ReconcileJob) RunOnce(ctx context.Context) error {
 	return nil
 }
 
-func dependenciesSatisfied(task core.TaskItem, byID map[string]core.TaskItem) bool {
-	if len(task.DependsOn) == 0 {
-		return true
+func dependenciesSatisfied(issue *core.Issue, byID map[string]*core.Issue, store core.Store) (bool, error) {
+	if issue == nil || len(issue.DependsOn) == 0 {
+		return true, nil
 	}
-	for _, depID := range task.DependsOn {
+	for _, depID := range issue.DependsOn {
 		dep, ok := byID[depID]
 		if !ok {
-			return false
+			loaded, err := store.GetIssue(depID)
+			if err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "not found") {
+					return false, nil
+				}
+				return false, err
+			}
+			dep = loaded
+			byID[depID] = dep
 		}
-		if dep.Status != core.ItemDone && dep.Status != core.ItemSkipped {
-			return false
+		if dep == nil {
+			return false, nil
+		}
+		if dep.Status != core.IssueStatusDone &&
+			dep.Status != core.IssueStatusSuperseded &&
+			dep.Status != core.IssueStatusAbandoned {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 func (j *ReconcileJob) now() time.Time {

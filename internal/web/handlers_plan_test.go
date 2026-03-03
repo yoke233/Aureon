@@ -14,10 +14,9 @@ import (
 	"testing"
 
 	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/secretary"
 )
 
-func TestCreateListGetPlanAndDAG(t *testing.T) {
+func TestPlanRoutesCreateListGetAndDAG(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
 		ID:       "proj-plan-api",
@@ -31,101 +30,91 @@ func TestCreateListGetPlanAndDAG(t *testing.T) {
 		ID:        "chat-20260301-planapi01",
 		ProjectID: project.ID,
 		Messages: []core.ChatMessage{
-			{Role: "user", Content: "把 OAuth 登录拆成任务"},
+			{Role: "user", Content: "split oauth flow into issues"},
 		},
 	}
 	if err := store.CreateChatSession(session); err != nil {
 		t.Fatalf("seed chat session: %v", err)
 	}
 
-	createCalled := false
-	planManager := &testPlanManager{
-		createDraftFn: func(_ context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error) {
-			createCalled = true
-			planID := core.NewTaskPlanID()
-			planName := strings.TrimSpace(input.Name)
-			if planName == "" {
-				planName = planID
-			}
-			failPolicy := input.FailPolicy
-			if failPolicy == "" {
-				failPolicy = core.FailBlock
-			}
-			plan := &core.TaskPlan{
-				ID:         planID,
+	createCalls := 0
+	manager := &testPlanManager{
+		createIssuesFn: func(_ context.Context, input IssueCreateInput) ([]core.Issue, error) {
+			createCalls++
+			issue := core.Issue{
+				ID:         core.NewIssueID(),
 				ProjectID:  input.ProjectID,
 				SessionID:  input.SessionID,
-				Name:       planName,
-				Status:     core.PlanDraft,
-				WaitReason: core.WaitNone,
-				FailPolicy: failPolicy,
+				Title:      strings.TrimSpace(input.Name),
+				Body:       "oauth breakdown",
+				Template:   "standard",
+				State:      core.IssueStateOpen,
+				Status:     core.IssueStatusDraft,
+				FailPolicy: input.FailPolicy,
 			}
-			if err := store.CreateTaskPlan(plan); err != nil {
+			if issue.Title == "" {
+				issue.Title = issue.ID
+			}
+			if issue.FailPolicy == "" {
+				issue.FailPolicy = core.FailBlock
+			}
+			if err := store.CreateIssue(&issue); err != nil {
 				return nil, err
 			}
-			return store.GetTaskPlan(plan.ID)
+			loaded, err := store.GetIssue(issue.ID)
+			if err != nil {
+				return nil, err
+			}
+			return []core.Issue{*loaded}, nil
 		},
 	}
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
+
+	srv := NewServer(Config{Store: store, PlanManager: manager})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	rawBody, err := json.Marshal(map[string]any{
+	createResp := doIssuePost(t, ts, "/api/v1/projects/proj-plan-api/plans", map[string]any{
 		"session_id": session.ID,
 		"name":       "oauth-plan",
 	})
-	if err != nil {
-		t.Fatalf("marshal create plan body: %v", err)
-	}
-
-	createResp, err := http.Post(
-		ts.URL+"/api/v1/projects/proj-plan-api/plans",
-		"application/json",
-		bytes.NewReader(rawBody),
-	)
-	if err != nil {
-		t.Fatalf("POST /api/v1/projects/{pid}/plans: %v", err)
-	}
 	defer createResp.Body.Close()
 	if createResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", createResp.StatusCode)
 	}
 
-	var created core.TaskPlan
+	var created struct {
+		Issue core.Issue   `json:"issue"`
+		Items []core.Issue `json:"items"`
+	}
 	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created plan: %v", err)
+		t.Fatalf("decode created issue: %v", err)
 	}
-	if created.ID == "" {
-		t.Fatal("expected non-empty plan id")
+	if created.Issue.ID == "" {
+		t.Fatal("expected non-empty issue id")
 	}
-	if created.Status != core.PlanDraft {
-		t.Fatalf("expected status draft, got %s", created.Status)
+	if created.Issue.Status != core.IssueStatusDraft {
+		t.Fatalf("expected status draft, got %s", created.Issue.Status)
 	}
-	if !createCalled {
-		t.Fatal("expected create draft to be delegated to plan manager")
+	if len(created.Items) != 1 || created.Items[0].ID != created.Issue.ID {
+		t.Fatalf("unexpected create response items: %#v", created.Items)
+	}
+	if createCalls != 1 {
+		t.Fatalf("expected CreateIssues called once, got %d", createCalls)
 	}
 
-	task1 := core.TaskItem{
-		ID:          "task-planapi-1",
-		PlanID:      created.ID,
-		Title:       "设计 OAuth 回调路由",
-		Description: "设计 OAuth 回调路由并定义请求参数",
-		Status:      core.ItemPending,
+	dependent := core.Issue{
+		ID:         "issue-planapi-2",
+		ProjectID:  project.ID,
+		SessionID:  session.ID,
+		Title:      "add auth state tests",
+		Body:       "cover token refresh path",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusExecuting,
+		DependsOn:  []string{created.Issue.ID},
+		FailPolicy: core.FailBlock,
 	}
-	task2 := core.TaskItem{
-		ID:          "task-planapi-2",
-		PlanID:      created.ID,
-		Title:       "补齐登录状态测试",
-		Description: "补齐登录状态测试并覆盖 token 刷新路径",
-		DependsOn:   []string{task1.ID},
-		Status:      core.ItemRunning,
-	}
-	if err := store.CreateTaskItem(&task1); err != nil {
-		t.Fatalf("seed task1: %v", err)
-	}
-	if err := store.CreateTaskItem(&task2); err != nil {
-		t.Fatalf("seed task2: %v", err)
-	}
+	mustCreateIssue(t, store, dependent)
 
 	listResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans?status=draft&limit=10&offset=0")
 	if err != nil {
@@ -136,22 +125,18 @@ func TestCreateListGetPlanAndDAG(t *testing.T) {
 		t.Fatalf("expected 200, got %d", listResp.StatusCode)
 	}
 
-	var listed struct {
-		Items  []core.TaskPlan `json:"items"`
-		Total  int             `json:"total"`
-		Offset int             `json:"offset"`
-	}
+	var listed issueListResponse
 	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
-		t.Fatalf("decode list plans response: %v", err)
+		t.Fatalf("decode list response: %v", err)
 	}
 	if listed.Total != 1 {
 		t.Fatalf("expected total=1, got %d", listed.Total)
 	}
-	if len(listed.Items) != 1 || listed.Items[0].ID != created.ID {
-		t.Fatalf("unexpected list items: %#v", listed.Items)
+	if len(listed.Items) != 1 || listed.Items[0].ID != created.Issue.ID {
+		t.Fatalf("unexpected listed items: %#v", listed.Items)
 	}
 
-	getResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans/" + created.ID)
+	getResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans/" + created.Issue.ID)
 	if err != nil {
 		t.Fatalf("GET /api/v1/projects/{pid}/plans/{id}: %v", err)
 	}
@@ -160,18 +145,15 @@ func TestCreateListGetPlanAndDAG(t *testing.T) {
 		t.Fatalf("expected 200, got %d", getResp.StatusCode)
 	}
 
-	var got core.TaskPlan
+	var got core.Issue
 	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
-		t.Fatalf("decode get plan response: %v", err)
+		t.Fatalf("decode get response: %v", err)
 	}
-	if got.ID != created.ID {
-		t.Fatalf("expected plan id %s, got %s", created.ID, got.ID)
-	}
-	if len(got.Tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(got.Tasks))
+	if got.ID != created.Issue.ID {
+		t.Fatalf("expected issue id %s, got %s", created.Issue.ID, got.ID)
 	}
 
-	dagResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans/" + created.ID + "/dag")
+	dagResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-api/plans/" + created.Issue.ID + "/dag")
 	if err != nil {
 		t.Fatalf("GET /api/v1/projects/{pid}/plans/{id}/dag: %v", err)
 	}
@@ -180,26 +162,7 @@ func TestCreateListGetPlanAndDAG(t *testing.T) {
 		t.Fatalf("expected 200, got %d", dagResp.StatusCode)
 	}
 
-	var dag struct {
-		Nodes []struct {
-			ID         string              `json:"id"`
-			Title      string              `json:"title"`
-			Status     core.TaskItemStatus `json:"status"`
-			PipelineID string              `json:"pipeline_id"`
-		} `json:"nodes"`
-		Edges []struct {
-			From string `json:"from"`
-			To   string `json:"to"`
-		} `json:"edges"`
-		Stats struct {
-			Total   int `json:"total"`
-			Pending int `json:"pending"`
-			Ready   int `json:"ready"`
-			Running int `json:"running"`
-			Done    int `json:"done"`
-			Failed  int `json:"failed"`
-		} `json:"stats"`
-	}
+	var dag issueDAGResponse
 	if err := json.NewDecoder(dagResp.Body).Decode(&dag); err != nil {
 		t.Fatalf("decode dag response: %v", err)
 	}
@@ -209,12 +172,15 @@ func TestCreateListGetPlanAndDAG(t *testing.T) {
 	if len(dag.Edges) != 1 {
 		t.Fatalf("expected 1 edge, got %d", len(dag.Edges))
 	}
+	if dag.Edges[0].From != created.Issue.ID || dag.Edges[0].To != dependent.ID {
+		t.Fatalf("unexpected edge: %#v", dag.Edges[0])
+	}
 	if dag.Stats.Total != 2 || dag.Stats.Pending != 1 || dag.Stats.Running != 1 {
-		t.Fatalf("unexpected stats: %#v", dag.Stats)
+		t.Fatalf("unexpected dag stats: %#v", dag.Stats)
 	}
 }
 
-func TestCreatePlanUsesConfiguredPlanParserRole(t *testing.T) {
+func TestPlanCreateUsesConfiguredIssueParserRole(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
 		ID:       "proj-plan-role-api",
@@ -228,7 +194,7 @@ func TestCreatePlanUsesConfiguredPlanParserRole(t *testing.T) {
 		ID:        "chat-20260302-planrole01",
 		ProjectID: project.ID,
 		Messages: []core.ChatMessage{
-			{Role: "user", Content: "请生成任务计划"},
+			{Role: "user", Content: "generate issues"},
 		},
 	}
 	if err := store.CreateChatSession(session); err != nil {
@@ -236,68 +202,58 @@ func TestCreatePlanUsesConfiguredPlanParserRole(t *testing.T) {
 	}
 
 	gotRole := ""
-	planManager := &testPlanManager{
-		createDraftFn: func(_ context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error) {
+	manager := &testPlanManager{
+		createIssuesFn: func(_ context.Context, input IssueCreateInput) ([]core.Issue, error) {
 			gotRole = strings.TrimSpace(input.Request.Role)
-			plan := &core.TaskPlan{
-				ID:         "plan-20260302-role",
+			issue := core.Issue{
+				ID:         "issue-20260302-role",
 				ProjectID:  input.ProjectID,
 				SessionID:  input.SessionID,
-				Name:       "role-plan",
-				Status:     core.PlanDraft,
-				WaitReason: core.WaitNone,
+				Title:      "role-issue",
+				Template:   "standard",
+				State:      core.IssueStateOpen,
+				Status:     core.IssueStatusDraft,
 				FailPolicy: core.FailBlock,
 			}
-			if err := store.CreateTaskPlan(plan); err != nil {
+			if err := store.CreateIssue(&issue); err != nil {
 				return nil, err
 			}
-			return store.GetTaskPlan(plan.ID)
+			return []core.Issue{issue}, nil
 		},
 	}
 
 	srv := NewServer(Config{
 		Store:            store,
-		PlanManager:      planManager,
+		PlanManager:      manager,
 		PlanParserRoleID: "plan_parser_custom",
 	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	rawBody, err := json.Marshal(map[string]any{
+	resp := doIssuePost(t, ts, "/api/v1/projects/proj-plan-role-api/plans", map[string]any{
 		"session_id": session.ID,
 		"name":       "role-plan",
 	})
-	if err != nil {
-		t.Fatalf("marshal create plan body: %v", err)
-	}
-
-	resp, err := http.Post(
-		ts.URL+"/api/v1/projects/proj-plan-role-api/plans",
-		"application/json",
-		bytes.NewReader(rawBody),
-	)
-	if err != nil {
-		t.Fatalf("POST /api/v1/projects/{pid}/plans: %v", err)
-	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 	if gotRole != "plan_parser_custom" {
-		t.Fatalf("expected create draft request role %q, got %q", "plan_parser_custom", gotRole)
+		t.Fatalf("expected role %q, got %q", "plan_parser_custom", gotRole)
 	}
 }
 
-func TestCreatePlanFromFilesHappyPath(t *testing.T) {
+func TestPlanCreateFromFilesPassesSourceFilesAndReviewInput(t *testing.T) {
 	store := newTestStore(t)
+
 	repoRoot := filepath.Join(t.TempDir(), "repo-plan-from-files")
 	if err := os.MkdirAll(filepath.Join(repoRoot, "docs"), 0o755); err != nil {
-		t.Fatalf("mkdir repo docs: %v", err)
+		t.Fatalf("mkdir docs: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "docs", "plan.md"), []byte("任务拆分草案\n- OAuth 回调\n- 状态校验"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, "docs", "plan.md"), []byte("oauth notes"), 0o644); err != nil {
 		t.Fatalf("write docs/plan.md: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("repo readme"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("readme notes"), 0o644); err != nil {
 		t.Fatalf("write README.md: %v", err)
 	}
 
@@ -313,139 +269,129 @@ func TestCreatePlanFromFilesHappyPath(t *testing.T) {
 		ID:        "chat-20260302-planfiles01",
 		ProjectID: project.ID,
 		Messages: []core.ChatMessage{
-			{Role: "user", Content: "请基于文件生成任务计划"},
+			{Role: "user", Content: "extract issues from docs"},
 		},
 	}
 	if err := store.CreateChatSession(session); err != nil {
 		t.Fatalf("seed chat session: %v", err)
 	}
 
-	createFromFilesCalls := 0
-	submitReviewCalls := 0
-	var capturedCreateInput secretary.CreateDraftInput
-	var capturedReviewInput secretary.ReviewInput
-	planManager := &testPlanManager{
-		createDraftFromFilesFn: func(_ context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error) {
-			createFromFilesCalls++
+	createCalls := 0
+	submitCalls := 0
+	var capturedCreateInput IssueCreateInput
+	var capturedReviewInput IssueReviewInput
+
+	manager := &testPlanManager{
+		createIssuesFn: func(_ context.Context, input IssueCreateInput) ([]core.Issue, error) {
+			createCalls++
 			capturedCreateInput = input
-			planID := core.NewTaskPlanID()
-			planName := strings.TrimSpace(input.Name)
-			if planName == "" {
-				planName = planID
-			}
-			failPolicy := input.FailPolicy
-			if failPolicy == "" {
-				failPolicy = core.FailBlock
-			}
-			plan := &core.TaskPlan{
-				ID:         planID,
+			issue := core.Issue{
+				ID:         "issue-20260302-fromfiles",
 				ProjectID:  input.ProjectID,
 				SessionID:  input.SessionID,
-				Name:       planName,
-				Status:     core.PlanDraft,
-				WaitReason: core.WaitNone,
-				FailPolicy: failPolicy,
+				Title:      "from-files-issue",
+				Template:   "standard",
+				State:      core.IssueStateOpen,
+				Status:     core.IssueStatusDraft,
+				FailPolicy: input.FailPolicy,
 			}
-			if err := store.CreateTaskPlan(plan); err != nil {
+			if err := store.CreateIssue(&issue); err != nil {
 				return nil, err
 			}
-			return store.GetTaskPlan(plan.ID)
+			return []core.Issue{issue}, nil
 		},
-		submitReviewFn: func(_ context.Context, planID string, input secretary.ReviewInput) (*core.TaskPlan, error) {
-			submitReviewCalls++
+		submitForReviewFn: func(_ context.Context, issueID string, input IssueReviewInput) (*core.Issue, error) {
+			submitCalls++
 			capturedReviewInput = input
-			loaded, err := store.GetTaskPlan(planID)
+			issue, err := store.GetIssue(issueID)
 			if err != nil {
 				return nil, err
 			}
-			loaded.Status = core.PlanReviewing
-			loaded.WaitReason = core.WaitNone
-			if err := store.SaveTaskPlan(loaded); err != nil {
+			issue.Status = core.IssueStatusReviewing
+			if err := store.SaveIssue(issue); err != nil {
 				return nil, err
 			}
-			return store.GetTaskPlan(planID)
+			return store.GetIssue(issueID)
 		},
 	}
 
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
+	srv := NewServer(Config{Store: store, PlanManager: manager})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	rawBody, err := json.Marshal(map[string]any{
-		"session_id":  session.ID,
-		"name":        "from-files-plan",
-		"fail_policy": string(core.FailHuman),
-		"file_paths":  []string{"docs/plan.md", "README.md"},
+	resp := doIssuePost(t, ts, "/api/v1/projects/proj-plan-from-files/plans/from-files", map[string]any{
+		"session_id": session.ID,
+		"name":       "from-files-plan",
+		"file_paths": []string{"docs/plan.md", "README.md"},
 	})
-	if err != nil {
-		t.Fatalf("marshal create plan from files body: %v", err)
-	}
-	resp, err := http.Post(
-		ts.URL+"/api/v1/projects/proj-plan-from-files/plans/from-files",
-		"application/json",
-		bytes.NewReader(rawBody),
-	)
-	if err != nil {
-		t.Fatalf("POST /api/v1/projects/{pid}/plans/from-files: %v", err)
-	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 
 	var created struct {
-		ID           string              `json:"id"`
-		Status       core.TaskPlanStatus `json:"status"`
-		SourceFiles  []string            `json:"source_files"`
-		FileContents map[string]string   `json:"file_contents"`
+		Issue        core.Issue        `json:"issue"`
+		Items        []core.Issue      `json:"items"`
+		SourceFiles  []string          `json:"source_files"`
+		FileContents map[string]string `json:"file_contents"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create plan from files response: %v", err)
+		t.Fatalf("decode create-from-files response: %v", err)
 	}
-	if created.ID == "" {
-		t.Fatal("expected non-empty plan id")
+	if created.Issue.ID == "" {
+		t.Fatal("expected non-empty issue id")
 	}
+	if created.Issue.Status != core.IssueStatusReviewing {
+		t.Fatalf("expected issue status reviewing, got %s", created.Issue.Status)
+	}
+	if createCalls != 1 {
+		t.Fatalf("expected CreateIssues called once, got %d", createCalls)
+	}
+	if submitCalls != 1 {
+		t.Fatalf("expected SubmitForReview called once, got %d", submitCalls)
+	}
+
 	wantSourceFiles := []string{"docs/plan.md", "README.md"}
-	if !reflect.DeepEqual(created.SourceFiles, wantSourceFiles) {
-		t.Fatalf("unexpected source_files, want %#v got %#v", wantSourceFiles, created.SourceFiles)
-	}
 	wantFileContents := map[string]string{
-		"docs/plan.md": "任务拆分草案\n- OAuth 回调\n- 状态校验",
-		"README.md":    "repo readme",
-	}
-	if !reflect.DeepEqual(created.FileContents, wantFileContents) {
-		t.Fatalf("unexpected file_contents, want %#v got %#v", wantFileContents, created.FileContents)
-	}
-	if createFromFilesCalls != 1 {
-		t.Fatalf("expected CreateDraftFromFiles called once, got %d", createFromFilesCalls)
-	}
-	if submitReviewCalls != 1 {
-		t.Fatalf("expected SubmitReview called once, got %d", submitReviewCalls)
+		"docs/plan.md": "oauth notes",
+		"README.md":    "readme notes",
 	}
 	if !reflect.DeepEqual(capturedCreateInput.SourceFiles, wantSourceFiles) {
-		t.Fatalf("unexpected CreateDraftFromFiles.SourceFiles, want %#v got %#v", wantSourceFiles, capturedCreateInput.SourceFiles)
+		t.Fatalf("unexpected create input source files: %#v", capturedCreateInput.SourceFiles)
 	}
 	if !reflect.DeepEqual(capturedCreateInput.FileContents, wantFileContents) {
-		t.Fatalf("unexpected CreateDraftFromFiles.FileContents, want %#v got %#v", wantFileContents, capturedCreateInput.FileContents)
+		t.Fatalf("unexpected create input file contents: %#v", capturedCreateInput.FileContents)
 	}
-	if !reflect.DeepEqual(capturedReviewInput.PlanFileContents, wantFileContents) {
-		t.Fatalf("unexpected SubmitReview.PlanFileContents, want %#v got %#v", wantFileContents, capturedReviewInput.PlanFileContents)
+	if !reflect.DeepEqual(created.SourceFiles, wantSourceFiles) {
+		t.Fatalf("unexpected response source files: %#v", created.SourceFiles)
+	}
+	if !reflect.DeepEqual(created.FileContents, wantFileContents) {
+		t.Fatalf("unexpected response file contents: %#v", created.FileContents)
+	}
+	if !reflect.DeepEqual(capturedReviewInput.FileContents, wantFileContents) {
+		t.Fatalf("unexpected review input file contents: %#v", capturedReviewInput.FileContents)
+	}
+	if !strings.Contains(capturedReviewInput.Conversation, "extract issues from docs") {
+		t.Fatalf("unexpected review conversation: %q", capturedReviewInput.Conversation)
+	}
+	if !strings.Contains(capturedReviewInput.ProjectContext, "project=plan-from-files") {
+		t.Fatalf("unexpected review project context: %q", capturedReviewInput.ProjectContext)
 	}
 }
 
-func TestCreatePlanFromFilesBadRequest(t *testing.T) {
+func TestPlanCreateFromFilesValidationReturnsBadRequest(t *testing.T) {
 	store := newTestStore(t)
-	repoRoot := filepath.Join(t.TempDir(), "repo-plan-from-files-bad-request")
-	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
+	repoRoot := filepath.Join(t.TempDir(), "repo-plan-from-files-bad")
+	if err := os.MkdirAll(filepath.Join(repoRoot, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "existing.md"), []byte("existing"), 0o644); err != nil {
-		t.Fatalf("write existing.md: %v", err)
+	if err := os.WriteFile(filepath.Join(repoRoot, "docs", "ok.md"), []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write docs/ok.md: %v", err)
 	}
 
 	project := core.Project{
-		ID:       "proj-plan-from-files-bad-request",
-		Name:     "plan-from-files-bad-request",
+		ID:       "proj-plan-from-files-bad",
+		Name:     "plan-from-files-bad",
 		RepoPath: repoRoot,
 	}
 	if err := store.CreateProject(&project); err != nil {
@@ -455,91 +401,77 @@ func TestCreatePlanFromFilesBadRequest(t *testing.T) {
 		ID:        "chat-20260302-planfiles02",
 		ProjectID: project.ID,
 		Messages: []core.ChatMessage{
-			{Role: "user", Content: "bad request"},
+			{Role: "user", Content: "bad request test"},
 		},
 	}
 	if err := store.CreateChatSession(session); err != nil {
 		t.Fatalf("seed chat session: %v", err)
 	}
 
-	createFromFilesCalls := 0
-	planManager := &testPlanManager{
-		createDraftFromFilesFn: func(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
-			createFromFilesCalls++
+	createCalls := 0
+	manager := &testPlanManager{
+		createIssuesFn: func(_ context.Context, _ IssueCreateInput) ([]core.Issue, error) {
+			createCalls++
 			return nil, errors.New("should not be called")
+		},
+		submitForReviewFn: func(_ context.Context, _ string, _ IssueReviewInput) (*core.Issue, error) {
+			t.Fatal("SubmitForReview should not be called")
+			return nil, nil
 		},
 	}
 
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
+	srv := NewServer(Config{Store: store, PlanManager: manager})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	testCases := []struct {
-		name     string
-		body     map[string]any
-		wantCode string
+	cases := []struct {
+		name string
+		body map[string]any
 	}{
 		{
-			name: "file_paths empty",
-			body: map[string]any{
-				"session_id": session.ID,
-				"file_paths": []string{},
-			},
-			wantCode: "FILE_PATHS_REQUIRED",
+			name: "missing_file_paths",
+			body: map[string]any{"session_id": session.ID},
 		},
 		{
-			name: "path traversal",
+			name: "empty_path",
 			body: map[string]any{
 				"session_id": session.ID,
-				"file_paths": []string{"../outside.md"},
+				"file_paths": []string{""},
 			},
-			wantCode: "INVALID_FILE_PATH",
 		},
 		{
-			name: "file not found",
+			name: "path_traversal",
+			body: map[string]any{
+				"session_id": session.ID,
+				"file_paths": []string{"../secret.md"},
+			},
+		},
+		{
+			name: "file_not_found",
 			body: map[string]any{
 				"session_id": session.ID,
 				"file_paths": []string{"missing.md"},
 			},
-			wantCode: "FILE_NOT_FOUND",
 		},
 	}
 
-	for _, tc := range testCases {
+	for i := range cases {
+		tc := cases[i]
 		t.Run(tc.name, func(t *testing.T) {
-			rawBody, err := json.Marshal(tc.body)
-			if err != nil {
-				t.Fatalf("marshal request body: %v", err)
-			}
-			resp, err := http.Post(
-				ts.URL+"/api/v1/projects/proj-plan-from-files-bad-request/plans/from-files",
-				"application/json",
-				bytes.NewReader(rawBody),
-			)
-			if err != nil {
-				t.Fatalf("POST /api/v1/projects/{pid}/plans/from-files: %v", err)
-			}
+			resp := doIssuePost(t, ts, "/api/v1/projects/proj-plan-from-files-bad/plans/from-files", tc.body)
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("expected 400, got %d", resp.StatusCode)
 			}
-
-			var apiErr apiError
-			if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
-				t.Fatalf("decode api error response: %v", err)
-			}
-			if apiErr.Code != tc.wantCode {
-				t.Fatalf("expected code %s, got %s", tc.wantCode, apiErr.Code)
-			}
 		})
 	}
 
-	if createFromFilesCalls != 0 {
-		t.Fatalf("expected CreateDraftFromFiles not called, got %d", createFromFilesCalls)
+	if createCalls != 0 {
+		t.Fatalf("expected CreateIssues not called, got %d", createCalls)
 	}
 }
 
-func TestSubmitPlanReviewReturnsReviewing(t *testing.T) {
+func TestPlanReviewDelegatesToIssueManager(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
 		ID:       "proj-review-api",
@@ -549,147 +481,56 @@ func TestSubmitPlanReviewReturnsReviewing(t *testing.T) {
 	if err := store.CreateProject(&project); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	plan := &core.TaskPlan{
-		ID:         "plan-20260301-reviewapi",
-		ProjectID:  project.ID,
-		Name:       "review-plan",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("seed plan: %v", err)
-	}
-
-	submitCalled := false
-	planManager := &testPlanManager{
-		submitReviewFn: func(_ context.Context, planID string, _ secretary.ReviewInput) (*core.TaskPlan, error) {
-			submitCalled = true
-			loaded, err := store.GetTaskPlan(planID)
-			if err != nil {
-				return nil, err
-			}
-			loaded.Status = core.PlanReviewing
-			loaded.WaitReason = core.WaitNone
-			if err := store.SaveTaskPlan(loaded); err != nil {
-				return nil, err
-			}
-			return store.GetTaskPlan(planID)
-		},
-	}
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	req, err := http.NewRequest(
-		http.MethodPost,
-		ts.URL+"/api/v1/projects/proj-review-api/plans/"+plan.ID+"/review",
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("create request: %v", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("POST /api/v1/projects/{pid}/plans/{id}/review: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-
-	var out struct {
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode review response: %v", err)
-	}
-	if out.Status != string(core.PlanReviewing) {
-		t.Fatalf("expected status reviewing, got %s", out.Status)
-	}
-	if !submitCalled {
-		t.Fatal("expected submit review to be delegated to plan manager")
-	}
-
-	updated, err := store.GetTaskPlan(plan.ID)
-	if err != nil {
-		t.Fatalf("reload plan: %v", err)
-	}
-	if updated.Status != core.PlanReviewing {
-		t.Fatalf("expected persisted status reviewing, got %s", updated.Status)
-	}
-}
-
-func TestPlanReviewTriggersReviewOrchestrator(t *testing.T) {
-	store := newTestStore(t)
-	project := core.Project{
-		ID:       "proj-review-orchestrator",
-		Name:     "review-orchestrator",
-		RepoPath: filepath.Join(t.TempDir(), "repo-review-orchestrator"),
-	}
-	if err := store.CreateProject(&project); err != nil {
-		t.Fatalf("seed project: %v", err)
-	}
-
 	session := &core.ChatSession{
-		ID:        "chat-20260302-review-orchestrator",
+		ID:        "chat-20260302-review01",
 		ProjectID: project.ID,
 		Messages: []core.ChatMessage{
-			{Role: "user", Content: "请评审当前任务拆分"},
-			{Role: "assistant", Content: "建议补齐验收项"},
+			{Role: "user", Content: "need review"},
 		},
 	}
 	if err := store.CreateChatSession(session); err != nil {
 		t.Fatalf("seed chat session: %v", err)
 	}
-
-	plan := &core.TaskPlan{
-		ID:         "plan-20260302-review-orchestrator",
+	issue := mustCreateIssue(t, store, core.Issue{
+		ID:         "issue-20260302-reviewapi",
 		ProjectID:  project.ID,
 		SessionID:  session.ID,
-		Name:       "review-orchestrator-plan",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
+		Title:      "review-issue",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusDraft,
 		FailPolicy: core.FailBlock,
-	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("seed plan: %v", err)
-	}
+	})
 
 	submitCalls := 0
-	var capturedPlanID string
-	var capturedInput secretary.ReviewInput
-	planManager := &testPlanManager{
-		submitReviewFn: func(_ context.Context, planID string, input secretary.ReviewInput) (*core.TaskPlan, error) {
+	capturedIssueID := ""
+	capturedInput := IssueReviewInput{}
+	manager := &testPlanManager{
+		submitForReviewFn: func(_ context.Context, issueID string, input IssueReviewInput) (*core.Issue, error) {
 			submitCalls++
-			capturedPlanID = planID
+			capturedIssueID = issueID
 			capturedInput = input
-			loaded, err := store.GetTaskPlan(planID)
+			loaded, err := store.GetIssue(issueID)
 			if err != nil {
 				return nil, err
 			}
-			loaded.Status = core.PlanReviewing
-			loaded.WaitReason = core.WaitNone
-			if err := store.SaveTaskPlan(loaded); err != nil {
+			loaded.Status = core.IssueStatusReviewing
+			if err := store.SaveIssue(loaded); err != nil {
 				return nil, err
 			}
-			return store.GetTaskPlan(planID)
+			return store.GetIssue(issueID)
 		},
 	}
 
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
+	srv := NewServer(Config{Store: store, PlanManager: manager})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	req, err := http.NewRequest(
-		http.MethodPost,
-		ts.URL+"/api/v1/projects/proj-review-orchestrator/plans/"+plan.ID+"/review",
-		nil,
+	resp, err := http.Post(
+		ts.URL+"/api/v1/projects/proj-review-api/plans/"+issue.ID+"/review",
+		"application/json",
+		bytes.NewReader([]byte("{}")),
 	)
-	if err != nil {
-		t.Fatalf("create request: %v", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST /api/v1/projects/{pid}/plans/{id}/review: %v", err)
 	}
@@ -698,26 +539,28 @@ func TestPlanReviewTriggersReviewOrchestrator(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
+	var payload issueStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode review response: %v", err)
+	}
+	if payload.Status != string(core.IssueStatusReviewing) {
+		t.Fatalf("expected status %q, got %q", core.IssueStatusReviewing, payload.Status)
+	}
 	if submitCalls != 1 {
-		t.Fatalf("expected SubmitReview called once, got %d", submitCalls)
+		t.Fatalf("expected SubmitForReview called once, got %d", submitCalls)
 	}
-	if capturedPlanID != plan.ID {
-		t.Fatalf("expected submitted plan id %q, got %q", plan.ID, capturedPlanID)
+	if capturedIssueID != issue.ID {
+		t.Fatalf("expected issue id %q, got %q", issue.ID, capturedIssueID)
 	}
-
-	wantConversation := "user: 请评审当前任务拆分\nassistant: 建议补齐验收项"
-	if capturedInput.Conversation != wantConversation {
-		t.Fatalf("unexpected review conversation, want %q got %q", wantConversation, capturedInput.Conversation)
+	if !strings.Contains(capturedInput.Conversation, "need review") {
+		t.Fatalf("unexpected conversation: %q", capturedInput.Conversation)
 	}
-	if !strings.Contains(capturedInput.ProjectContext, "project=review-orchestrator") {
-		t.Fatalf("expected project context contains project name, got %q", capturedInput.ProjectContext)
-	}
-	if !strings.Contains(capturedInput.ProjectContext, "repo="+project.RepoPath) {
-		t.Fatalf("expected project context contains repo path, got %q", capturedInput.ProjectContext)
+	if !strings.Contains(capturedInput.ProjectContext, "project=review-api") {
+		t.Fatalf("unexpected project context: %q", capturedInput.ProjectContext)
 	}
 }
 
-func TestPlanActionRejectRequiresTwoPhaseFeedback(t *testing.T) {
+func TestPlanActionRejectRequiresFeedbackAndDelegates(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
 		ID:       "proj-action-api",
@@ -727,118 +570,124 @@ func TestPlanActionRejectRequiresTwoPhaseFeedback(t *testing.T) {
 	if err := store.CreateProject(&project); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
-	plan := &core.TaskPlan{
-		ID:         "plan-20260301-actionapi",
+	issue := mustCreateIssue(t, store, core.Issue{
+		ID:         "issue-20260302-actionapi",
 		ProjectID:  project.ID,
-		Name:       "action-plan",
-		Status:     core.PlanWaitingHuman,
-		WaitReason: core.WaitFinalApproval,
+		Title:      "action-issue",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusReviewing,
 		FailPolicy: core.FailBlock,
-	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("seed plan: %v", err)
-	}
+	})
 
 	applyCalls := 0
-	planManager := &testPlanManager{
-		applyActionFn: func(_ context.Context, planID string, action secretary.PlanAction) (*core.TaskPlan, error) {
+	capturedAction := IssueAction{}
+	manager := &testPlanManager{
+		applyIssueActionFn: func(_ context.Context, issueID string, action IssueAction) (*core.Issue, error) {
 			applyCalls++
-			if action.Action != secretary.PlanActionReject {
-				t.Fatalf("expected manager action reject, got %s", action.Action)
-			}
-			loaded, err := store.GetTaskPlan(planID)
+			capturedAction = action
+			loaded, err := store.GetIssue(issueID)
 			if err != nil {
 				return nil, err
 			}
-			loaded.Status = core.PlanReviewing
-			loaded.WaitReason = core.WaitNone
-			if err := store.SaveTaskPlan(loaded); err != nil {
+			loaded.Status = core.IssueStatusDraft
+			if err := store.SaveIssue(loaded); err != nil {
 				return nil, err
 			}
-			return store.GetTaskPlan(planID)
+			return store.GetIssue(issueID)
 		},
 	}
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
+
+	srv := NewServer(Config{Store: store, PlanManager: manager})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	assertActionCode := func(body string, wantCode string) {
-		t.Helper()
-		resp, err := http.Post(
-			ts.URL+"/api/v1/projects/proj-action-api/plans/"+plan.ID+"/action",
-			"application/json",
-			strings.NewReader(body),
-		)
-		if err != nil {
-			t.Fatalf("POST /api/v1/projects/{pid}/plans/{id}/action: %v", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", resp.StatusCode)
-		}
-
-		var apiErr apiError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
-			t.Fatalf("decode api error: %v", err)
-		}
-		if apiErr.Code != wantCode {
-			t.Fatalf("expected code %s, got %s", wantCode, apiErr.Code)
-		}
+	invalidResp := doIssuePost(t, ts, "/api/v1/projects/proj-action-api/plans/"+issue.ID+"/action", map[string]any{
+		"action": "reject",
+	})
+	invalidResp.Body.Close()
+	if invalidResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing feedback, got %d", invalidResp.StatusCode)
 	}
 
-	assertActionCode(`{"action":"reject"}`, "FEEDBACK_REQUIRED")
-	assertActionCode(`{"action":"reject","feedback":{"detail":"这是足够长的说明用于触发缺失类别校验"}}`, "FEEDBACK_CATEGORY_REQUIRED")
-	assertActionCode(`{"action":"reject","feedback":{"category":"coverage_gap"}}`, "FEEDBACK_DETAIL_REQUIRED")
-	assertActionCode(`{"action":"reject","feedback":{"category":"coverage_gap","detail":"太短"}}`, "INVALID_FEEDBACK")
+	shortResp := doIssuePost(t, ts, "/api/v1/projects/proj-action-api/plans/"+issue.ID+"/action", map[string]any{
+		"action": "reject",
+		"feedback": map[string]any{
+			"category": "coverage_gap",
+			"detail":   "too short",
+		},
+	})
+	shortResp.Body.Close()
+	if shortResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for short feedback detail, got %d", shortResp.StatusCode)
+	}
 
-	successBody := map[string]any{
+	validResp := doIssuePost(t, ts, "/api/v1/projects/proj-action-api/plans/"+issue.ID+"/action", map[string]any{
 		"action": "reject",
 		"feedback": map[string]any{
 			"category":           "coverage_gap",
-			"detail":             "当前计划遗漏了审计日志回归测试任务，请补齐并补充依赖关系。",
-			"expected_direction": "增加审计日志回归任务并依赖登录主流程任务",
+			"detail":             "please cover dependency branch and rollback behavior",
+			"expected_direction": "split issue by auth state",
 		},
-	}
-	rawSuccessBody, err := json.Marshal(successBody)
-	if err != nil {
-		t.Fatalf("marshal success request body: %v", err)
-	}
-	successResp, err := http.Post(
-		ts.URL+"/api/v1/projects/proj-action-api/plans/"+plan.ID+"/action",
-		"application/json",
-		bytes.NewReader(rawSuccessBody),
-	)
-	if err != nil {
-		t.Fatalf("POST reject with valid feedback: %v", err)
-	}
-	defer successResp.Body.Close()
-	if successResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", successResp.StatusCode)
-	}
-
-	var out struct {
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(successResp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode success response: %v", err)
-	}
-	if out.Status != string(core.PlanReviewing) {
-		t.Fatalf("expected status reviewing, got %s", out.Status)
-	}
-
-	updated, err := store.GetTaskPlan(plan.ID)
-	if err != nil {
-		t.Fatalf("reload plan: %v", err)
-	}
-	if updated.Status != core.PlanReviewing {
-		t.Fatalf("expected persisted status reviewing, got %s", updated.Status)
+	})
+	defer validResp.Body.Close()
+	if validResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for valid reject action, got %d", validResp.StatusCode)
 	}
 	if applyCalls != 1 {
-		t.Fatalf("expected valid reject to invoke plan manager once, got %d", applyCalls)
+		t.Fatalf("expected ApplyIssueAction called once, got %d", applyCalls)
+	}
+	if capturedAction.Action != "reject" {
+		t.Fatalf("expected action reject, got %q", capturedAction.Action)
+	}
+	if capturedAction.Feedback == nil {
+		t.Fatal("expected reject feedback to be forwarded")
+	}
+	if capturedAction.Feedback.Category != "coverage_gap" {
+		t.Fatalf("unexpected feedback category: %q", capturedAction.Feedback.Category)
 	}
 }
 
-func TestListPlansTotalReflectsUnpaginatedCount(t *testing.T) {
+func TestPlanActionApproveStatusConflictMapsTo409(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-action-conflict",
+		Name:     "action-conflict",
+		RepoPath: filepath.Join(t.TempDir(), "repo-action-conflict"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	issue := mustCreateIssue(t, store, core.Issue{
+		ID:         "issue-20260302-conflict",
+		ProjectID:  project.ID,
+		Title:      "conflict-issue",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusDraft,
+		FailPolicy: core.FailBlock,
+	})
+
+	manager := &testPlanManager{
+		applyIssueActionFn: func(_ context.Context, _ string, _ IssueAction) (*core.Issue, error) {
+			return nil, errors.New("approve requires reviewing status")
+		},
+	}
+
+	srv := NewServer(Config{Store: store, PlanManager: manager})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp := doIssuePost(t, ts, "/api/v1/projects/proj-action-conflict/plans/"+issue.ID+"/action", map[string]any{
+		"action": "approve",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", resp.StatusCode)
+	}
+}
+
+func TestPlanListReturnsTotalWithPagination(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
 		ID:       "proj-plan-total",
@@ -849,28 +698,24 @@ func TestListPlansTotalReflectsUnpaginatedCount(t *testing.T) {
 		t.Fatalf("seed project: %v", err)
 	}
 
-	plan1 := &core.TaskPlan{
-		ID:         "plan-20260301-total01",
+	mustCreateIssue(t, store, core.Issue{
+		ID:         "issue-20260302-total01",
 		ProjectID:  project.ID,
-		Name:       "total-1",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
+		Title:      "total-1",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusDraft,
 		FailPolicy: core.FailBlock,
-	}
-	plan2 := &core.TaskPlan{
-		ID:         "plan-20260301-total02",
+	})
+	mustCreateIssue(t, store, core.Issue{
+		ID:         "issue-20260302-total02",
 		ProjectID:  project.ID,
-		Name:       "total-2",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
+		Title:      "total-2",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusDraft,
 		FailPolicy: core.FailBlock,
-	}
-	if err := store.CreateTaskPlan(plan1); err != nil {
-		t.Fatalf("seed plan1: %v", err)
-	}
-	if err := store.CreateTaskPlan(plan2); err != nil {
-		t.Fatalf("seed plan2: %v", err)
-	}
+	})
 
 	srv := NewServer(Config{Store: store})
 	ts := httptest.NewServer(srv.Handler())
@@ -885,181 +730,96 @@ func TestListPlansTotalReflectsUnpaginatedCount(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var listed struct {
-		Items  []core.TaskPlan `json:"items"`
-		Total  int             `json:"total"`
-		Offset int             `json:"offset"`
-	}
+	var listed issueListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
-		t.Fatalf("decode list plans response: %v", err)
+		t.Fatalf("decode list response: %v", err)
 	}
 	if listed.Total != 2 {
 		t.Fatalf("expected total=2, got %d", listed.Total)
 	}
 	if len(listed.Items) != 1 {
-		t.Fatalf("expected paginated items=1, got %d", len(listed.Items))
+		t.Fatalf("expected one item due to limit=1, got %d", len(listed.Items))
 	}
 }
 
-func TestPlanActionApproveRequiresWaitingHumanFinalApproval(t *testing.T) {
-	store := newTestStore(t)
-	project := core.Project{
-		ID:       "proj-action-conflict",
-		Name:     "action-conflict",
-		RepoPath: filepath.Join(t.TempDir(), "repo-action-conflict"),
-	}
-	if err := store.CreateProject(&project); err != nil {
-		t.Fatalf("seed project: %v", err)
-	}
-	plan := &core.TaskPlan{
-		ID:         "plan-20260301-conflict",
-		ProjectID:  project.ID,
-		Name:       "conflict-plan",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("seed plan: %v", err)
-	}
-
-	planManager := &testPlanManager{
-		applyActionFn: func(_ context.Context, _ string, _ secretary.PlanAction) (*core.TaskPlan, error) {
-			return nil, errors.New("approve requires waiting_human/final_approval, got draft/none")
-		},
-	}
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	resp, err := http.Post(
-		ts.URL+"/api/v1/projects/proj-action-conflict/plans/"+plan.ID+"/action",
-		"application/json",
-		strings.NewReader(`{"action":"approve"}`),
-	)
+func doIssuePost(t *testing.T, ts *httptest.Server, path string, body map[string]any) *http.Response {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("POST /api/v1/projects/{pid}/plans/{id}/action: %v", err)
+		t.Fatalf("marshal request body: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("expected 409, got %d", resp.StatusCode)
+	resp, err := http.Post(ts.URL+path, "application/json", bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
 	}
-
-	var apiErr apiError
-	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
-		t.Fatalf("decode api error: %v", err)
-	}
-	if apiErr.Code != "PLAN_STATUS_INVALID" {
-		t.Fatalf("expected PLAN_STATUS_INVALID, got %s", apiErr.Code)
-	}
+	return resp
 }
 
-func TestPlanTaskPayload_IncludesInputsOutputsAcceptance(t *testing.T) {
-	store := newTestStore(t)
-	project := core.Project{
-		ID:       "proj-plan-structured",
-		Name:     "plan-structured",
-		RepoPath: filepath.Join(t.TempDir(), "repo-plan-structured"),
+func mustCreateIssue(t *testing.T, store core.Store, issue core.Issue) core.Issue {
+	t.Helper()
+	if strings.TrimSpace(issue.ID) == "" {
+		issue.ID = core.NewIssueID()
 	}
-	if err := store.CreateProject(&project); err != nil {
-		t.Fatalf("seed project: %v", err)
+	if strings.TrimSpace(issue.Template) == "" {
+		issue.Template = "standard"
 	}
-	plan := &core.TaskPlan{
-		ID:               "plan-20260301-structured",
-		ProjectID:        project.ID,
-		Name:             "structured-plan",
-		Status:           core.PlanDraft,
-		WaitReason:       core.WaitNone,
-		FailPolicy:       core.FailBlock,
-		SpecProfile:      "default",
-		ContractVersion:  "v1",
-		ContractChecksum: "sha256:abcd",
+	if strings.TrimSpace(string(issue.State)) == "" {
+		issue.State = core.IssueStateOpen
 	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("seed plan: %v", err)
+	if strings.TrimSpace(string(issue.Status)) == "" {
+		issue.Status = core.IssueStatusDraft
 	}
-
-	task := core.TaskItem{
-		ID:          "task-structured-1",
-		PlanID:      plan.ID,
-		Title:       "structured task",
-		Description: "structured payload test",
-		Inputs:      []string{"oauth_app_id"},
-		Outputs:     []string{"oauth_token"},
-		Acceptance:  []string{"callback returns 200"},
-		Constraints: []string{"must keep backward compatibility"},
-		Template:    "standard",
-		Status:      core.ItemPending,
+	if strings.TrimSpace(string(issue.FailPolicy)) == "" {
+		issue.FailPolicy = core.FailBlock
 	}
-	if err := store.CreateTaskItem(&task); err != nil {
-		t.Fatalf("seed task: %v", err)
+	if err := store.CreateIssue(&issue); err != nil {
+		t.Fatalf("seed issue %s: %v", issue.ID, err)
 	}
-
-	srv := NewServer(Config{Store: store})
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-structured/plans/" + plan.ID)
+	loaded, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("GET /api/v1/projects/{pid}/plans/{id}: %v", err)
+		t.Fatalf("reload issue %s: %v", issue.ID, err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-
-	var got core.TaskPlan
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatalf("decode plan response: %v", err)
-	}
-	if len(got.Tasks) != 1 {
-		t.Fatalf("expected one task, got %d", len(got.Tasks))
-	}
-	if len(got.Tasks[0].Inputs) != 1 || got.Tasks[0].Inputs[0] != "oauth_app_id" {
-		t.Fatalf("unexpected task inputs: %#v", got.Tasks[0].Inputs)
-	}
-	if len(got.Tasks[0].Outputs) != 1 || got.Tasks[0].Outputs[0] != "oauth_token" {
-		t.Fatalf("unexpected task outputs: %#v", got.Tasks[0].Outputs)
-	}
-	if len(got.Tasks[0].Acceptance) != 1 || got.Tasks[0].Acceptance[0] != "callback returns 200" {
-		t.Fatalf("unexpected task acceptance: %#v", got.Tasks[0].Acceptance)
-	}
-	if len(got.Tasks[0].Constraints) != 1 || got.Tasks[0].Constraints[0] != "must keep backward compatibility" {
-		t.Fatalf("unexpected task constraints: %#v", got.Tasks[0].Constraints)
-	}
+	return *loaded
 }
 
 type testPlanManager struct {
-	createDraftFn          func(ctx context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error)
-	createDraftFromFilesFn func(ctx context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error)
-	submitReviewFn         func(ctx context.Context, planID string, input secretary.ReviewInput) (*core.TaskPlan, error)
-	applyActionFn          func(ctx context.Context, planID string, action secretary.PlanAction) (*core.TaskPlan, error)
+	createIssuesFn     func(ctx context.Context, input IssueCreateInput) ([]core.Issue, error)
+	createDraftFn      func(ctx context.Context, input IssueCreateInput) ([]core.Issue, error)
+	submitForReviewFn  func(ctx context.Context, issueID string, input IssueReviewInput) (*core.Issue, error)
+	submitReviewFn     func(ctx context.Context, issueID string, input IssueReviewInput) (*core.Issue, error)
+	applyIssueActionFn func(ctx context.Context, issueID string, action IssueAction) (*core.Issue, error)
+	applyActionFn      func(ctx context.Context, issueID string, action IssueAction) (*core.Issue, error)
 }
 
-func (m *testPlanManager) CreateDraft(ctx context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error) {
-	if m.createDraftFn == nil {
-		return nil, errors.New("create draft not implemented")
+func (m *testPlanManager) CreateIssues(ctx context.Context, input IssueCreateInput) ([]core.Issue, error) {
+	switch {
+	case m.createIssuesFn != nil:
+		return m.createIssuesFn(ctx, input)
+	case m.createDraftFn != nil:
+		return m.createDraftFn(ctx, input)
+	default:
+		return nil, errors.New("create issues not implemented")
 	}
-	return m.createDraftFn(ctx, input)
 }
 
-func (m *testPlanManager) CreateDraftFromFiles(ctx context.Context, input secretary.CreateDraftInput) (*core.TaskPlan, error) {
-	if m.createDraftFromFilesFn == nil {
-		return nil, errors.New("create draft from files not implemented")
+func (m *testPlanManager) SubmitForReview(ctx context.Context, issueID string, input IssueReviewInput) (*core.Issue, error) {
+	switch {
+	case m.submitForReviewFn != nil:
+		return m.submitForReviewFn(ctx, issueID, input)
+	case m.submitReviewFn != nil:
+		return m.submitReviewFn(ctx, issueID, input)
+	default:
+		return nil, errors.New("submit for review not implemented")
 	}
-	return m.createDraftFromFilesFn(ctx, input)
 }
 
-func (m *testPlanManager) SubmitReview(ctx context.Context, planID string, input secretary.ReviewInput) (*core.TaskPlan, error) {
-	if m.submitReviewFn == nil {
-		return nil, errors.New("submit review not implemented")
+func (m *testPlanManager) ApplyIssueAction(ctx context.Context, issueID string, action IssueAction) (*core.Issue, error) {
+	switch {
+	case m.applyIssueActionFn != nil:
+		return m.applyIssueActionFn(ctx, issueID, action)
+	case m.applyActionFn != nil:
+		return m.applyActionFn(ctx, issueID, action)
+	default:
+		return nil, errors.New("apply issue action not implemented")
 	}
-	return m.submitReviewFn(ctx, planID, input)
-}
-
-func (m *testPlanManager) ApplyPlanAction(ctx context.Context, planID string, action secretary.PlanAction) (*core.TaskPlan, error) {
-	if m.applyActionFn == nil {
-		return nil, errors.New("apply plan action not implemented")
-	}
-	return m.applyActionFn(ctx, planID, action)
 }

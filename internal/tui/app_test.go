@@ -122,43 +122,43 @@ func (noopStore) ListChatSessions(projectID string) ([]core.ChatSession, error) 
 	return nil, nil
 }
 
-func (noopStore) CreateTaskPlan(p *core.TaskPlan) error {
+func (noopStore) CreateIssue(i *core.Issue) error {
 	return nil
 }
 
-func (noopStore) GetTaskPlan(id string) (*core.TaskPlan, error) {
+func (noopStore) GetIssue(id string) (*core.Issue, error) {
 	return nil, nil
 }
 
-func (noopStore) SaveTaskPlan(p *core.TaskPlan) error {
+func (noopStore) SaveIssue(i *core.Issue) error {
 	return nil
 }
 
-func (noopStore) ListTaskPlans(projectID string, filter core.TaskPlanFilter) ([]core.TaskPlan, error) {
+func (noopStore) ListIssues(projectID string, filter core.IssueFilter) ([]core.Issue, int, error) {
+	return nil, 0, nil
+}
+
+func (noopStore) GetActiveIssues(projectID string) ([]core.Issue, error) {
 	return nil, nil
 }
 
-func (noopStore) GetActiveTaskPlans() ([]core.TaskPlan, error) {
+func (noopStore) GetIssueByPipeline(pipelineID string) (*core.Issue, error) {
 	return nil, nil
 }
 
-func (noopStore) CreateTaskItem(item *core.TaskItem) error {
+func (noopStore) SaveIssueAttachment(issueID, path, content string) error {
 	return nil
 }
 
-func (noopStore) GetTaskItem(id string) (*core.TaskItem, error) {
+func (noopStore) GetIssueAttachments(issueID string) ([]core.IssueAttachment, error) {
 	return nil, nil
 }
 
-func (noopStore) SaveTaskItem(item *core.TaskItem) error {
+func (noopStore) SaveIssueChange(change *core.IssueChange) error {
 	return nil
 }
 
-func (noopStore) GetTaskItemsByPlan(planID string) ([]core.TaskItem, error) {
-	return nil, nil
-}
-
-func (noopStore) GetTaskItemByPipeline(pipelineID string) (*core.TaskItem, error) {
+func (noopStore) GetIssueChanges(issueID string) ([]core.IssueChange, error) {
 	return nil, nil
 }
 
@@ -166,7 +166,7 @@ func (noopStore) SaveReviewRecord(r *core.ReviewRecord) error {
 	return nil
 }
 
-func (noopStore) GetReviewRecords(planID string) ([]core.ReviewRecord, error) {
+func (noopStore) GetReviewRecords(issueID string) ([]core.ReviewRecord, error) {
 	return nil, nil
 }
 

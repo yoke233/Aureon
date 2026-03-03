@@ -16,7 +16,6 @@ import (
 	"github.com/yoke233/ai-workflow/internal/engine"
 	"github.com/yoke233/ai-workflow/internal/eventbus"
 	pluginfactory "github.com/yoke233/ai-workflow/internal/plugins/factory"
-	"github.com/yoke233/ai-workflow/internal/secretary"
 	"github.com/yoke233/ai-workflow/internal/web"
 )
 
@@ -158,23 +157,23 @@ func TestRunServer_PortPriority(t *testing.T) {
 
 			origSchedulerFactory := newServerScheduler
 			origServerFactory := newAPIServer
-			origPlanManagerFactory := newServerPlanManager
+			origIssueManagerFactory := newServerIssueManager
 			t.Cleanup(func() {
 				newServerScheduler = origSchedulerFactory
 				newAPIServer = origServerFactory
-				newServerPlanManager = origPlanManagerFactory
+				newServerIssueManager = origIssueManagerFactory
 			})
 
 			startErr := errors.New("server start failed")
 			fakeScheduler := &testScheduler{}
-			fakePlanManager := &testServerPlanManager{}
+			fakeIssueManager := &testServerIssueManager{}
 			capturedAddr := ""
 
 			newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 				return fakeScheduler, nil
 			}
-			newServerPlanManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverPlanManager, error) {
-				return fakePlanManager, nil
+			newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverIssueManager, error) {
+				return fakeIssueManager, nil
 			}
 			newAPIServer = func(cfg web.Config) apiServer {
 				capturedAddr = cfg.Addr
@@ -191,8 +190,8 @@ func TestRunServer_PortPriority(t *testing.T) {
 			if !fakeScheduler.stopCalled {
 				t.Fatal("expected scheduler stop to be called on startup failure")
 			}
-			if !fakePlanManager.stopCalled {
-				t.Fatal("expected plan manager stop to be called on startup failure")
+			if !fakeIssueManager.stopCalled {
+				t.Fatal("expected issue manager stop to be called on startup failure")
 			}
 		})
 	}
@@ -205,23 +204,23 @@ func TestRunServer_StartFailureJoinsSchedulerStopError(t *testing.T) {
 
 	origSchedulerFactory := newServerScheduler
 	origServerFactory := newAPIServer
-	origPlanManagerFactory := newServerPlanManager
+	origIssueManagerFactory := newServerIssueManager
 	t.Cleanup(func() {
 		newServerScheduler = origSchedulerFactory
 		newAPIServer = origServerFactory
-		newServerPlanManager = origPlanManagerFactory
+		newServerIssueManager = origIssueManagerFactory
 	})
 
 	startErr := errors.New("server start failed")
 	stopErr := errors.New("scheduler stop failed")
 	fakeScheduler := &testScheduler{stopErr: stopErr}
-	fakePlanManager := &testServerPlanManager{}
+	fakeIssueManager := &testServerIssueManager{}
 
 	newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 		return fakeScheduler, nil
 	}
-	newServerPlanManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverPlanManager, error) {
-		return fakePlanManager, nil
+	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, _ config.RoleBindings) (serverIssueManager, error) {
+		return fakeIssueManager, nil
 	}
 	newAPIServer = func(_ web.Config) apiServer {
 		return &testAPIServer{startErr: startErr}
@@ -240,36 +239,36 @@ func TestRunServer_StartFailureJoinsSchedulerStopError(t *testing.T) {
 	if !fakeScheduler.stopCalled {
 		t.Fatal("expected scheduler stop to be called on server start failure")
 	}
-	if !fakePlanManager.stopCalled {
-		t.Fatal("expected plan manager stop to be called on server start failure")
+	if !fakeIssueManager.stopCalled {
+		t.Fatal("expected issue manager stop to be called on server start failure")
 	}
 }
 
-func TestRunServer_PlanManagerReceivesReviewRoleBindings(t *testing.T) {
+func TestRunServer_IssueManagerReceivesReviewRoleBindings(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 	t.Setenv("USERPROFILE", tempHome)
 
 	origSchedulerFactory := newServerScheduler
 	origServerFactory := newAPIServer
-	origPlanManagerFactory := newServerPlanManager
+	origIssueManagerFactory := newServerIssueManager
 	t.Cleanup(func() {
 		newServerScheduler = origSchedulerFactory
 		newAPIServer = origServerFactory
-		newServerPlanManager = origPlanManagerFactory
+		newServerIssueManager = origIssueManagerFactory
 	})
 
 	startErr := errors.New("server start failed")
 	fakeScheduler := &testScheduler{}
-	fakePlanManager := &testServerPlanManager{}
+	fakeIssueManager := &testServerIssueManager{}
 	var capturedRoleBinds config.RoleBindings
 
 	newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 		return fakeScheduler, nil
 	}
-	newServerPlanManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, roleBinds config.RoleBindings) (serverPlanManager, error) {
+	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ *eventbus.Bus, _ config.SecretaryConfig, roleBinds config.RoleBindings) (serverIssueManager, error) {
 		capturedRoleBinds = roleBinds
-		return fakePlanManager, nil
+		return fakeIssueManager, nil
 	}
 	newAPIServer = func(_ web.Config) apiServer {
 		return &testAPIServer{startErr: startErr}
@@ -394,35 +393,31 @@ func (s *testScheduler) Stop(_ context.Context) error {
 	return s.stopErr
 }
 
-type testServerPlanManager struct {
+type testServerIssueManager struct {
 	startErr    error
 	stopErr     error
 	startCalled bool
 	stopCalled  bool
 }
 
-func (m *testServerPlanManager) Start(_ context.Context) error {
+func (m *testServerIssueManager) Start(_ context.Context) error {
 	m.startCalled = true
 	return m.startErr
 }
 
-func (m *testServerPlanManager) Stop(_ context.Context) error {
+func (m *testServerIssueManager) Stop(_ context.Context) error {
 	m.stopCalled = true
 	return m.stopErr
 }
 
-func (m *testServerPlanManager) CreateDraft(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
-	return nil, nil
+func (m *testServerIssueManager) CreateIssues(_ context.Context, _ web.IssueCreateInput) ([]core.Issue, error) {
+	return []core.Issue{}, nil
 }
 
-func (m *testServerPlanManager) CreateDraftFromFiles(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
-	return nil, nil
+func (m *testServerIssueManager) SubmitForReview(_ context.Context, issueID string, _ web.IssueReviewInput) (*core.Issue, error) {
+	return &core.Issue{ID: issueID}, nil
 }
 
-func (m *testServerPlanManager) SubmitReview(_ context.Context, _ string, _ secretary.ReviewInput) (*core.TaskPlan, error) {
-	return nil, nil
-}
-
-func (m *testServerPlanManager) ApplyPlanAction(_ context.Context, _ string, _ secretary.PlanAction) (*core.TaskPlan, error) {
-	return nil, nil
+func (m *testServerIssueManager) ApplyIssueAction(_ context.Context, issueID string, _ web.IssueAction) (*core.Issue, error) {
+	return &core.Issue{ID: issueID}, nil
 }

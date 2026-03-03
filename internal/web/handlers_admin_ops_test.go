@@ -16,14 +16,14 @@ import (
 
 func TestAdminOps_ForceReady_Audited(t *testing.T) {
 	store := newTestStore(t)
-	task := seedAdminTaskFixture(t, store, "pipe-admin-ready", core.ItemPending)
+	issue := seedAdminIssueFixture(t, store, "pipe-admin-ready", core.IssueStatusDraft)
 
 	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	body := map[string]any{
-		"task_id":  task.ID,
+		"issue_id": issue.ID,
 		"trace_id": "trace-force-ready",
 	}
 	resp := postJSON(t, ts.URL+"/api/v1/admin/ops/force-ready", body)
@@ -32,15 +32,15 @@ func TestAdminOps_ForceReady_Audited(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	updated, err := store.GetTaskItem(task.ID)
+	updated, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("GetTaskItem() error = %v", err)
+		t.Fatalf("GetIssue() error = %v", err)
 	}
-	if updated.Status != core.ItemReady {
-		t.Fatalf("task status = %s, want %s", updated.Status, core.ItemReady)
+	if updated.Status != core.IssueStatusReady {
+		t.Fatalf("issue status = %s, want %s", updated.Status, core.IssueStatusReady)
 	}
 
-	actions, err := store.GetActions(task.PipelineID)
+	actions, err := store.GetActions(issue.PipelineID)
 	if err != nil {
 		t.Fatalf("GetActions() error = %v", err)
 	}
@@ -57,14 +57,14 @@ func TestAdminOps_ForceReady_Audited(t *testing.T) {
 
 func TestAdminOps_ForceUnblock_Audited(t *testing.T) {
 	store := newTestStore(t)
-	task := seedAdminTaskFixture(t, store, "pipe-admin-unblock", core.ItemBlockedByFailure)
+	issue := seedAdminIssueFixture(t, store, "pipe-admin-unblock", core.IssueStatusFailed)
 
 	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	body := map[string]any{
-		"task_id":  task.ID,
+		"task_id":  issue.ID,
 		"trace_id": "trace-force-unblock",
 	}
 	resp := postJSON(t, ts.URL+"/api/v1/admin/ops/force-unblock", body)
@@ -73,15 +73,15 @@ func TestAdminOps_ForceUnblock_Audited(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
 
-	updated, err := store.GetTaskItem(task.ID)
+	updated, err := store.GetIssue(issue.ID)
 	if err != nil {
-		t.Fatalf("GetTaskItem() error = %v", err)
+		t.Fatalf("GetIssue() error = %v", err)
 	}
-	if updated.Status != core.ItemReady {
-		t.Fatalf("task status = %s, want %s", updated.Status, core.ItemReady)
+	if updated.Status != core.IssueStatusReady {
+		t.Fatalf("issue status = %s, want %s", updated.Status, core.IssueStatusReady)
 	}
 
-	actions, err := store.GetActions(task.PipelineID)
+	actions, err := store.GetActions(issue.PipelineID)
 	if err != nil {
 		t.Fatalf("GetActions() error = %v", err)
 	}
@@ -145,7 +145,7 @@ func postJSON(t *testing.T, url string, body map[string]any) *http.Response {
 	return resp
 }
 
-func seedAdminTaskFixture(t *testing.T, store core.Store, pipelineID string, status core.TaskItemStatus) *core.TaskItem {
+func seedAdminIssueFixture(t *testing.T, store core.Store, pipelineID string, status core.IssueStatus) *core.Issue {
 	t.Helper()
 
 	project := &core.Project{
@@ -175,30 +175,23 @@ func seedAdminTaskFixture(t *testing.T, store core.Store, pipelineID string, sta
 		t.Fatalf("SavePipeline() error = %v", err)
 	}
 
-	plan := &core.TaskPlan{
-		ID:         "plan-" + pipelineID,
+	issue := &core.Issue{
+		ID:         "issue-" + pipelineID,
 		ProjectID:  project.ID,
-		Name:       "plan",
-		Status:     core.PlanExecuting,
-		WaitReason: core.WaitNone,
+		Title:      "admin-issue",
+		Body:       "admin issue",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     status,
+		PipelineID: pipelineID,
 		FailPolicy: core.FailBlock,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
-	if err := store.SaveTaskPlan(plan); err != nil {
-		t.Fatalf("SaveTaskPlan() error = %v", err)
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue() error = %v", err)
 	}
-
-	task := &core.TaskItem{
-		ID:          "task-" + pipelineID,
-		PlanID:      plan.ID,
-		Title:       "admin-task",
-		Description: "admin task",
-		Status:      status,
-		PipelineID:  pipelineID,
-	}
-	if err := store.SaveTaskItem(task); err != nil {
-		t.Fatalf("SaveTaskItem() error = %v", err)
-	}
-	return task
+	return issue
 }
 
 type fakeWebhookReplayer struct {

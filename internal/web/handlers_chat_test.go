@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/secretary"
 )
 
 func TestCreateChatSessionThenGetChatSession(t *testing.T) {
@@ -400,26 +399,26 @@ func TestDeleteChatSession(t *testing.T) {
 	}
 }
 
-func TestCreateChatSessionRejectsAutoCreatePlanParam(t *testing.T) {
+func TestCreateChatSessionRejectsLegacyAutoCreatePlanParam(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
-		ID:       "proj-chat-plan-draft",
-		Name:     "chat-plan-draft",
-		RepoPath: filepath.Join(t.TempDir(), "repo-chat-plan-draft"),
+		ID:       "proj-chat-issue-draft",
+		Name:     "chat-issue-draft",
+		RepoPath: filepath.Join(t.TempDir(), "repo-chat-issue-draft"),
 	}
 	if err := store.CreateProject(&project); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
 
-	createDraftCalled := false
-	planManager := &testPlanManager{
-		createDraftFn: func(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
-			createDraftCalled = true
+	createIssuesCalled := false
+	issueManager := &testPlanManager{
+		createIssuesFn: func(_ context.Context, _ IssueCreateInput) ([]core.Issue, error) {
+			createIssuesCalled = true
 			return nil, nil
 		},
 	}
 
-	srv := NewServer(Config{Store: store, PlanManager: planManager})
+	srv := NewServer(Config{Store: store, IssueManager: issueManager})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -432,7 +431,7 @@ func TestCreateChatSessionRejectsAutoCreatePlanParam(t *testing.T) {
 	}
 
 	resp, err := http.Post(
-		ts.URL+"/api/v1/projects/proj-chat-plan-draft/chat",
+		ts.URL+"/api/v1/projects/proj-chat-issue-draft/chat",
 		"application/json",
 		bytes.NewReader(rawBody),
 	)
@@ -443,26 +442,35 @@ func TestCreateChatSessionRejectsAutoCreatePlanParam(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
-	if createDraftCalled {
-		t.Fatal("expected no plan manager calls from /chat")
+
+	var apiErr apiError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode api error: %v", err)
+	}
+	if apiErr.Code != "INVALID_JSON" {
+		t.Fatalf("expected INVALID_JSON, got %s", apiErr.Code)
+	}
+
+	if createIssuesCalled {
+		t.Fatal("expected no issue manager calls from /chat")
 	}
 }
 
-func TestCreateChatSessionDoesNotAutoCreatePlanByDefault(t *testing.T) {
+func TestCreateChatSessionDoesNotAutoCreateIssueByDefault(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
-		ID:       "proj-chat-plan-default-off",
-		Name:     "chat-plan-default-off",
-		RepoPath: filepath.Join(t.TempDir(), "repo-chat-plan-default-off"),
+		ID:       "proj-chat-issue-default-off",
+		Name:     "chat-issue-default-off",
+		RepoPath: filepath.Join(t.TempDir(), "repo-chat-issue-default-off"),
 	}
 	if err := store.CreateProject(&project); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
 
-	createDraftCalled := false
-	planManager := &testPlanManager{
-		createDraftFn: func(_ context.Context, _ secretary.CreateDraftInput) (*core.TaskPlan, error) {
-			createDraftCalled = true
+	createIssuesCalled := false
+	issueManager := &testPlanManager{
+		createIssuesFn: func(_ context.Context, _ IssueCreateInput) ([]core.Issue, error) {
+			createIssuesCalled = true
 			return nil, nil
 		},
 	}
@@ -474,21 +482,21 @@ func TestCreateChatSessionDoesNotAutoCreatePlanByDefault(t *testing.T) {
 	}
 	srv := NewServer(Config{
 		Store:         store,
-		PlanManager:   planManager,
+		IssueManager:  issueManager,
 		ChatAssistant: assistant,
 	})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	rawBody, err := json.Marshal(map[string]any{
-		"message": "默认不自动建计划",
+		"message": "默认不自动建 issue",
 	})
 	if err != nil {
 		t.Fatalf("marshal request body: %v", err)
 	}
 
 	resp, err := http.Post(
-		ts.URL+"/api/v1/projects/proj-chat-plan-default-off/chat",
+		ts.URL+"/api/v1/projects/proj-chat-issue-default-off/chat",
 		"application/json",
 		bytes.NewReader(rawBody),
 	)
@@ -504,8 +512,8 @@ func TestCreateChatSessionDoesNotAutoCreatePlanByDefault(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		t.Fatalf("decode create chat response: %v", err)
 	}
-	if createDraftCalled {
-		t.Fatal("expected no plan manager calls from /chat")
+	if createIssuesCalled {
+		t.Fatal("expected no issue manager calls from /chat")
 	}
 }
 

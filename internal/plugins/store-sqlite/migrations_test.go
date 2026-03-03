@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestMigration_AddsTaskContractColumns_BackwardCompatible(t *testing.T) {
+func TestMigration_Wave3IssueCutoverSchema_BackwardCompatible(t *testing.T) {
 	db := openLegacySQLite(t)
 	defer db.Close()
 
@@ -15,41 +15,63 @@ func TestMigration_AddsTaskContractColumns_BackwardCompatible(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO projects (id, name, repo_path) VALUES ('proj-mig-1', 'proj', '/tmp/proj-mig-1')`); err != nil {
 		t.Fatalf("insert project: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO task_plans (id, project_id, name, status) VALUES ('plan-mig-done', 'proj-mig-1', 'done plan', 'done')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO pipelines (id, project_id, name, template, status, task_item_id) VALUES ('pipe-mig-1', 'proj-mig-1', 'pipe', 'standard', 'done', 'task-mig-1')`); err != nil {
+		t.Fatalf("insert pipeline: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO task_plans (id, project_id, name, status) VALUES ('plan-mig-1', 'proj-mig-1', 'done plan', 'done')`); err != nil {
 		t.Fatalf("insert task_plan: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO task_items (id, plan_id, title, description, status) VALUES ('task-mig-done', 'plan-mig-done', 'task', 'desc', 'done')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO task_items (id, plan_id, title, description, pipeline_id, status) VALUES ('task-mig-1', 'plan-mig-1', 'task', 'desc', 'pipe-mig-1', 'done')`); err != nil {
 		t.Fatalf("insert task_item: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO pipelines (id, project_id, name, template, status) VALUES ('pipe-mig-done', 'proj-mig-1', 'pipe', 'standard', 'done')`); err != nil {
-		t.Fatalf("insert pipeline: %v", err)
+	if _, err := db.Exec(`
+INSERT INTO review_records (plan_id, round, reviewer, verdict, issues, fixes, score)
+VALUES ('plan-mig-1', 2, 'ai-panel', 'approved', '[]', '[]', 90)
+`); err != nil {
+		t.Fatalf("insert review_record: %v", err)
 	}
 
 	if err := applyMigrations(db); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
 
-	assertColumnExists(t, db, "pipelines", "task_item_id")
-	assertColumnExists(t, db, "task_plans", "spec_profile")
-	assertColumnExists(t, db, "task_plans", "contract_version")
-	assertColumnExists(t, db, "task_plans", "contract_checksum")
-	assertColumnExists(t, db, "task_plans", "source_files")
-	assertColumnExists(t, db, "task_plans", "file_contents")
-	assertColumnExists(t, db, "task_items", "inputs")
-	assertColumnExists(t, db, "task_items", "outputs")
-	assertColumnExists(t, db, "task_items", "acceptance")
-	assertColumnExists(t, db, "task_items", "constraints")
+	assertTableExists(t, db, "issues")
+	assertTableExists(t, db, "issue_attachments")
+	assertTableExists(t, db, "issue_changes")
+	assertTableNotExists(t, db, "task_plans")
+	assertTableNotExists(t, db, "task_items")
 
-	var plans int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM task_plans WHERE id='plan-mig-done'`).Scan(&plans); err != nil {
-		t.Fatalf("count migrated task_plan: %v", err)
+	assertColumnExists(t, db, "pipelines", "issue_id")
+	assertColumnNotExists(t, db, "pipelines", "task_item_id")
+	assertColumnExists(t, db, "review_records", "issue_id")
+	assertColumnNotExists(t, db, "review_records", "plan_id")
+
+	var issueRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM issues WHERE id='task-mig-1'`).Scan(&issueRows); err != nil {
+		t.Fatalf("count migrated issues: %v", err)
 	}
-	if plans != 1 {
-		t.Fatalf("expected migrated task_plan to be preserved, got count=%d", plans)
+	if issueRows != 1 {
+		t.Fatalf("expected migrated issue row count=1, got %d", issueRows)
+	}
+
+	var reviewIssueID string
+	if err := db.QueryRow(`SELECT issue_id FROM review_records WHERE reviewer='ai-panel'`).Scan(&reviewIssueID); err != nil {
+		t.Fatalf("query migrated review_records.issue_id: %v", err)
+	}
+	if reviewIssueID != "plan-mig-1" {
+		t.Fatalf("expected review_records.issue_id=plan-mig-1, got %q", reviewIssueID)
+	}
+
+	var wave3Flag string
+	if err := db.QueryRow(`SELECT flag_value FROM migration_flags WHERE flag_key='wave3_issue_cutover_done'`).Scan(&wave3Flag); err != nil {
+		t.Fatalf("query wave3 cutover flag: %v", err)
+	}
+	if wave3Flag != "1" {
+		t.Fatalf("expected wave3 cutover flag=1, got %q", wave3Flag)
 	}
 }
 
-func TestMigration_BackfillPipelineTaskItemID_FromLegacyTaskItems(t *testing.T) {
+func TestMigration_BackfillPipelineIssueID_FromLegacyTaskItems(t *testing.T) {
 	db := openLegacySQLite(t)
 	defer db.Close()
 
@@ -62,7 +84,7 @@ func TestMigration_BackfillPipelineTaskItemID_FromLegacyTaskItems(t *testing.T) 
 	if _, err := db.Exec(`INSERT INTO task_plans (id, project_id, name, status) VALUES ('plan-mig-2', 'proj-mig-2', 'done plan', 'done')`); err != nil {
 		t.Fatalf("insert task_plan: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO pipelines (id, project_id, name, template, status) VALUES ('pipe-mig-2', 'proj-mig-2', 'pipe', 'standard', 'done')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO pipelines (id, project_id, name, template, status, task_item_id) VALUES ('pipe-mig-2', 'proj-mig-2', 'pipe', 'standard', 'done', '')`); err != nil {
 		t.Fatalf("insert pipeline: %v", err)
 	}
 	if _, err := db.Exec(`
@@ -78,21 +100,21 @@ VALUES
 		t.Fatalf("apply migrations: %v", err)
 	}
 
-	var taskItemID string
-	if err := db.QueryRow(`SELECT COALESCE(task_item_id, '') FROM pipelines WHERE id='pipe-mig-2'`).Scan(&taskItemID); err != nil {
-		t.Fatalf("query pipelines.task_item_id: %v", err)
+	var issueID string
+	if err := db.QueryRow(`SELECT COALESCE(issue_id, '') FROM pipelines WHERE id='pipe-mig-2'`).Scan(&issueID); err != nil {
+		t.Fatalf("query pipelines.issue_id: %v", err)
 	}
-	if taskItemID != "task-early" {
-		t.Fatalf("expected deterministic backfill task_item_id=task-early, got %q", taskItemID)
+	if issueID != "task-early" {
+		t.Fatalf("expected deterministic backfill issue_id=task-early, got %q", issueID)
 	}
 }
 
-func TestMigration_AddsQueuedAtColumnBeforeCreatingIndexes(t *testing.T) {
+func TestMigration_AddsIssueIDAndQueuedAtBeforeCreatingIndexes(t *testing.T) {
 	db := openLegacySQLite(t)
 	defer db.Close()
 
-	// Simulate an older local DB: pipelines exists but lacks queued_at, while applyMigrations wants
-	// to create idx_pipelines_status_queued_at. This must not fail.
+	// Simulate an older local DB: pipelines exists but lacks queued_at/issue_id.
+	// applyMigrations must still finish and rebuild to wave3-compatible schema.
 	if _, err := db.Exec(`
 CREATE TABLE pipelines (
 	id                TEXT PRIMARY KEY,
@@ -127,6 +149,8 @@ CREATE TABLE pipelines (
 	}
 
 	assertColumnExists(t, db, "pipelines", "queued_at")
+	assertColumnExists(t, db, "pipelines", "issue_id")
+	assertColumnNotExists(t, db, "pipelines", "task_item_id")
 }
 
 func assertColumnExists(t *testing.T, db *sql.DB, table, column string) {
@@ -138,5 +162,17 @@ func assertColumnExists(t *testing.T, db *sql.DB, table, column string) {
 	}
 	if !ok {
 		t.Fatalf("expected column %s.%s to exist", table, column)
+	}
+}
+
+func assertColumnNotExists(t *testing.T, db *sql.DB, table, column string) {
+	t.Helper()
+
+	ok, err := hasColumn(db, table, column)
+	if err != nil {
+		t.Fatalf("check column %s.%s: %v", table, column, err)
+	}
+	if ok {
+		t.Fatalf("expected column %s.%s to be absent", table, column)
 	}
 }

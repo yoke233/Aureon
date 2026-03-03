@@ -20,8 +20,9 @@ type adminOpsHandlers struct {
 	replayer   WebhookDeliveryReplayer
 }
 
-type adminTaskOperationRequest struct {
-	TaskID  string `json:"task_id"`
+type adminIssueOperationRequest struct {
+	IssueID string `json:"issue_id"`
+	TaskID  string `json:"task_id,omitempty"`
 	TraceID string `json:"trace_id"`
 	Reason  string `json:"reason"`
 }
@@ -44,18 +45,18 @@ func registerAdminOpsRoutes(r chi.Router, store core.Store, adminToken string, r
 }
 
 func (h *adminOpsHandlers) handleForceReady(w http.ResponseWriter, r *http.Request) {
-	h.handleTaskStateMutation(w, r, "force_ready", core.ItemReady)
+	h.handleTaskStateMutation(w, r, "force_ready", core.IssueStatusReady)
 }
 
 func (h *adminOpsHandlers) handleForceUnblock(w http.ResponseWriter, r *http.Request) {
-	h.handleTaskStateMutation(w, r, "force_unblock", core.ItemReady)
+	h.handleTaskStateMutation(w, r, "force_unblock", core.IssueStatusReady)
 }
 
 func (h *adminOpsHandlers) handleTaskStateMutation(
 	w http.ResponseWriter,
 	r *http.Request,
 	action string,
-	targetStatus core.TaskItemStatus,
+	targetStatus core.IssueStatus,
 ) {
 	if !h.isAuthorized(r) {
 		writeAPIError(w, http.StatusUnauthorized, "admin operation unauthorized", "ADMIN_UNAUTHORIZED")
@@ -66,30 +67,33 @@ func (h *adminOpsHandlers) handleTaskStateMutation(
 		return
 	}
 
-	var req adminTaskOperationRequest
+	var req adminIssueOperationRequest
 	if err := decodeJSONBodyStrict(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid json body", "INVALID_JSON")
 		return
 	}
-	taskID := strings.TrimSpace(req.TaskID)
-	if taskID == "" {
-		writeAPIError(w, http.StatusBadRequest, "task_id is required", "TASK_ID_REQUIRED")
+	issueID := strings.TrimSpace(req.IssueID)
+	if issueID == "" {
+		issueID = strings.TrimSpace(req.TaskID)
+	}
+	if issueID == "" {
+		writeAPIError(w, http.StatusBadRequest, "issue_id is required", "ISSUE_ID_REQUIRED")
 		return
 	}
 
-	task, err := h.store.GetTaskItem(taskID)
+	issue, err := h.store.GetIssue(issueID)
 	if err != nil {
 		if isNotFoundError(err) {
-			writeAPIError(w, http.StatusNotFound, "task item not found", "TASK_ITEM_NOT_FOUND")
+			writeAPIError(w, http.StatusNotFound, "issue not found", "ISSUE_NOT_FOUND")
 			return
 		}
-		writeAPIError(w, http.StatusInternalServerError, "failed to load task item", "GET_TASK_ITEM_FAILED")
+		writeAPIError(w, http.StatusInternalServerError, "failed to load issue", "GET_ISSUE_FAILED")
 		return
 	}
 
-	task.Status = targetStatus
-	if err := h.store.SaveTaskItem(task); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "failed to update task item", "SAVE_TASK_ITEM_FAILED")
+	issue.Status = targetStatus
+	if err := h.store.SaveIssue(issue); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "failed to update issue", "SAVE_ISSUE_FAILED")
 		return
 	}
 
@@ -99,7 +103,7 @@ func (h *adminOpsHandlers) handleTaskStateMutation(
 		auditMessage += " reason=" + reason
 	}
 	if err := h.store.RecordAction(core.HumanAction{
-		PipelineID: task.PipelineID,
+		PipelineID: issue.PipelineID,
 		Action:     action,
 		Message:    auditMessage,
 		Source:     "admin",
@@ -111,7 +115,7 @@ func (h *adminOpsHandlers) handleTaskStateMutation(
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":   "ok",
-		"task_id":  task.ID,
+		"issue_id": issue.ID,
 		"trace_id": traceID,
 	})
 }

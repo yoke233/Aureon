@@ -41,10 +41,93 @@ type serverScheduler interface {
 	Stop(ctx context.Context) error
 }
 
-type serverPlanManager interface {
-	web.PlanManager
+type serverIssueManager interface {
+	web.IssueManager
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
+}
+
+type depSchedulerIssueAdapter struct {
+	scheduler *secretary.DepScheduler
+}
+
+func (a *depSchedulerIssueAdapter) Start(ctx context.Context) error {
+	if a == nil || a.scheduler == nil {
+		return errors.New("issue scheduler is not configured")
+	}
+	return a.scheduler.Start(ctx)
+}
+
+func (a *depSchedulerIssueAdapter) Stop(ctx context.Context) error {
+	if a == nil || a.scheduler == nil {
+		return nil
+	}
+	return a.scheduler.Stop(ctx)
+}
+
+func (a *depSchedulerIssueAdapter) RecoverExecutingIssues(ctx context.Context) error {
+	if a == nil || a.scheduler == nil {
+		return errors.New("issue scheduler is not configured")
+	}
+	return a.scheduler.RecoverExecutingIssues(ctx, "")
+}
+
+func (a *depSchedulerIssueAdapter) StartIssue(ctx context.Context, issue *core.Issue) error {
+	if a == nil || a.scheduler == nil {
+		return errors.New("issue scheduler is not configured")
+	}
+	return a.scheduler.ScheduleIssues(ctx, []*core.Issue{issue})
+}
+
+type secretaryIssueManagerAdapter struct {
+	manager *secretary.Manager
+	store   core.Store
+}
+
+func (a *secretaryIssueManagerAdapter) Start(ctx context.Context) error {
+	if a == nil || a.manager == nil {
+		return errors.New("issue manager is not configured")
+	}
+	return a.manager.Start(ctx)
+}
+
+func (a *secretaryIssueManagerAdapter) Stop(ctx context.Context) error {
+	if a == nil || a.manager == nil {
+		return nil
+	}
+	return a.manager.Stop(ctx)
+}
+
+func (a *secretaryIssueManagerAdapter) CreateIssues(context.Context, web.IssueCreateInput) ([]core.Issue, error) {
+	return nil, errors.New("issue creation via secretary manager is not implemented")
+}
+
+func (a *secretaryIssueManagerAdapter) SubmitForReview(ctx context.Context, issueID string, _ web.IssueReviewInput) (*core.Issue, error) {
+	if a == nil || a.manager == nil {
+		return nil, errors.New("issue manager is not configured")
+	}
+	id := strings.TrimSpace(issueID)
+	if id == "" {
+		return nil, errors.New("issue id is required")
+	}
+	if err := a.manager.SubmitForReview(ctx, []string{id}); err != nil {
+		return nil, err
+	}
+	if a.store == nil {
+		return &core.Issue{ID: id}, nil
+	}
+	return a.store.GetIssue(id)
+}
+
+func (a *secretaryIssueManagerAdapter) ApplyIssueAction(ctx context.Context, issueID string, action web.IssueAction) (*core.Issue, error) {
+	if a == nil || a.manager == nil {
+		return nil, errors.New("issue manager is not configured")
+	}
+	feedback := ""
+	if action.Feedback != nil {
+		feedback = strings.TrimSpace(action.Feedback.Detail)
+	}
+	return a.manager.ApplyIssueAction(ctx, issueID, action.Action, feedback)
 }
 
 var (
@@ -54,18 +137,18 @@ var (
 	newServerScheduler = func(exec *engine.Executor, store core.Store) (serverScheduler, error) {
 		return buildScheduler(exec, store)
 	}
-	newServerPlanManager = func(
+	newServerIssueManager = func(
 		exec *engine.Executor,
 		bootstrapSet *pluginfactory.BootstrapSet,
 		bus *eventbus.Bus,
 		secretaryCfg config.SecretaryConfig,
 		roleBinds config.RoleBindings,
-	) (serverPlanManager, error) {
+	) (serverIssueManager, error) {
 		if exec == nil {
-			return nil, errors.New("executor is required for plan manager")
+			return nil, errors.New("executor is required for issue manager")
 		}
 		if bootstrapSet == nil {
-			return nil, errors.New("bootstrap set is required for plan manager")
+			return nil, errors.New("bootstrap set is required for issue manager")
 		}
 		agentPlugin, err := selectSecretaryAgentPlugin(bootstrapSet.Agents)
 		if err != nil {
@@ -113,7 +196,20 @@ var (
 		if bootstrapSet.ReviewGate != nil {
 			opts = append(opts, secretary.WithReviewGate(bootstrapSet.ReviewGate))
 		}
-		return secretary.NewManager(bootstrapSet.Store, agent, reviewPanel, depScheduler, opts...)
+		manager, err := secretary.NewManager(
+			bootstrapSet.Store,
+			agent,
+			reviewPanel,
+			&depSchedulerIssueAdapter{scheduler: depScheduler},
+			opts...,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return &secretaryIssueManagerAdapter{
+			manager: manager,
+			store:   bootstrapSet.Store,
+		}, nil
 	}
 )
 
@@ -535,36 +631,25 @@ func runServer(ctx context.Context, args []string) error {
 		return err
 	}
 
-	planManager, err := newServerPlanManager(exec, bootstrapSet, bus, cfg.Secretary, cfg.RoleBinds)
+	issueManager, err := newServerIssueManager(exec, bootstrapSet, bus, cfg.Secretary, cfg.RoleBinds)
 	if err != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		stopErr := scheduler.Stop(stopCtx)
 		return errors.Join(err, stopErr)
 	}
-	if planManager == nil {
+	if issueManager == nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		stopErr := scheduler.Stop(stopCtx)
-		return errors.Join(errors.New("plan manager is not configured"), stopErr)
+		return errors.Join(errors.New("issue manager is not configured"), stopErr)
 	}
-	if err := planManager.Start(ctx); err != nil {
+	if err := issueManager.Start(ctx); err != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		managerStopErr := planManager.Stop(stopCtx)
+		managerStopErr := issueManager.Stop(stopCtx)
 		stopErr := scheduler.Stop(stopCtx)
 		return errors.Join(err, managerStopErr, stopErr)
-	}
-	var a2aBridge web.A2ABridge
-	if a2aPlanManager, ok := planManager.(secretary.A2APlanManager); ok {
-		a2aBridge, err = secretary.NewA2ABridge(store, a2aPlanManager)
-		if err != nil {
-			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			managerStopErr := planManager.Stop(stopCtx)
-			stopErr := scheduler.Stop(stopCtx)
-			return errors.Join(fmt.Errorf("build a2a bridge: %w", err), managerStopErr, stopErr)
-		}
 	}
 
 	hub := web.NewHub()
@@ -602,18 +687,14 @@ func runServer(ctx context.Context, args []string) error {
 		Addr:               listenAddr,
 		AuthEnabled:        cfg.Server.AuthEnabled,
 		BearerToken:        cfg.Server.AuthToken,
-		A2AEnabled:         cfg.A2A.Enabled,
-		A2AToken:           cfg.A2A.Token,
-		A2AVersion:         cfg.A2A.Version,
 		WebhookSecret:      cfg.GitHub.WebhookSecret,
 		Store:              store,
-		PlanManager:        planManager,
-		A2ABridge:          a2aBridge,
+		IssueManager:       issueManager,
 		ChatAssistant:      chatAssistant,
 		EventPublisher:     bus,
 		PipelineExec:       exec,
 		PipelineStageRoles: cfg.RoleBinds.Pipeline.StageRoles,
-		PlanParserRoleID:   strings.TrimSpace(cfg.RoleBinds.PlanParser.Role),
+		IssueParserRoleID:  strings.TrimSpace(cfg.RoleBinds.PlanParser.Role),
 		Hub:                hub,
 	})
 
@@ -628,7 +709,7 @@ func runServer(ctx context.Context, args []string) error {
 	case serverErr := <-serverErrCh:
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		managerStopErr := planManager.Stop(stopCtx)
+		managerStopErr := issueManager.Stop(stopCtx)
 		stopErr := scheduler.Stop(stopCtx)
 		bus.Unsubscribe(sub)
 		<-bridgeDone
@@ -643,7 +724,7 @@ func runServer(ctx context.Context, args []string) error {
 	if err := apiServer.Shutdown(stopCtx); err != nil {
 		shutdownErr = err
 	}
-	if err := planManager.Stop(stopCtx); err != nil && shutdownErr == nil {
+	if err := issueManager.Stop(stopCtx); err != nil && shutdownErr == nil {
 		shutdownErr = err
 	}
 	if err := scheduler.Stop(stopCtx); err != nil && shutdownErr == nil {

@@ -152,7 +152,7 @@ func TestChatRunEventCRUD(t *testing.T) {
 	}
 }
 
-func TestTaskPlanTaskItemAndReviewRecordCRUD(t *testing.T) {
+func TestIssueAndReviewRecordCRUD(t *testing.T) {
 	s, err := New(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -175,31 +175,6 @@ func TestTaskPlanTaskItemAndReviewRecordCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan := &core.TaskPlan{
-		ID:          "plan-20260301-a3f1b2c0",
-		ProjectID:   project.ID,
-		SessionID:   session.ID,
-		Name:        "add-oauth-login",
-		Status:      core.PlanDraft,
-		WaitReason:  core.WaitNone,
-		FailPolicy:  core.FailBlock,
-		ReviewRound: 1,
-	}
-	if err := s.CreateTaskPlan(plan); err != nil {
-		t.Fatal(err)
-	}
-
-	gotPlan, err := s.GetTaskPlan(plan.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotPlan.Status != core.PlanDraft {
-		t.Fatalf("expected draft status, got %s", gotPlan.Status)
-	}
-	if len(gotPlan.Tasks) != 0 {
-		t.Fatalf("expected empty tasks on new plan, got %d", len(gotPlan.Tasks))
-	}
-
 	pipeline := &core.Pipeline{
 		ID:        "20260301-123456abcdef",
 		ProjectID: project.ID,
@@ -212,95 +187,113 @@ func TestTaskPlanTaskItemAndReviewRecordCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	item := &core.TaskItem{
-		ID:          "task-a3f1b2c0-1",
-		PlanID:      plan.ID,
-		Title:       "后端 OAuth 接口",
-		Description: "实现 OAuth 登录接口并添加测试",
-		Labels:      []string{"backend", "auth"},
-		DependsOn:   []string{},
-		Template:    "standard",
-		Status:      core.ItemPending,
+	issue := &core.Issue{
+		ID:         "issue-20260301-a3f1b2c0",
+		ProjectID:  project.ID,
+		SessionID:  session.ID,
+		Title:      "后端 OAuth 接口",
+		Body:       "实现 OAuth 登录接口并添加测试",
+		Labels:     []string{"backend", "auth"},
+		DependsOn:  []string{},
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusDraft,
+		FailPolicy: core.FailBlock,
 	}
-	if err := s.CreateTaskItem(item); err != nil {
+	if err := s.CreateIssue(issue); err != nil {
 		t.Fatal(err)
 	}
 
-	createdItem, err := s.GetTaskItem(item.ID)
+	createdIssue, err := s.GetIssue(issue.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if createdItem.Status != core.ItemPending {
-		t.Fatalf("expected pending item, got %s", createdItem.Status)
+	if createdIssue.Status != core.IssueStatusDraft {
+		t.Fatalf("expected draft issue status, got %s", createdIssue.Status)
 	}
 
-	item.Status = core.ItemRunning
-	item.PipelineID = pipeline.ID
-	item.ExternalID = "ISSUE-101"
-	if err := s.SaveTaskItem(item); err != nil {
+	issue.Status = core.IssueStatusExecuting
+	issue.PipelineID = pipeline.ID
+	issue.ExternalID = "ISSUE-101"
+	if err := s.SaveIssue(issue); err != nil {
 		t.Fatal(err)
 	}
 
-	byPipeline, err := s.GetTaskItemByPipeline(pipeline.ID)
+	byPipeline, err := s.GetIssueByPipeline(pipeline.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if byPipeline.ID != item.ID {
-		t.Fatalf("expected task %s by pipeline, got %s", item.ID, byPipeline.ID)
+	if byPipeline == nil || byPipeline.ID != issue.ID {
+		t.Fatalf("expected issue %s by pipeline, got %#v", issue.ID, byPipeline)
 	}
 
-	items, err := s.GetTaskItemsByPlan(plan.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].ID != item.ID {
-		t.Fatalf("unexpected items by plan: %#v", items)
-	}
-
-	plan.Status = core.PlanExecuting
-	plan.WaitReason = core.WaitNone
-	if err := s.SaveTaskPlan(plan); err != nil {
-		t.Fatal(err)
-	}
-
-	list, err := s.ListTaskPlans(project.ID, core.TaskPlanFilter{
-		Status: string(core.PlanExecuting),
+	list, total, err := s.ListIssues(project.ID, core.IssueFilter{
+		Status: string(core.IssueStatusExecuting),
 		Limit:  10,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].ID != plan.ID {
-		t.Fatalf("unexpected task plan list: %#v", list)
+	if total != 1 || len(list) != 1 || list[0].ID != issue.ID {
+		t.Fatalf("unexpected issue list: total=%d issues=%#v", total, list)
 	}
 
-	active, err := s.GetActiveTaskPlans()
+	active, err := s.GetActiveIssues(project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(active) != 1 || active[0].ID != plan.ID {
-		t.Fatalf("unexpected active task plans: %#v", active)
+	if len(active) != 1 || active[0].ID != issue.ID {
+		t.Fatalf("unexpected active issues: %#v", active)
+	}
+
+	if err := s.SaveIssueAttachment(issue.ID, "docs/oauth.md", "oauth design"); err != nil {
+		t.Fatal(err)
+	}
+	attachments, err := s.GetIssueAttachments(issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 1 || attachments[0].Path != "docs/oauth.md" {
+		t.Fatalf("unexpected attachments: %#v", attachments)
+	}
+
+	if err := s.SaveIssueChange(&core.IssueChange{
+		IssueID:   issue.ID,
+		Field:     "status",
+		OldValue:  "draft",
+		NewValue:  "executing",
+		Reason:    "pipeline started",
+		ChangedBy: "scheduler",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := s.GetIssueChanges(issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Field != "status" {
+		t.Fatalf("unexpected changes: %#v", changes)
 	}
 
 	score := 88
 	record := &core.ReviewRecord{
-		PlanID:   plan.ID,
+		IssueID:  issue.ID,
 		Round:    1,
 		Reviewer: "completeness",
 		Verdict:  "issues_found",
 		Issues: []core.ReviewIssue{
 			{
 				Severity:    "warning",
-				TaskID:      item.ID,
+				IssueID:     issue.ID,
 				Description: "任务粒度略大",
 				Suggestion:  "拆分为接口实现和回归测试两个任务",
 			},
 		},
 		Fixes: []core.ProposedFix{
 			{
-				TaskID:      item.ID,
+				IssueID:     issue.ID,
 				Description: "补充一个独立测试任务",
-				Suggestion:  "新增 task-a3f1b2c0-2",
+				Suggestion:  "新增 issue-20260301-a3f1b2c1",
 			},
 		},
 		Score: &score,
@@ -309,7 +302,7 @@ func TestTaskPlanTaskItemAndReviewRecordCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	records, err := s.GetReviewRecords(plan.ID)
+	records, err := s.GetReviewRecords(issue.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

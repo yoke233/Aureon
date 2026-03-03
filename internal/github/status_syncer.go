@@ -10,8 +10,8 @@ import (
 )
 
 type taskStatusMirror interface {
-	UpdateStatus(ctx context.Context, externalID string, status core.TaskItemStatus) error
-	SyncDependencies(ctx context.Context, item *core.TaskItem, allItems []core.TaskItem) error
+	UpdateStatus(ctx context.Context, externalID string, status core.IssueStatus) error
+	SyncDependencies(ctx context.Context, issue *core.Issue, allIssues []*core.Issue) error
 }
 
 type pipelineIssueSyncClient interface {
@@ -42,19 +42,19 @@ func NewStatusSyncer(tracker taskStatusMirror) *StatusSyncer {
 	return &StatusSyncer{tracker: tracker}
 }
 
-// RepairTask syncs final status and dependency labels for one task item.
-func (s *StatusSyncer) RepairTask(ctx context.Context, item *core.TaskItem, allItems []core.TaskItem) error {
-	if s == nil || s.tracker == nil || item == nil {
+// RepairTask syncs final status and dependency labels for one issue.
+func (s *StatusSyncer) RepairTask(ctx context.Context, issue *core.Issue, allIssues []*core.Issue) error {
+	if s == nil || s.tracker == nil || issue == nil {
 		return nil
 	}
-	if strings.TrimSpace(item.ExternalID) == "" {
+	if strings.TrimSpace(issue.ExternalID) == "" {
 		return nil
 	}
 
-	if err := s.tracker.UpdateStatus(ctx, item.ExternalID, item.Status); err != nil {
+	if err := s.tracker.UpdateStatus(ctx, issue.ExternalID, issue.Status); err != nil {
 		return err
 	}
-	return s.tracker.SyncDependencies(ctx, item, allItems)
+	return s.tracker.SyncDependencies(ctx, issue, allIssues)
 }
 
 // SyncPipelineEvent mirrors pipeline lifecycle events to GitHub issue labels/comments.

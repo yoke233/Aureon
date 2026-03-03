@@ -25,21 +25,21 @@ func (t *LocalTracker) Close() error {
 	return nil
 }
 
-func (t *LocalTracker) CreateTask(_ context.Context, item *core.TaskItem) (string, error) {
-	if item == nil {
+func (t *LocalTracker) CreateIssue(_ context.Context, issue *core.Issue) (string, error) {
+	if issue == nil {
 		return "", nil
 	}
-	if item.ExternalID != "" {
-		return item.ExternalID, nil
+	if issue.ExternalID != "" {
+		return issue.ExternalID, nil
 	}
-	return item.ID, nil
+	return issue.ID, nil
 }
 
-func (t *LocalTracker) UpdateStatus(context.Context, string, core.TaskItemStatus) error {
+func (t *LocalTracker) UpdateStatus(context.Context, string, core.IssueStatus) error {
 	return nil
 }
 
-func (t *LocalTracker) SyncDependencies(context.Context, *core.TaskItem, []core.TaskItem) error {
+func (t *LocalTracker) SyncDependencies(context.Context, *core.Issue, []*core.Issue) error {
 	return nil
 }
 
@@ -48,4 +48,3 @@ func (t *LocalTracker) OnExternalComplete(context.Context, string) error {
 }
 
 var _ core.Tracker = (*LocalTracker)(nil)
-

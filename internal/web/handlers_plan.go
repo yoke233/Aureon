@@ -10,60 +10,61 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/secretary"
 )
 
 const (
-	defaultPlanParserRoleID      = "plan_parser"
-	maxPlanSourceFileBytes       = 1 << 20 // 1MB
-	maxPlanSourceFilesTotalBytes = 5 << 20 // 5MB
+	defaultIssueParserRoleID      = "plan_parser"
+	maxIssueSourceFileBytes       = 1 << 20 // 1MB
+	maxIssueSourceFilesTotalBytes = 5 << 20 // 5MB
+	minIssueFeedbackDetailRunes   = 20
 )
 
-type planHandlers struct {
-	store       core.Store
-	planManager PlanManager
-	planRoleID  string
+type issueHandlers struct {
+	store        core.Store
+	issueManager IssueManager
+	issueRoleID  string
 }
 
-type createPlanRequest struct {
+type createIssuesRequest struct {
 	SessionID  string `json:"session_id"`
 	Name       string `json:"name"`
 	FailPolicy string `json:"fail_policy"`
 }
 
-type createPlanFromFilesRequest struct {
+type createIssuesFromFilesRequest struct {
 	SessionID  string   `json:"session_id"`
 	Name       string   `json:"name"`
 	FailPolicy string   `json:"fail_policy"`
 	FilePaths  []string `json:"file_paths"`
 }
 
-type planListResponse struct {
-	Items  []core.TaskPlan `json:"items"`
-	Total  int             `json:"total"`
-	Offset int             `json:"offset"`
+type issueListResponse struct {
+	Items  []core.Issue `json:"items"`
+	Total  int          `json:"total"`
+	Offset int          `json:"offset"`
 }
 
-type taskPlanStatusResponse struct {
+type issueStatusResponse struct {
 	Status string `json:"status"`
 }
 
-type planDAGNode struct {
-	ID         string              `json:"id"`
-	Title      string              `json:"title"`
-	Status     core.TaskItemStatus `json:"status"`
-	PipelineID string              `json:"pipeline_id"`
+type issueDAGNode struct {
+	ID         string           `json:"id"`
+	Title      string           `json:"title"`
+	Status     core.IssueStatus `json:"status"`
+	PipelineID string           `json:"pipeline_id"`
 }
 
-type planDAGEdge struct {
+type issueDAGEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 }
 
-type planDAGStats struct {
+type issueDAGStats struct {
 	Total   int `json:"total"`
 	Pending int `json:"pending"`
 	Ready   int `json:"ready"`
@@ -72,41 +73,66 @@ type planDAGStats struct {
 	Failed  int `json:"failed"`
 }
 
-type planDAGResponse struct {
-	Nodes []planDAGNode `json:"nodes"`
-	Edges []planDAGEdge `json:"edges"`
-	Stats planDAGStats  `json:"stats"`
+type issueDAGResponse struct {
+	Nodes []issueDAGNode `json:"nodes"`
+	Edges []issueDAGEdge `json:"edges"`
+	Stats issueDAGStats  `json:"stats"`
 }
 
-type planActionRequest struct {
-	Action   string              `json:"action"`
-	Feedback *planActionFeedback `json:"feedback,omitempty"`
+type issueActionRequest struct {
+	Action   string               `json:"action"`
+	Feedback *issueActionFeedback `json:"feedback,omitempty"`
 }
 
-type planActionFeedback struct {
+type issueActionFeedback struct {
 	Category          string `json:"category"`
 	Detail            string `json:"detail"`
 	ExpectedDirection string `json:"expected_direction,omitempty"`
 }
 
-func registerPlanRoutes(r chi.Router, store core.Store, planManager PlanManager, planParserRoleID string) {
-	h := &planHandlers{
-		store:       store,
-		planManager: planManager,
-		planRoleID:  resolvePlanParserRoleID(planParserRoleID),
-	}
-	r.Post("/projects/{projectID}/plans", h.createPlan)
-	r.Post("/projects/{projectID}/plans/from-files", h.createPlanFromFiles)
-	r.Get("/projects/{projectID}/plans", h.listPlans)
-	r.Get("/projects/{projectID}/plans/{id}", h.getPlan)
-	r.Get("/projects/{projectID}/plans/{id}/dag", h.getPlanDAG)
-	r.Post("/projects/{projectID}/plans/{id}/review", h.submitReview)
-	r.Post("/projects/{projectID}/plans/{id}/action", h.applyAction)
+var allowedIssueFeedbackCategories = map[string]struct{}{
+	"missing_node":    {},
+	"cycle":           {},
+	"self_dependency": {},
+	"bad_granularity": {},
+	"coverage_gap":    {},
+	"other":           {},
 }
 
-func (h *planHandlers) createPlan(w http.ResponseWriter, r *http.Request) {
+func registerIssueRoutes(r chi.Router, store core.Store, issueManager IssueManager, issueParserRoleID string) {
+	h := &issueHandlers{
+		store:        store,
+		issueManager: issueManager,
+		issueRoleID:  resolveIssueParserRoleID(issueParserRoleID),
+	}
+
+	registerResourceRoutes := func(base string) {
+		r.Post(base, h.createIssues)
+		r.Post(base+"/from-files", h.createIssuesFromFiles)
+		r.Get(base, h.listIssues)
+		r.Get(base+"/{id}", h.getIssue)
+		r.Get(base+"/{id}/dag", h.getIssueDAG)
+		r.Post(base+"/{id}/review", h.submitForReview)
+		r.Post(base+"/{id}/action", h.applyIssueAction)
+	}
+
+	registerResourceRoutes("/projects/{projectID}/issues")
+	// Backward-compatible aliases during cutover.
+	registerResourceRoutes("/projects/{projectID}/plans")
+}
+
+// registerPlanRoutes is kept as a compatibility alias for existing call sites.
+func registerPlanRoutes(r chi.Router, store core.Store, issueManager IssueManager, issueParserRoleID string) {
+	registerIssueRoutes(r, store, issueManager, issueParserRoleID)
+}
+
+func (h *issueHandlers) createIssues(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "store is not configured", "STORE_UNAVAILABLE")
+		return
+	}
+	if h.issueManager == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "issue manager is not configured", "ISSUE_MANAGER_UNAVAILABLE")
 		return
 	}
 
@@ -125,7 +151,7 @@ func (h *planHandlers) createPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req createPlanRequest
+	var req createIssuesRequest
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
@@ -161,22 +187,18 @@ func (h *planHandlers) createPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.planManager == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "plan manager is not configured", "PLAN_MANAGER_UNAVAILABLE")
-		return
-	}
-
-	createReq := secretary.Request{
+	createReq := IssueCreateRequest{
 		Conversation: summarizeChatMessages(session.Messages),
 		ProjectName:  strings.TrimSpace(project.Name),
 		RepoPath:     strings.TrimSpace(project.RepoPath),
-		Role:         h.planRoleID,
+		Role:         h.issueRoleID,
 		WorkDir:      strings.TrimSpace(project.RepoPath),
 	}
 	if createReq.WorkDir == "" {
 		createReq.WorkDir = "."
 	}
-	created, err := h.planManager.CreateDraft(r.Context(), secretary.CreateDraftInput{
+
+	issues, err := h.issueManager.CreateIssues(r.Context(), IssueCreateInput{
 		ProjectID:  projectID,
 		SessionID:  req.SessionID,
 		Name:       req.Name,
@@ -184,20 +206,25 @@ func (h *planHandlers) createPlan(w http.ResponseWriter, r *http.Request) {
 		Request:    createReq,
 	})
 	if err != nil {
-		log.Printf("[web][plan] create draft failed project=%s session=%s err=%v", projectID, req.SessionID, err)
-		writeAPIError(w, http.StatusInternalServerError, "failed to create task plan", "CREATE_TASK_PLAN_FAILED")
+		log.Printf("[web][issue] create issues failed project=%s session=%s err=%v", projectID, req.SessionID, err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to create issues", "CREATE_ISSUES_FAILED")
 		return
 	}
-	writeJSON(w, http.StatusCreated, normalizeTaskPlanForAPI(created))
+	if len(issues) == 0 {
+		writeAPIError(w, http.StatusInternalServerError, "failed to create issues", "CREATE_ISSUES_FAILED")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, buildCreateIssuesResponse(issues))
 }
 
-func (h *planHandlers) createPlanFromFiles(w http.ResponseWriter, r *http.Request) {
+func (h *issueHandlers) createIssuesFromFiles(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "store is not configured", "STORE_UNAVAILABLE")
 		return
 	}
-	if h.planManager == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "plan manager is not configured", "PLAN_MANAGER_UNAVAILABLE")
+	if h.issueManager == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "issue manager is not configured", "ISSUE_MANAGER_UNAVAILABLE")
 		return
 	}
 
@@ -207,7 +234,7 @@ func (h *planHandlers) createPlanFromFiles(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var req createPlanFromFilesRequest
+	var req createIssuesFromFilesRequest
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
@@ -262,7 +289,7 @@ func (h *planHandlers) createPlanFromFiles(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	sourceFiles, fileContents, err := loadPlanSourceFiles(repoPath, req.FilePaths)
+	sourceFiles, fileContents, err := loadIssueSourceFiles(repoPath, req.FilePaths)
 	if err != nil {
 		var validationErr *planFilesValidationError
 		if errors.As(err, &validationErr) {
@@ -273,61 +300,80 @@ func (h *planHandlers) createPlanFromFiles(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	createReq := secretary.Request{
+	createReq := IssueCreateRequest{
 		Conversation: summarizeChatMessages(session.Messages),
 		ProjectName:  strings.TrimSpace(project.Name),
 		RepoPath:     repoPath,
-		Role:         h.planRoleID,
+		Role:         h.issueRoleID,
 		WorkDir:      repoPath,
 	}
 	if createReq.WorkDir == "" {
 		createReq.WorkDir = "."
 	}
 
-	input := secretary.CreateDraftInput{
+	createdIssues, err := h.issueManager.CreateIssues(r.Context(), IssueCreateInput{
 		ProjectID:    projectID,
 		SessionID:    req.SessionID,
 		Name:         req.Name,
 		FailPolicy:   failPolicy,
 		Request:      createReq,
 		SourceFiles:  sourceFiles,
-		FileContents: clonePlanStringMap(fileContents),
-	}
-
-	plan, err := h.planManager.CreateDraftFromFiles(r.Context(), input)
+		FileContents: cloneIssueStringMap(fileContents),
+	})
 	if err != nil {
-		log.Printf("[web][plan] create draft from files failed project=%s session=%s err=%v", projectID, req.SessionID, err)
-		writeAPIError(w, http.StatusInternalServerError, "failed to create task plan", "CREATE_TASK_PLAN_FAILED")
+		log.Printf("[web][issue] create issues from files failed project=%s session=%s err=%v", projectID, req.SessionID, err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to create issues", "CREATE_ISSUES_FAILED")
 		return
 	}
-	if plan == nil || strings.TrimSpace(plan.ID) == "" {
-		writeAPIError(w, http.StatusInternalServerError, "failed to create task plan", "CREATE_TASK_PLAN_FAILED")
+	if len(createdIssues) == 0 {
+		writeAPIError(w, http.StatusInternalServerError, "failed to create issues", "CREATE_ISSUES_FAILED")
 		return
 	}
 
-	reviewInput := h.buildReviewInput(plan)
-	reviewInput.PlanFileContents = clonePlanStringMap(fileContents)
-	if _, err := h.planManager.SubmitReview(r.Context(), plan.ID, reviewInput); err != nil {
-		if isPlanStatusConflictError(err) {
-			writeAPIError(w, http.StatusConflict, err.Error(), "PLAN_STATUS_INVALID")
+	submittedIssues := make([]core.Issue, 0, len(createdIssues))
+	for i := range createdIssues {
+		issueID := strings.TrimSpace(createdIssues[i].ID)
+		if issueID == "" {
+			writeAPIError(w, http.StatusInternalServerError, "failed to create issues", "CREATE_ISSUES_FAILED")
 			return
 		}
-		writeAPIError(w, http.StatusInternalServerError, "failed to update task plan", "SAVE_TASK_PLAN_FAILED")
+		reviewInput := h.buildReviewInput(&createdIssues[i])
+		reviewInput.FileContents = cloneIssueStringMap(fileContents)
+		updated, err := h.issueManager.SubmitForReview(r.Context(), issueID, reviewInput)
+		if err != nil {
+			if isIssueStatusConflictError(err) {
+				writeAPIError(w, http.StatusConflict, err.Error(), "ISSUE_STATUS_INVALID")
+				return
+			}
+			writeAPIError(w, http.StatusInternalServerError, "failed to update issue", "SAVE_ISSUE_FAILED")
+			return
+		}
+		if normalized := normalizeIssueForAPI(updated); normalized != nil {
+			submittedIssues = append(submittedIssues, *normalized)
+			continue
+		}
+		if normalized := normalizeIssueForAPI(&createdIssues[i]); normalized != nil {
+			submittedIssues = append(submittedIssues, *normalized)
+		}
+	}
+
+	if len(submittedIssues) == 0 {
+		writeAPIError(w, http.StatusInternalServerError, "failed to update issue", "SAVE_ISSUE_FAILED")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, buildPlanFromFilesResponse(plan, sourceFiles, fileContents))
+	writeJSON(w, http.StatusCreated, buildIssueFromFilesResponse(submittedIssues, sourceFiles, fileContents))
 }
 
-func resolvePlanParserRoleID(roleID string) string {
+func resolveIssueParserRoleID(roleID string) string {
 	trimmed := strings.TrimSpace(roleID)
 	if trimmed == "" {
-		return defaultPlanParserRoleID
+		return defaultIssueParserRoleID
 	}
 	return trimmed
 }
 
-func (h *planHandlers) listPlans(w http.ResponseWriter, r *http.Request) {
+func (h *issueHandlers) listIssues(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "store is not configured", "STORE_UNAVAILABLE")
 		return
@@ -354,90 +400,139 @@ func (h *planHandlers) listPlans(w http.ResponseWriter, r *http.Request) {
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 
-	// Keep `total` as unpaginated count for client-side paginator semantics.
-	allItems, err := h.store.ListTaskPlans(projectID, core.TaskPlanFilter{
-		Status: status,
-	})
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "failed to count task plans", "COUNT_TASK_PLANS_FAILED")
-		return
-	}
-	total := len(allItems)
-
-	items, err := h.store.ListTaskPlans(projectID, core.TaskPlanFilter{
+	items, total, err := h.store.ListIssues(projectID, core.IssueFilter{
 		Status: status,
 		Limit:  limit,
 		Offset: offset,
 	})
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "failed to list task plans", "LIST_TASK_PLANS_FAILED")
+		writeAPIError(w, http.StatusInternalServerError, "failed to list issues", "LIST_ISSUES_FAILED")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, planListResponse{
-		Items:  normalizeTaskPlansForAPI(items),
+	writeJSON(w, http.StatusOK, issueListResponse{
+		Items:  normalizeIssuesForAPI(items),
 		Total:  total,
 		Offset: offset,
 	})
 }
 
-func (h *planHandlers) getPlan(w http.ResponseWriter, r *http.Request) {
-	plan, ok := h.loadPlanForProject(w, r)
+func (h *issueHandlers) getIssue(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForProject(w, r)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, normalizeTaskPlanForAPI(plan))
+	writeJSON(w, http.StatusOK, normalizeIssueForAPI(issue))
 }
 
-func (h *planHandlers) getPlanDAG(w http.ResponseWriter, r *http.Request) {
-	plan, ok := h.loadPlanForProject(w, r)
+func (h *issueHandlers) getIssueDAG(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForProject(w, r)
 	if !ok {
 		return
 	}
 
-	dag := secretary.Build(plan.Tasks)
-	if err := dag.Validate(); err != nil {
-		writeAPIError(w, http.StatusBadRequest, err.Error(), "INVALID_TASK_DAG")
+	allIssues, _, err := h.store.ListIssues(issue.ProjectID, core.IssueFilter{})
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "failed to list issues", "LIST_ISSUES_FAILED")
 		return
 	}
 
-	nodes := make([]planDAGNode, len(plan.Tasks))
-	stats := planDAGStats{Total: len(plan.Tasks)}
-	for i := range plan.Tasks {
-		item := plan.Tasks[i]
-		nodes[i] = planDAGNode{
+	allByID := make(map[string]core.Issue, len(allIssues)+1)
+	for i := range allIssues {
+		normalized := normalizeIssueForAPI(&allIssues[i])
+		if normalized == nil {
+			continue
+		}
+		allByID[strings.TrimSpace(normalized.ID)] = *normalized
+	}
+	if normalized := normalizeIssueForAPI(issue); normalized != nil {
+		allByID[strings.TrimSpace(normalized.ID)] = *normalized
+	}
+
+	rootID := strings.TrimSpace(issue.ID)
+	inScope := map[string]struct{}{}
+	addInScope := func(id string) {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			return
+		}
+		if _, exists := allByID[trimmed]; !exists {
+			return
+		}
+		inScope[trimmed] = struct{}{}
+	}
+
+	addInScope(rootID)
+	for _, dep := range issue.DependsOn {
+		addInScope(dep)
+	}
+	for _, blocked := range issue.Blocks {
+		addInScope(blocked)
+	}
+	for _, candidate := range allByID {
+		if hasIssueReference(candidate.DependsOn, rootID) || hasIssueReference(candidate.Blocks, rootID) {
+			addInScope(candidate.ID)
+		}
+	}
+
+	nodeIDs := make([]string, 0, len(inScope))
+	for id := range inScope {
+		nodeIDs = append(nodeIDs, id)
+	}
+	sort.Strings(nodeIDs)
+
+	nodes := make([]issueDAGNode, 0, len(nodeIDs))
+	stats := issueDAGStats{}
+	for _, id := range nodeIDs {
+		item, ok := allByID[id]
+		if !ok {
+			continue
+		}
+		nodes = append(nodes, issueDAGNode{
 			ID:         item.ID,
 			Title:      item.Title,
 			Status:     item.Status,
 			PipelineID: item.PipelineID,
-		}
+		})
+		stats.Total++
+		accumulateIssueStats(&stats, item.Status)
+	}
 
-		switch item.Status {
-		case core.ItemPending:
-			stats.Pending++
-		case core.ItemReady:
-			stats.Ready++
-		case core.ItemRunning:
-			stats.Running++
-		case core.ItemDone:
-			stats.Done++
-		case core.ItemFailed:
-			stats.Failed++
+	edges := make([]issueDAGEdge, 0, len(nodeIDs)*2)
+	edgeSeen := make(map[string]struct{}, len(nodeIDs)*2)
+	addEdge := func(from, to string) {
+		from = strings.TrimSpace(from)
+		to = strings.TrimSpace(to)
+		if from == "" || to == "" {
+			return
+		}
+		if _, ok := inScope[from]; !ok {
+			return
+		}
+		if _, ok := inScope[to]; !ok {
+			return
+		}
+		key := from + "->" + to
+		if _, exists := edgeSeen[key]; exists {
+			return
+		}
+		edgeSeen[key] = struct{}{}
+		edges = append(edges, issueDAGEdge{From: from, To: to})
+	}
+
+	for _, id := range nodeIDs {
+		item, ok := allByID[id]
+		if !ok {
+			continue
+		}
+		for _, dep := range item.DependsOn {
+			addEdge(dep, item.ID)
+		}
+		for _, blocked := range item.Blocks {
+			addEdge(item.ID, blocked)
 		}
 	}
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].ID < nodes[j].ID
-	})
 
-	edges := make([]planDAGEdge, 0, len(plan.Tasks))
-	for from, downstream := range dag.Downstream {
-		for _, to := range downstream {
-			edges = append(edges, planDAGEdge{
-				From: from,
-				To:   to,
-			})
-		}
-	}
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].From == edges[j].From {
 			return edges[i].To < edges[j].To
@@ -445,45 +540,81 @@ func (h *planHandlers) getPlanDAG(w http.ResponseWriter, r *http.Request) {
 		return edges[i].From < edges[j].From
 	})
 
-	writeJSON(w, http.StatusOK, planDAGResponse{
+	writeJSON(w, http.StatusOK, issueDAGResponse{
 		Nodes: nodes,
 		Edges: edges,
 		Stats: stats,
 	})
 }
 
-func (h *planHandlers) submitReview(w http.ResponseWriter, r *http.Request) {
-	plan, ok := h.loadPlanForProject(w, r)
+func accumulateIssueStats(stats *issueDAGStats, status core.IssueStatus) {
+	if stats == nil {
+		return
+	}
+	switch status {
+	case core.IssueStatusReady:
+		stats.Ready++
+	case core.IssueStatusExecuting:
+		stats.Running++
+	case core.IssueStatusDone:
+		stats.Done++
+	case core.IssueStatusFailed, core.IssueStatusSuperseded, core.IssueStatusAbandoned:
+		stats.Failed++
+	default:
+		stats.Pending++
+	}
+}
+
+func hasIssueReference(values []string, target string) bool {
+	trimmedTarget := strings.TrimSpace(target)
+	if trimmedTarget == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), trimmedTarget) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *issueHandlers) submitForReview(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForProject(w, r)
 	if !ok {
 		return
 	}
 
-	if h.planManager == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "plan manager is not configured", "PLAN_MANAGER_UNAVAILABLE")
+	if h.issueManager == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "issue manager is not configured", "ISSUE_MANAGER_UNAVAILABLE")
 		return
 	}
 
-	updated, err := h.planManager.SubmitReview(r.Context(), plan.ID, h.buildReviewInput(plan))
+	updated, err := h.issueManager.SubmitForReview(r.Context(), issue.ID, h.buildReviewInput(issue))
 	if err != nil {
-		if isPlanStatusConflictError(err) {
-			writeAPIError(w, http.StatusConflict, err.Error(), "PLAN_STATUS_INVALID")
+		if isIssueStatusConflictError(err) {
+			writeAPIError(w, http.StatusConflict, err.Error(), "ISSUE_STATUS_INVALID")
 			return
 		}
-		writeAPIError(w, http.StatusInternalServerError, "failed to update task plan", "SAVE_TASK_PLAN_FAILED")
+		writeAPIError(w, http.StatusInternalServerError, "failed to update issue", "SAVE_ISSUE_FAILED")
 		return
 	}
-	writeJSON(w, http.StatusOK, taskPlanStatusResponse{
-		Status: string(updated.Status),
+
+	status := issue.Status
+	if updated != nil {
+		status = updated.Status
+	}
+	writeJSON(w, http.StatusOK, issueStatusResponse{
+		Status: string(status),
 	})
 }
 
-func (h *planHandlers) applyAction(w http.ResponseWriter, r *http.Request) {
-	plan, ok := h.loadPlanForProject(w, r)
+func (h *issueHandlers) applyIssueAction(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForProject(w, r)
 	if !ok {
 		return
 	}
 
-	var req planActionRequest
+	var req issueActionRequest
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
@@ -497,95 +628,101 @@ func (h *planHandlers) applyAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.planManager == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "plan manager is not configured", "PLAN_MANAGER_UNAVAILABLE")
+	if h.issueManager == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "issue manager is not configured", "ISSUE_MANAGER_UNAVAILABLE")
 		return
 	}
 
-	managerAction := secretary.PlanAction{Action: action}
+	managerAction := IssueAction{Action: action}
 	switch action {
 	case "approve":
 		// no-op
 	case "reject":
-		if err := validatePlanRejectFeedback(req.Feedback); err != nil {
+		if err := validateIssueRejectFeedback(req.Feedback); err != nil {
 			writeAPIError(w, http.StatusBadRequest, err.Error(), feedbackErrorCode(err))
 			return
 		}
-		managerAction.Feedback = &secretary.HumanFeedback{
-			Category:          secretary.FeedbackCategory(strings.TrimSpace(req.Feedback.Category)),
+		managerAction.Feedback = &IssueFeedback{
+			Category:          strings.TrimSpace(req.Feedback.Category),
 			Detail:            strings.TrimSpace(req.Feedback.Detail),
 			ExpectedDirection: strings.TrimSpace(req.Feedback.ExpectedDirection),
 		}
 	case "abort", "abandon":
-		managerAction.Action = secretary.PlanActionAbandon
+		managerAction.Action = "abandon"
 	default:
-		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("unsupported plan action %q", action), "INVALID_ACTION")
+		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("unsupported issue action %q", action), "INVALID_ACTION")
 		return
 	}
 
-	updated, err := h.planManager.ApplyPlanAction(r.Context(), plan.ID, managerAction)
+	updated, err := h.issueManager.ApplyIssueAction(r.Context(), issue.ID, managerAction)
 	if err != nil {
 		switch {
-		case isPlanStatusConflictError(err):
-			writeAPIError(w, http.StatusConflict, err.Error(), "PLAN_STATUS_INVALID")
+		case isIssueStatusConflictError(err):
+			writeAPIError(w, http.StatusConflict, err.Error(), "ISSUE_STATUS_INVALID")
 		case isFeedbackValidationError(err):
 			writeAPIError(w, http.StatusBadRequest, err.Error(), feedbackErrorCode(err))
-		case strings.Contains(strings.ToLower(err.Error()), "unsupported plan action"):
+		case strings.Contains(strings.ToLower(err.Error()), "unsupported issue action"),
+			strings.Contains(strings.ToLower(err.Error()), "unsupported plan action"):
 			writeAPIError(w, http.StatusBadRequest, err.Error(), "INVALID_ACTION")
 		default:
-			writeAPIError(w, http.StatusInternalServerError, "failed to update task plan", "SAVE_TASK_PLAN_FAILED")
+			writeAPIError(w, http.StatusInternalServerError, "failed to update issue", "SAVE_ISSUE_FAILED")
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, taskPlanStatusResponse{
-		Status: string(updated.Status),
+
+	status := issue.Status
+	if updated != nil {
+		status = updated.Status
+	}
+	writeJSON(w, http.StatusOK, issueStatusResponse{
+		Status: string(status),
 	})
 }
 
-func (h *planHandlers) loadPlanForProject(w http.ResponseWriter, r *http.Request) (*core.TaskPlan, bool) {
+func (h *issueHandlers) loadIssueForProject(w http.ResponseWriter, r *http.Request) (*core.Issue, bool) {
 	if h.store == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "store is not configured", "STORE_UNAVAILABLE")
 		return nil, false
 	}
 
 	projectID := strings.TrimSpace(chi.URLParam(r, "projectID"))
-	planID := strings.TrimSpace(chi.URLParam(r, "id"))
-	if projectID == "" || planID == "" {
-		writeAPIError(w, http.StatusBadRequest, "project id and plan id are required", "INVALID_PATH_PARAM")
+	issueID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if projectID == "" || issueID == "" {
+		writeAPIError(w, http.StatusBadRequest, "project id and issue id are required", "INVALID_PATH_PARAM")
 		return nil, false
 	}
 
-	plan, err := h.store.GetTaskPlan(planID)
+	issue, err := h.store.GetIssue(issueID)
 	if err != nil {
 		if isNotFoundError(err) {
-			writeAPIError(w, http.StatusNotFound, fmt.Sprintf("task plan %s not found", planID), "TASK_PLAN_NOT_FOUND")
+			writeAPIError(w, http.StatusNotFound, fmt.Sprintf("issue %s not found", issueID), "ISSUE_NOT_FOUND")
 			return nil, false
 		}
-		writeAPIError(w, http.StatusInternalServerError, "failed to load task plan", "GET_TASK_PLAN_FAILED")
+		writeAPIError(w, http.StatusInternalServerError, "failed to load issue", "GET_ISSUE_FAILED")
 		return nil, false
 	}
-	if plan.ProjectID != projectID {
-		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("task plan %s not found in project %s", planID, projectID), "TASK_PLAN_NOT_FOUND")
+	if issue.ProjectID != projectID {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("issue %s not found in project %s", issueID, projectID), "ISSUE_NOT_FOUND")
 		return nil, false
 	}
 
-	return plan, true
+	return issue, true
 }
 
-func (h *planHandlers) buildReviewInput(plan *core.TaskPlan) secretary.ReviewInput {
-	if h == nil || h.store == nil || plan == nil {
-		return secretary.ReviewInput{}
+func (h *issueHandlers) buildReviewInput(issue *core.Issue) IssueReviewInput {
+	if h == nil || h.store == nil || issue == nil {
+		return IssueReviewInput{}
 	}
 
-	input := secretary.ReviewInput{}
-	sessionID := strings.TrimSpace(plan.SessionID)
+	input := IssueReviewInput{}
+	sessionID := strings.TrimSpace(issue.SessionID)
 	if sessionID != "" {
 		if session, err := h.store.GetChatSession(sessionID); err == nil && session != nil {
 			input.Conversation = summarizeChatMessages(session.Messages)
 		}
 	}
 
-	if project, err := h.store.GetProject(plan.ProjectID); err == nil && project != nil {
+	if project, err := h.store.GetProject(issue.ProjectID); err == nil && project != nil {
 		projectName := strings.TrimSpace(project.Name)
 		repoPath := strings.TrimSpace(project.RepoPath)
 		parts := make([]string, 0, 2)
@@ -619,12 +756,13 @@ func summarizeChatMessages(messages []core.ChatMessage) string {
 	return strings.Join(lines, "\n")
 }
 
-func isPlanStatusConflictError(err error) bool {
+func isIssueStatusConflictError(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "submit review requires") ||
+	return strings.Contains(msg, "submit for review requires") ||
+		strings.Contains(msg, "submit review requires") ||
 		strings.Contains(msg, "approve requires") ||
 		strings.Contains(msg, "reject requires") ||
 		strings.Contains(msg, "abandon requires")
@@ -650,12 +788,11 @@ func parseFailPolicy(raw string) (core.FailurePolicy, error) {
 	}
 }
 
-func validatePlanRejectFeedback(feedback *planActionFeedback) error {
+func validateIssueRejectFeedback(feedback *issueActionFeedback) error {
 	if feedback == nil {
 		return fmt.Errorf("reject action requires feedback")
 	}
 
-	// 第一段：字段必填校验（category + detail）
 	category := strings.TrimSpace(feedback.Category)
 	if category == "" {
 		return fmt.Errorf("reject action requires feedback.category")
@@ -664,15 +801,11 @@ func validatePlanRejectFeedback(feedback *planActionFeedback) error {
 	if detail == "" {
 		return fmt.Errorf("reject action requires feedback.detail")
 	}
-
-	// 第二段：复用领域校验（合法类别 + detail 最少长度）
-	err := secretary.HumanFeedback{
-		Category:          secretary.FeedbackCategory(category),
-		Detail:            detail,
-		ExpectedDirection: strings.TrimSpace(feedback.ExpectedDirection),
-	}.Validate()
-	if err != nil {
-		return err
+	if _, ok := allowedIssueFeedbackCategories[category]; !ok {
+		return fmt.Errorf("invalid feedback category %q", category)
+	}
+	if utf8.RuneCountInString(detail) < minIssueFeedbackDetailRunes {
+		return fmt.Errorf("feedback detail must be at least %d characters", minIssueFeedbackDetailRunes)
 	}
 	return nil
 }
@@ -703,7 +836,7 @@ func (e *planFilesValidationError) Error() string {
 	return e.Message
 }
 
-func loadPlanSourceFiles(repoPath string, filePaths []string) ([]string, map[string]string, error) {
+func loadIssueSourceFiles(repoPath string, filePaths []string) ([]string, map[string]string, error) {
 	repoRoot := strings.TrimSpace(repoPath)
 	if repoRoot == "" {
 		return nil, nil, &planFilesValidationError{
@@ -725,7 +858,7 @@ func loadPlanSourceFiles(repoPath string, filePaths []string) ([]string, map[str
 	var totalBytes int64
 
 	for i := range filePaths {
-		absPath, normalizedPath, err := resolvePlanSourceFilePath(absRepoRoot, filePaths[i])
+		absPath, normalizedPath, err := resolveIssueSourceFilePath(absRepoRoot, filePaths[i])
 		if err != nil {
 			return nil, nil, err
 		}
@@ -752,13 +885,13 @@ func loadPlanSourceFiles(repoPath string, filePaths []string) ([]string, map[str
 				Code:    "FILE_NOT_FOUND",
 			}
 		}
-		if info.Size() > maxPlanSourceFileBytes {
+		if info.Size() > maxIssueSourceFileBytes {
 			return nil, nil, &planFilesValidationError{
 				Message: fmt.Sprintf("source file %s exceeds 1MB", normalizedPath),
 				Code:    "FILE_TOO_LARGE",
 			}
 		}
-		if totalBytes+info.Size() > maxPlanSourceFilesTotalBytes {
+		if totalBytes+info.Size() > maxIssueSourceFilesTotalBytes {
 			return nil, nil, &planFilesValidationError{
 				Message: "total source file size exceeds 5MB",
 				Code:    "FILE_TOTAL_TOO_LARGE",
@@ -773,13 +906,13 @@ func loadPlanSourceFiles(repoPath string, filePaths []string) ([]string, map[str
 			}
 		}
 		contentBytes := int64(len(content))
-		if contentBytes > maxPlanSourceFileBytes {
+		if contentBytes > maxIssueSourceFileBytes {
 			return nil, nil, &planFilesValidationError{
 				Message: fmt.Sprintf("source file %s exceeds 1MB", normalizedPath),
 				Code:    "FILE_TOO_LARGE",
 			}
 		}
-		if totalBytes+contentBytes > maxPlanSourceFilesTotalBytes {
+		if totalBytes+contentBytes > maxIssueSourceFilesTotalBytes {
 			return nil, nil, &planFilesValidationError{
 				Message: "total source file size exceeds 5MB",
 				Code:    "FILE_TOTAL_TOO_LARGE",
@@ -801,7 +934,7 @@ func loadPlanSourceFiles(repoPath string, filePaths []string) ([]string, map[str
 	return sourceFiles, fileContents, nil
 }
 
-func resolvePlanSourceFilePath(repoRoot string, rawPath string) (string, string, error) {
+func resolveIssueSourceFilePath(repoRoot string, rawPath string) (string, string, error) {
 	trimmed := strings.TrimSpace(rawPath)
 	absPath, normalizedPath, err := validateRelativePath(repoRoot, trimmed)
 	if err != nil {
@@ -825,20 +958,26 @@ func resolvePlanSourceFilePath(repoRoot string, rawPath string) (string, string,
 	return absPath, normalizedPath, nil
 }
 
-func buildPlanFromFilesResponse(plan *core.TaskPlan, sourceFiles []string, fileContents map[string]string) map[string]any {
-	payload := map[string]any{}
-	normalized := normalizeTaskPlanForAPI(plan)
-	if normalized != nil {
-		if raw, err := json.Marshal(normalized); err == nil {
-			_ = json.Unmarshal(raw, &payload)
-		}
+func buildCreateIssuesResponse(issues []core.Issue) map[string]any {
+	normalized := normalizeIssuesForAPI(issues)
+	payload := map[string]any{
+		"items": normalized,
 	}
-	payload["source_files"] = normalizeStringSlice(sourceFiles)
-	payload["file_contents"] = clonePlanStringMap(fileContents)
+	if len(normalized) > 0 {
+		issue := normalized[0]
+		payload["issue"] = issue
+	}
 	return payload
 }
 
-func clonePlanStringMap(values map[string]string) map[string]string {
+func buildIssueFromFilesResponse(issues []core.Issue, sourceFiles []string, fileContents map[string]string) map[string]any {
+	payload := buildCreateIssuesResponse(issues)
+	payload["source_files"] = normalizeStringSlice(sourceFiles)
+	payload["file_contents"] = cloneIssueStringMap(fileContents)
+	return payload
+}
+
+func cloneIssueStringMap(values map[string]string) map[string]string {
 	if len(values) == 0 {
 		return map[string]string{}
 	}
@@ -849,15 +988,15 @@ func clonePlanStringMap(values map[string]string) map[string]string {
 	return out
 }
 
-func normalizeTaskPlansForAPI(items []core.TaskPlan) []core.TaskPlan {
+func normalizeIssuesForAPI(items []core.Issue) []core.Issue {
 	if len(items) == 0 {
-		return []core.TaskPlan{}
+		return []core.Issue{}
 	}
-	out := make([]core.TaskPlan, len(items))
+	out := make([]core.Issue, len(items))
 	for i := range items {
-		normalized := normalizeTaskPlanForAPI(&items[i])
+		normalized := normalizeIssueForAPI(&items[i])
 		if normalized == nil {
-			out[i] = core.TaskPlan{}
+			out[i] = core.Issue{}
 			continue
 		}
 		out[i] = *normalized
@@ -865,26 +1004,15 @@ func normalizeTaskPlansForAPI(items []core.TaskPlan) []core.TaskPlan {
 	return out
 }
 
-func normalizeTaskPlanForAPI(plan *core.TaskPlan) *core.TaskPlan {
-	if plan == nil {
+func normalizeIssueForAPI(issue *core.Issue) *core.Issue {
+	if issue == nil {
 		return nil
 	}
-	clone := *plan
-	if len(plan.Tasks) == 0 {
-		clone.Tasks = []core.TaskItem{}
-		return &clone
-	}
-	clone.Tasks = make([]core.TaskItem, len(plan.Tasks))
-	for i := range plan.Tasks {
-		task := plan.Tasks[i]
-		task.Labels = normalizeStringSlice(task.Labels)
-		task.DependsOn = normalizeStringSlice(task.DependsOn)
-		task.Inputs = normalizeStringSlice(task.Inputs)
-		task.Outputs = normalizeStringSlice(task.Outputs)
-		task.Acceptance = normalizeStringSlice(task.Acceptance)
-		task.Constraints = normalizeStringSlice(task.Constraints)
-		clone.Tasks[i] = task
-	}
+	clone := *issue
+	clone.Labels = normalizeStringSlice(issue.Labels)
+	clone.Attachments = normalizeStringSlice(issue.Attachments)
+	clone.DependsOn = normalizeStringSlice(issue.DependsOn)
+	clone.Blocks = normalizeStringSlice(issue.Blocks)
 	return &clone
 }
 

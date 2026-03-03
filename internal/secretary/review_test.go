@@ -6,9 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/yoke233/ai-workflow/internal/acpclient"
 	"github.com/yoke233/ai-workflow/internal/core"
@@ -20,562 +18,470 @@ func TestReviewOrchestratorRunApprovePath(t *testing.T) {
 	store := newMockReviewStore()
 	panel := ReviewOrchestrator{
 		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", passVerdict("completeness")),
-			newStubReviewer("dependency", passVerdict("dependency")),
-			newStubReviewer("feasibility", passVerdict("feasibility")),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, input AggregatorInput) (AggregatorDecision, error) {
-			if input.Round != 1 {
-				return AggregatorDecision{}, errors.New("unexpected round")
-			}
-			if len(input.Verdicts) != 3 {
-				return AggregatorDecision{}, errors.New("aggregator should receive 3 verdicts")
-			}
-			return AggregatorDecision{Decision: DecisionApprove}, nil
-		}),
+		Reviewer: stubDemandReviewer{fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 92}, nil
+		}},
 	}
 
-	result, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-approve"), ReviewInput{})
+	issues := []*core.Issue{
+		newReviewTestIssue("issue-review-approve-1"),
+		newReviewTestIssue("issue-review-approve-2"),
+	}
+
+	result, err := panel.Run(context.Background(), issues)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if result.Decision != DecisionApprove {
 		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
 	}
-	if result.Plan.Status != core.PlanWaitingHuman {
-		t.Fatalf("plan status = %q, want %q", result.Plan.Status, core.PlanWaitingHuman)
+	if result.Status != core.ReviewStatusApproved {
+		t.Fatalf("status = %q, want %q", result.Status, core.ReviewStatusApproved)
 	}
-	if result.Plan.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("wait reason = %q, want %q", result.Plan.WaitReason, core.WaitFinalApproval)
+	if !result.AutoApproved {
+		t.Fatal("auto_approved = false, want true")
 	}
-	if result.Plan.ReviewRound != 1 {
-		t.Fatalf("review round = %d, want 1", result.Plan.ReviewRound)
-	}
-
-	records, err := store.GetReviewRecords(result.Plan.ID)
-	if err != nil {
-		t.Fatalf("GetReviewRecords() error = %v", err)
-	}
-	if len(records) != 4 {
-		t.Fatalf("review record count = %d, want 4", len(records))
-	}
-	if got := collectReviewers(records); !slices.Equal(got, []string{"aggregator", "completeness", "dependency", "feasibility"}) {
-		t.Fatalf("reviewers = %v, want [aggregator completeness dependency feasibility]", got)
-	}
-}
-
-func TestReviewOrchestratorRunFixThenApprovePath(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	var sawRevisedTask atomic.Bool
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				if input.Round == 2 && len(input.Plan.Tasks) > 0 && input.Plan.Tasks[0].Title == "修正后任务" {
-					sawRevisedTask.Store(true)
-				}
-				return reviewerVerdict("completeness", input.Round), nil
-			}),
-			newStubReviewer("dependency", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				return reviewerVerdict("dependency", input.Round), nil
-			}),
-			newStubReviewer("feasibility", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				return reviewerVerdict("feasibility", input.Round), nil
-			}),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, input AggregatorInput) (AggregatorDecision, error) {
-			switch input.Round {
-			case 1:
-				return AggregatorDecision{
-					Decision: DecisionFix,
-					RevisedTasks: []core.TaskItem{
-						{
-							ID:          "task-1",
-							Title:       "修正后任务",
-							Description: "补齐依赖并增加验收步骤",
-							Template:    "standard",
-							Status:      core.ItemPending,
-						},
-					},
-					Reason: "补充缺失测试任务",
-				}, nil
-			case 2:
-				return AggregatorDecision{Decision: DecisionApprove}, nil
-			default:
-				return AggregatorDecision{}, errors.New("unexpected round")
-			}
-		}),
+	if len(result.Verdicts) != 2 {
+		t.Fatalf("verdict count = %d, want 2", len(result.Verdicts))
 	}
 
-	result, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-fix"), ReviewInput{})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Decision != DecisionApprove {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
-	}
-	if result.Round != 2 {
-		t.Fatalf("round = %d, want 2", result.Round)
-	}
-	if result.Plan.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("wait reason = %q, want %q", result.Plan.WaitReason, core.WaitFinalApproval)
-	}
-	if !sawRevisedTask.Load() {
-		t.Fatal("second review round should receive revised tasks from fix decision")
-	}
-
-	records, err := store.GetReviewRecords(result.Plan.ID)
-	if err != nil {
-		t.Fatalf("GetReviewRecords() error = %v", err)
-	}
-	if len(records) != 8 {
-		t.Fatalf("review record count = %d, want 8", len(records))
-	}
-}
-
-func TestReviewOrchestratorRunFixFileBasedKeepsTasksAndRecordsSuggestions(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	var sawPlanFileContents atomic.Bool
-
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				if input.Round == 1 {
-					if strings.TrimSpace(input.PlanFileContents["docs/spec.md"]) != "" {
-						sawPlanFileContents.Store(true)
-					}
-				}
-				if input.Round == 2 && len(input.Plan.Tasks) != 0 {
-					t.Fatalf("file-based fix should keep tasks unchanged, got %d tasks", len(input.Plan.Tasks))
-				}
-				return reviewerVerdict("completeness", input.Round), nil
-			}),
-			newStubReviewer("dependency", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				return reviewerVerdict("dependency", input.Round), nil
-			}),
-			newStubReviewer("feasibility", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				return reviewerVerdict("feasibility", input.Round), nil
-			}),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, input AggregatorInput) (AggregatorDecision, error) {
-			switch input.Round {
-			case 1:
-				return AggregatorDecision{
-					Decision:    DecisionFix,
-					Suggestions: "建议先按文件内容抽取模块边界，再进行任务拆分",
-				}, nil
-			case 2:
-				return AggregatorDecision{
-					Decision: DecisionApprove,
-				}, nil
-			default:
-				return AggregatorDecision{}, errors.New("unexpected round")
-			}
-		}),
-	}
-
-	plan := &core.TaskPlan{
-		ID:         "plan-review-file-fix",
-		ProjectID:  "proj-review",
-		Name:       "review-file-plan",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
-		FailPolicy: core.FailBlock,
-		Tasks:      nil,
-	}
-
-	result, err := panel.Run(context.Background(), plan, ReviewInput{
-		PlanFileContents: map[string]string{
-			"docs/spec.md": "Feature spec from files.",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Decision != DecisionApprove {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
-	}
-	if result.Round != 2 {
-		t.Fatalf("round = %d, want 2", result.Round)
-	}
-	if len(result.Plan.Tasks) != 0 {
-		t.Fatalf("result plan tasks = %d, want 0 for file-based flow", len(result.Plan.Tasks))
-	}
-	if !sawPlanFileContents.Load() {
-		t.Fatal("reviewer should receive plan file contents")
-	}
-
-	records, err := store.GetReviewRecords(result.Plan.ID)
-	if err != nil {
-		t.Fatalf("GetReviewRecords() error = %v", err)
-	}
-	foundSuggestion := false
-	for _, record := range records {
-		if record.Reviewer != "aggregator" || record.Round != 1 {
-			continue
+	for _, issue := range issues {
+		records, err := store.GetReviewRecords(issue.ID)
+		if err != nil {
+			t.Fatalf("GetReviewRecords(%s) error = %v", issue.ID, err)
 		}
-		for _, fix := range record.Fixes {
-			if strings.Contains(fix.Suggestion, "模块边界") {
-				foundSuggestion = true
-				break
-			}
+		if len(records) != 2 {
+			t.Fatalf("record count for issue %s = %d, want 2", issue.ID, len(records))
+		}
+		if got := collectReviewers(records); !slices.Equal(got, []string{phase1ReviewerName, phase2ReviewerName}) {
+			t.Fatalf("reviewers = %v, want [%s %s]", got, phase1ReviewerName, phase2ReviewerName)
 		}
 	}
-	if !foundSuggestion {
-		t.Fatal("round1 aggregator fixes should include suggestion for file-based fix flow")
-	}
 }
 
-func TestReviewOrchestratorRunEscalatePath(t *testing.T) {
+func TestReviewOrchestratorRunFixPathWhenVerdictHasIssues(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
 	panel := ReviewOrchestrator{
 		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", issueVerdict("completeness", "critical", "缺失核心任务")),
-			newStubReviewer("dependency", issueVerdict("dependency", "critical", "存在依赖环")),
-			newStubReviewer("feasibility", issueVerdict("feasibility", "warning", "任务过大难以执行")),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, _ AggregatorInput) (AggregatorDecision, error) {
-			return AggregatorDecision{
-				Decision: DecisionEscalate,
-				Reason:   "critical 问题无法安全自动修复",
-			}, nil
-		}),
-	}
-
-	result, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-escalate"), ReviewInput{})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Decision != DecisionEscalate {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionEscalate)
-	}
-	if result.Plan.Status != core.PlanWaitingHuman {
-		t.Fatalf("plan status = %q, want %q", result.Plan.Status, core.PlanWaitingHuman)
-	}
-	if result.Plan.WaitReason != core.WaitFeedbackReq {
-		t.Fatalf("wait reason = %q, want %q", result.Plan.WaitReason, core.WaitFeedbackReq)
-	}
-
-	records, err := store.GetReviewRecords(result.Plan.ID)
-	if err != nil {
-		t.Fatalf("GetReviewRecords() error = %v", err)
-	}
-	if len(records) != 4 {
-		t.Fatalf("review record count = %d, want 4", len(records))
-	}
-}
-
-func TestReviewOrchestratorRunMaxRoundsExceeded(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", issueVerdict("completeness", "warning", "覆盖不足")),
-			newStubReviewer("dependency", issueVerdict("dependency", "warning", "依赖可优化")),
-			newStubReviewer("feasibility", issueVerdict("feasibility", "warning", "任务过粗")),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, input AggregatorInput) (AggregatorDecision, error) {
-			return AggregatorDecision{
-				Decision: DecisionFix,
-				RevisedTasks: []core.TaskItem{
+		Reviewer: stubDemandReviewer{fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{
+				Reviewer: "completeness",
+				Status:   "approved",
+				Score:    80,
+				Issues: []core.ReviewIssue{
 					{
-						ID:          "task-1",
-						Title:       "第2轮仍需修正",
-						Description: "补充回归测试和依赖调整",
-						Template:    "standard",
-						Status:      core.ItemPending,
+						Severity:    "warning",
+						IssueID:     "",
+						Description: "覆盖不足",
+						Suggestion:  "补齐测试",
 					},
 				},
-				Reason: "继续修正",
 			}, nil
-		}),
-		MaxRounds: 2,
+		}},
 	}
 
-	result, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-max-rounds"), ReviewInput{})
+	issue := newReviewTestIssue("issue-review-fix")
+	result, err := panel.Run(context.Background(), []*core.Issue{issue})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.Decision != DecisionEscalate {
-		t.Fatalf("decision = %q, want %q when max rounds reached", result.Decision, DecisionEscalate)
+	if result.Decision != DecisionFix {
+		t.Fatalf("decision = %q, want %q", result.Decision, DecisionFix)
 	}
-	if result.Plan.ReviewRound != 2 {
-		t.Fatalf("review round = %d, want 2", result.Plan.ReviewRound)
+	if result.Status != core.ReviewStatusChangesRequested {
+		t.Fatalf("status = %q, want %q", result.Status, core.ReviewStatusChangesRequested)
 	}
-	if result.Plan.WaitReason != core.WaitFeedbackReq {
-		t.Fatalf("wait reason = %q, want %q", result.Plan.WaitReason, core.WaitFeedbackReq)
-	}
-	if inputReason := result.Reason; inputReason == "" {
-		t.Fatal("max rounds escalation reason should not be empty")
+	if result.AutoApproved {
+		t.Fatal("auto_approved = true, want false")
 	}
 
-	records, err := store.GetReviewRecords(result.Plan.ID)
+	records, err := store.GetReviewRecords(issue.ID)
 	if err != nil {
 		t.Fatalf("GetReviewRecords() error = %v", err)
 	}
-	if len(records) != 8 {
-		t.Fatalf("review record count = %d, want 8", len(records))
+	if len(records) != 2 {
+		t.Fatalf("record count = %d, want 2", len(records))
+	}
+	if records[0].Verdict != "issues_found" {
+		t.Fatalf("phase1 verdict = %q, want %q", records[0].Verdict, "issues_found")
+	}
+	if len(records[0].Issues) != 1 {
+		t.Fatalf("phase1 issues count = %d, want 1", len(records[0].Issues))
+	}
+	if records[0].Issues[0].IssueID != issue.ID {
+		t.Fatalf("phase1 issue_id = %q, want %q", records[0].Issues[0].IssueID, issue.ID)
 	}
 }
 
-func TestReviewOrchestratorRunReviewersInParallel(t *testing.T) {
+func TestReviewOrchestratorRunEscalatePathOnDependencyConflict(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
-	started := make(chan string, 3)
-	release := make(chan struct{})
-
-	newParallelReviewer := func(name string) Reviewer {
-		return newStubReviewer(name, func(ctx context.Context, _ ReviewerInput) (core.ReviewVerdict, error) {
-			started <- name
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return core.ReviewVerdict{}, ctx.Err()
+	panel := ReviewOrchestrator{
+		Store: store,
+		Reviewer: stubDemandReviewer{fn: func(_ context.Context, issue *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Reviewer: "demand", Status: "pass", Score: 95, Issues: nil}, nil
+		}},
+		Analyzer: stubDependencyAnalyzer{fn: func(_ context.Context, issues []*core.Issue) (*DependencyAnalysis, error) {
+			if len(issues) != 2 {
+				return nil, errors.New("analyzer should receive 2 issues")
 			}
-			return core.ReviewVerdict{
-				Reviewer: name,
-				Status:   "pass",
-				Score:    90,
-			}, nil
-		})
-	}
-
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newParallelReviewer("completeness"),
-			newParallelReviewer("dependency"),
-			newParallelReviewer("feasibility"),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, _ AggregatorInput) (AggregatorDecision, error) {
-			return AggregatorDecision{Decision: DecisionApprove}, nil
-		}),
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := panel.Run(ctx, newReviewTestPlan("plan-review-parallel"), ReviewInput{})
-		done <- err
-	}()
-
-	timeout := time.After(1 * time.Second)
-	for i := 0; i < 3; i++ {
-		select {
-		case <-started:
-		case <-timeout:
-			t.Fatal("reviewers were not started in parallel")
-		}
-	}
-	close(release)
-
-	if err := <-done; err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-}
-
-func TestReviewOrchestratorRunApproveDecisionWithWhitespace(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", passVerdict("completeness")),
-			newStubReviewer("dependency", passVerdict("dependency")),
-			newStubReviewer("feasibility", passVerdict("feasibility")),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, _ AggregatorInput) (AggregatorDecision, error) {
-			return AggregatorDecision{
-				Decision: " \n\tapprove \r\n ",
-			}, nil
-		}),
-	}
-
-	result, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-approve-ws"), ReviewInput{})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Decision != DecisionApprove {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
-	}
-
-	records, err := store.GetReviewRecords(result.Plan.ID)
-	if err != nil {
-		t.Fatalf("GetReviewRecords() error = %v", err)
-	}
-
-	var aggregatorVerdict string
-	for _, record := range records {
-		if record.Reviewer == "aggregator" {
-			aggregatorVerdict = record.Verdict
-			break
-		}
-	}
-	if aggregatorVerdict != DecisionApprove {
-		t.Fatalf("aggregator verdict = %q, want normalized %q", aggregatorVerdict, DecisionApprove)
-	}
-}
-
-func TestReviewOrchestratorRunFixDecisionWithWhitespace(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	var sawRevisedTask atomic.Bool
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				if input.Round == 2 && len(input.Plan.Tasks) > 0 && input.Plan.Tasks[0].Title == "修正后任务" {
-					sawRevisedTask.Store(true)
-				}
-				return reviewerVerdict("completeness", input.Round), nil
-			}),
-			newStubReviewer("dependency", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				return reviewerVerdict("dependency", input.Round), nil
-			}),
-			newStubReviewer("feasibility", func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
-				return reviewerVerdict("feasibility", input.Round), nil
-			}),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, input AggregatorInput) (AggregatorDecision, error) {
-			switch input.Round {
-			case 1:
-				return AggregatorDecision{
-					Decision: " \nfix\t ",
-					RevisedTasks: []core.TaskItem{
-						{
-							ID:          "task-1",
-							Title:       "修正后任务",
-							Description: "补齐依赖并增加验收步骤",
-							Template:    "standard",
-							Status:      core.ItemPending,
-						},
+			return &DependencyAnalysis{
+				Conflicts: []ConflictInfo{
+					{
+						IssueIDs:   []string{issues[0].ID, issues[1].ID},
+						Resource:   "db-lock",
+						Suggestion: "串行化写入顺序",
 					},
-				}, nil
-			case 2:
-				return AggregatorDecision{
-					Decision: "\napprove \t",
-				}, nil
-			default:
-				return AggregatorDecision{}, errors.New("unexpected round")
-			}
-		}),
-	}
-
-	result, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-fix-ws"), ReviewInput{})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Decision != DecisionApprove {
-		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
-	}
-	if !sawRevisedTask.Load() {
-		t.Fatal("second review round should receive revised tasks from fix decision with whitespace")
-	}
-
-	records, err := store.GetReviewRecords(result.Plan.ID)
-	if err != nil {
-		t.Fatalf("GetReviewRecords() error = %v", err)
-	}
-
-	aggregatorByRound := map[int]string{}
-	for _, record := range records {
-		if record.Reviewer == "aggregator" {
-			aggregatorByRound[record.Round] = record.Verdict
-		}
-	}
-	if aggregatorByRound[1] != DecisionFix {
-		t.Fatalf("round1 aggregator verdict = %q, want normalized %q", aggregatorByRound[1], DecisionFix)
-	}
-	if aggregatorByRound[2] != DecisionApprove {
-		t.Fatalf("round2 aggregator verdict = %q, want normalized %q", aggregatorByRound[2], DecisionApprove)
-	}
-}
-
-func TestReviewOrchestratorRunEscalateDecisionWithWhitespace(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", issueVerdict("completeness", "critical", "缺失核心任务")),
-			newStubReviewer("dependency", issueVerdict("dependency", "critical", "存在依赖环")),
-			newStubReviewer("feasibility", issueVerdict("feasibility", "warning", "任务过大难以执行")),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, _ AggregatorInput) (AggregatorDecision, error) {
-			return AggregatorDecision{
-				Decision: " \n escalate\t ",
-				Reason:   "critical 问题无法安全自动修复",
+				},
 			}, nil
-		}),
+		}},
 	}
 
-	result, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-escalate-ws"), ReviewInput{})
+	issues := []*core.Issue{
+		newReviewTestIssue("issue-review-conflict-1"),
+		newReviewTestIssue("issue-review-conflict-2"),
+	}
+
+	result, err := panel.Run(context.Background(), issues)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if result.Decision != DecisionEscalate {
 		t.Fatalf("decision = %q, want %q", result.Decision, DecisionEscalate)
 	}
-
-	records, err := store.GetReviewRecords(result.Plan.ID)
-	if err != nil {
-		t.Fatalf("GetReviewRecords() error = %v", err)
+	if result.Status != core.ReviewStatusRejected {
+		t.Fatalf("status = %q, want %q", result.Status, core.ReviewStatusRejected)
+	}
+	if result.AutoApproved {
+		t.Fatal("auto_approved = true, want false")
+	}
+	if result.DAG == nil || len(result.DAG.Conflicts) != 1 {
+		t.Fatalf("dag conflicts = %#v, want 1 conflict", result.DAG)
 	}
 
-	var aggregatorVerdict string
-	for _, record := range records {
-		if record.Reviewer == "aggregator" {
-			aggregatorVerdict = record.Verdict
-			break
+	for _, issue := range issues {
+		records, err := store.GetReviewRecords(issue.ID)
+		if err != nil {
+			t.Fatalf("GetReviewRecords(%s) error = %v", issue.ID, err)
 		}
-	}
-	if aggregatorVerdict != DecisionEscalate {
-		t.Fatalf("aggregator verdict = %q, want normalized %q", aggregatorVerdict, DecisionEscalate)
+		if len(records) != 2 {
+			t.Fatalf("record count for issue %s = %d, want 2", issue.ID, len(records))
+		}
+		phase2 := records[1]
+		if phase2.Verdict != "issues_found" {
+			t.Fatalf("phase2 verdict for issue %s = %q, want issues_found", issue.ID, phase2.Verdict)
+		}
+		if len(phase2.Issues) != 1 {
+			t.Fatalf("phase2 issues count for issue %s = %d, want 1", issue.ID, len(phase2.Issues))
+		}
+		if !strings.Contains(phase2.Issues[0].Description, "db-lock") {
+			t.Fatalf("phase2 description = %q, want contains db-lock", phase2.Issues[0].Description)
+		}
 	}
 }
 
-func TestReviewOrchestratorRunUnknownDecisionReturnsClearError(t *testing.T) {
+func TestReviewOrchestratorRunFixPathWhenBelowThreshold(t *testing.T) {
+	t.Parallel()
+
+	store := newMockReviewStore()
+	panel := ReviewOrchestrator{
+		Store:                store,
+		AutoApproveThreshold: 85,
+		Reviewer: stubDemandReviewer{fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 84}, nil
+		}},
+	}
+
+	result, err := panel.Run(context.Background(), []*core.Issue{newReviewTestIssue("issue-review-threshold")})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Decision != DecisionFix {
+		t.Fatalf("decision = %q, want %q", result.Decision, DecisionFix)
+	}
+	if result.Status != core.ReviewStatusChangesRequested {
+		t.Fatalf("status = %q, want %q", result.Status, core.ReviewStatusChangesRequested)
+	}
+	if result.AutoApproved {
+		t.Fatal("auto_approved = true, want false")
+	}
+}
+
+func TestReviewOrchestratorRunUsesLegacyReviewerAdapter(t *testing.T) {
 	t.Parallel()
 
 	store := newMockReviewStore()
 	panel := ReviewOrchestrator{
 		Store: store,
 		Reviewers: []Reviewer{
-			newStubReviewer("completeness", passVerdict("completeness")),
-			newStubReviewer("dependency", passVerdict("dependency")),
-			newStubReviewer("feasibility", passVerdict("feasibility")),
+			stubLegacyReviewer{
+				name: "legacy-reviewer",
+				fn: func(_ context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
+					if input.Issue == nil {
+						return core.ReviewVerdict{}, errors.New("legacy reviewer should receive issue")
+					}
+					input.Issue.Title = "changed-inside-reviewer"
+					return core.ReviewVerdict{Reviewer: "legacy-reviewer", Status: "pass", Score: 91}, nil
+				},
+			},
 		},
-		Aggregator: newStubAggregator(func(_ context.Context, _ AggregatorInput) (AggregatorDecision, error) {
-			return AggregatorDecision{Decision: " \nhold \t"}, nil
-		}),
 	}
 
-	_, err := panel.Run(context.Background(), newReviewTestPlan("plan-review-unknown-decision"), ReviewInput{})
-	if err == nil {
-		t.Fatal("Run() expected error for unknown decision, got nil")
+	issue := newReviewTestIssue("issue-review-legacy")
+	originalTitle := issue.Title
+
+	result, err := panel.Run(context.Background(), []*core.Issue{issue})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), `invalid aggregator decision in round 1`) {
-		t.Fatalf("error = %v, want invalid aggregator decision context", err)
+	if result.Decision != DecisionApprove {
+		t.Fatalf("decision = %q, want %q", result.Decision, DecisionApprove)
 	}
-	if !strings.Contains(err.Error(), `unsupported decision "hold"`) {
-		t.Fatalf("error = %v, want normalized unsupported decision detail", err)
+	if issue.Title != originalTitle {
+		t.Fatalf("original issue title mutated = %q, want %q", issue.Title, originalTitle)
+	}
+
+	records, err := store.GetReviewRecords(issue.ID)
+	if err != nil {
+		t.Fatalf("GetReviewRecords() error = %v", err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected persisted records")
+	}
+	if records[0].Reviewer != "legacy-reviewer" {
+		t.Fatalf("phase1 reviewer = %q, want legacy-reviewer", records[0].Reviewer)
+	}
+}
+
+func TestReviewOrchestratorSubmitForReviewDelegatesRun(t *testing.T) {
+	t.Parallel()
+
+	store := newMockReviewStore()
+	panel := ReviewOrchestrator{
+		Store: store,
+		Reviewer: stubDemandReviewer{fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 90}, nil
+		}},
+	}
+
+	err := panel.SubmitForReview(context.Background(), []*core.Issue{newReviewTestIssue("issue-review-submit")})
+	if err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
+	}
+}
+
+func TestTwoPhaseReviewRunValidatesInput(t *testing.T) {
+	t.Parallel()
+
+	base := TwoPhaseReview{
+		Store: newMockReviewStore(),
+		Reviewer: stubDemandReviewer{fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 90}, nil
+		}},
+	}
+
+	tests := []struct {
+		name   string
+		panel  TwoPhaseReview
+		issues []*core.Issue
+		want   string
+	}{
+		{
+			name:   "missing store",
+			panel:  TwoPhaseReview{Reviewer: base.Reviewer},
+			issues: []*core.Issue{newReviewTestIssue("issue-review-validate-1")},
+			want:   "review store is required",
+		},
+		{
+			name:   "missing reviewer",
+			panel:  TwoPhaseReview{Store: base.Store},
+			issues: []*core.Issue{newReviewTestIssue("issue-review-validate-2")},
+			want:   "demand reviewer is required",
+		},
+		{
+			name:   "empty issues",
+			panel:  base,
+			issues: nil,
+			want:   "issues are required",
+		},
+		{
+			name:  "nil issue",
+			panel: base,
+			issues: []*core.Issue{
+				nil,
+			},
+			want: "issue[0] is nil",
+		},
+		{
+			name: "blank id",
+			panel: base,
+			issues: []*core.Issue{
+				newReviewTestIssue("   "),
+			},
+			want: "issue[0] id is required",
+		},
+		{
+			name: "duplicate id",
+			panel: base,
+			issues: []*core.Issue{
+				newReviewTestIssue("issue-review-dup"),
+				newReviewTestIssue("issue-review-dup"),
+			},
+			want: `duplicate issue id "issue-review-dup"`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.panel.Run(context.Background(), tc.issues)
+			if err == nil {
+				t.Fatalf("Run() expected error contains %q, got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want contains %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestTwoPhaseReviewRunUsesNextRoundFromHistory(t *testing.T) {
+	t.Parallel()
+
+	store := newMockReviewStore()
+	if err := store.SaveReviewRecord(&core.ReviewRecord{IssueID: "issue-review-round-1", Round: 2, Reviewer: "x", Verdict: "pass"}); err != nil {
+		t.Fatalf("seed record issue-1 error = %v", err)
+	}
+	if err := store.SaveReviewRecord(&core.ReviewRecord{IssueID: "issue-review-round-2", Round: 4, Reviewer: "x", Verdict: "pass"}); err != nil {
+		t.Fatalf("seed record issue-2 error = %v", err)
+	}
+
+	panel := TwoPhaseReview{
+		Store: store,
+		Reviewer: stubDemandReviewer{fn: func(_ context.Context, _ *core.Issue) (core.ReviewVerdict, error) {
+			return core.ReviewVerdict{Status: "pass", Score: 96}, nil
+		}},
+	}
+
+	issues := []*core.Issue{
+		newReviewTestIssue("issue-review-round-1"),
+		newReviewTestIssue("issue-review-round-2"),
+	}
+	_, err := panel.Run(context.Background(), issues)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for _, issue := range issues {
+		records, err := store.GetReviewRecords(issue.ID)
+		if err != nil {
+			t.Fatalf("GetReviewRecords(%s) error = %v", issue.ID, err)
+		}
+		var latestRound int
+		for _, record := range records {
+			if record.Round > latestRound {
+				latestRound = record.Round
+			}
+		}
+		if latestRound != 5 {
+			t.Fatalf("latest round for issue %s = %d, want 5", issue.ID, latestRound)
+		}
+	}
+}
+
+func TestNormalizeIssuesTrimsIDAndClones(t *testing.T) {
+	t.Parallel()
+
+	origin := newReviewTestIssue(" issue-review-normalize ")
+	origin.DependsOn = []string{"upstream-1"}
+
+	out, err := normalizeIssues([]*core.Issue{origin})
+	if err != nil {
+		t.Fatalf("normalizeIssues() error = %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("normalize output len = %d, want 1", len(out))
+	}
+	if out[0].ID != "issue-review-normalize" {
+		t.Fatalf("normalized id = %q, want %q", out[0].ID, "issue-review-normalize")
+	}
+
+	out[0].Title = "mutated"
+	out[0].DependsOn[0] = "mutated-dependency"
+	if strings.TrimSpace(origin.ID) != "issue-review-normalize" {
+		t.Fatalf("origin id unexpectedly changed = %q", origin.ID)
+	}
+	if origin.Title == "mutated" {
+		t.Fatal("origin title should not be mutated")
+	}
+	if origin.DependsOn[0] != "upstream-1" {
+		t.Fatalf("origin depends_on[0] = %q, want %q", origin.DependsOn[0], "upstream-1")
+	}
+}
+
+func TestNormalizeVerdictDefaultsAndBounds(t *testing.T) {
+	t.Parallel()
+
+	pass := normalizeVerdict("issue-review-verdict", core.ReviewVerdict{})
+	if pass.Reviewer != phase1ReviewerName {
+		t.Fatalf("reviewer = %q, want %q", pass.Reviewer, phase1ReviewerName)
+	}
+	if pass.Status != "pass" {
+		t.Fatalf("status = %q, want pass", pass.Status)
+	}
+	if pass.Score != 100 {
+		t.Fatalf("score = %d, want 100", pass.Score)
+	}
+
+	withIssues := normalizeVerdict("issue-review-verdict", core.ReviewVerdict{
+		Reviewer: " custom-reviewer ",
+		Status:   "approved",
+		Score:    200,
+		Issues: []core.ReviewIssue{
+			{Severity: "warning", Description: "x"},
+		},
+	})
+	if withIssues.Reviewer != "custom-reviewer" {
+		t.Fatalf("reviewer = %q, want custom-reviewer", withIssues.Reviewer)
+	}
+	if withIssues.Status != "issues_found" {
+		t.Fatalf("status = %q, want issues_found", withIssues.Status)
+	}
+	if withIssues.Score != 100 {
+		t.Fatalf("score = %d, want 100", withIssues.Score)
+	}
+	if withIssues.Issues[0].IssueID != "issue-review-verdict" {
+		t.Fatalf("issue_id = %q, want issue-review-verdict", withIssues.Issues[0].IssueID)
+	}
+}
+
+func TestDependencyIssuesForIssueMapsConflicts(t *testing.T) {
+	t.Parallel()
+
+	analysis := &DependencyAnalysis{
+		Conflicts: []ConflictInfo{
+			{IssueIDs: []string{"issue-1", "issue-2"}, Resource: "shared-db", Suggestion: "serial execution"},
+			{IssueIDs: []string{"issue-3"}, Resource: "cache"},
+		},
+	}
+
+	got := dependencyIssuesForIssue("issue-1", analysis)
+	if len(got) != 1 {
+		t.Fatalf("issues len = %d, want 1", len(got))
+	}
+	if got[0].IssueID != "issue-1" {
+		t.Fatalf("issue_id = %q, want %q", got[0].IssueID, "issue-1")
+	}
+	if !strings.Contains(got[0].Description, "shared-db") {
+		t.Fatalf("description = %q, want contains shared-db", got[0].Description)
+	}
+	if got[0].Suggestion != "serial execution" {
+		t.Fatalf("suggestion = %q, want %q", got[0].Suggestion, "serial execution")
 	}
 }
 
@@ -657,195 +563,13 @@ func TestReviewOrchestratorUsesRoleBindings(t *testing.T) {
 	}
 }
 
-func TestReviewOrchestratorHandleHumanRejectTriggersRegeneration(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	plan := newReviewTestPlan("plan-review-reject")
-	plan.Status = core.PlanWaitingHuman
-	plan.WaitReason = core.WaitFinalApproval
-	plan.ReviewRound = 2
-
-	if err := store.SaveReviewRecord(&core.ReviewRecord{
-		PlanID:   plan.ID,
-		Round:    1,
-		Reviewer: "completeness",
-		Verdict:  "issues_found",
-		Issues: []core.ReviewIssue{
-			{
-				Severity:    "warning",
-				Description: "coverage_gap",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("SaveReviewRecord(round1) error = %v", err)
-	}
-	if err := store.SaveReviewRecord(&core.ReviewRecord{
-		PlanID:   plan.ID,
-		Round:    2,
-		Reviewer: "aggregator",
-		Verdict:  "approve",
-	}); err != nil {
-		t.Fatalf("SaveReviewRecord(round2) error = %v", err)
-	}
-
-	spy := &spyRegenerator{
-		result: &core.TaskPlan{
-			ID:        plan.ID,
-			ProjectID: plan.ProjectID,
-			Name:      "regenerated-plan",
-			Tasks: []core.TaskItem{
-				{
-					ID:          "task-r1",
-					Title:       "补全遗漏任务",
-					Description: "根据人工反馈重建任务清单",
-					Template:    "standard",
-					Status:      core.ItemPending,
-				},
-			},
-		},
-	}
-
-	panel := ReviewOrchestrator{Store: store}
-	nextPlan, err := panel.HandleHumanReject(context.Background(), plan, HumanFeedback{
-		Category:          FeedbackCoverageGap,
-		Detail:            "上一版遗漏验收与回归测试任务，请补齐并明确依赖关系。",
-		ExpectedDirection: "补齐测试任务并修正依赖",
-	}, spy)
-	if err != nil {
-		t.Fatalf("HandleHumanReject() error = %v", err)
-	}
-
-	if !spy.called {
-		t.Fatal("regenerator should be called")
-	}
-	if spy.request.PlanID != plan.ID {
-		t.Fatalf("regeneration plan_id = %q, want %q", spy.request.PlanID, plan.ID)
-	}
-	if spy.request.RevisionFrom != 2 {
-		t.Fatalf("revision_from = %d, want 2", spy.request.RevisionFrom)
-	}
-	if spy.request.WaitReason != core.WaitFinalApproval {
-		t.Fatalf("wait_reason = %q, want %q", spy.request.WaitReason, core.WaitFinalApproval)
-	}
-	if spy.request.AIReviewSummary.Rounds != 2 {
-		t.Fatalf("ai_review_summary.rounds = %d, want 2", spy.request.AIReviewSummary.Rounds)
-	}
-	if spy.request.AIReviewSummary.LastDecision != DecisionApprove {
-		t.Fatalf("ai_review_summary.last_decision = %q, want %q", spy.request.AIReviewSummary.LastDecision, DecisionApprove)
-	}
-	if len(spy.request.AIReviewSummary.TopIssues) == 0 || spy.request.AIReviewSummary.TopIssues[0] != "coverage_gap" {
-		t.Fatalf("ai_review_summary.top_issues = %v, want first issue coverage_gap", spy.request.AIReviewSummary.TopIssues)
-	}
-
-	if nextPlan.Status != core.PlanReviewing {
-		t.Fatalf("next plan status = %q, want %q", nextPlan.Status, core.PlanReviewing)
-	}
-	if nextPlan.WaitReason != core.WaitNone {
-		t.Fatalf("next plan wait reason = %q, want empty", nextPlan.WaitReason)
-	}
-	if nextPlan.ReviewRound != 0 {
-		t.Fatalf("next plan review_round = %d, want 0", nextPlan.ReviewRound)
-	}
-}
-
-func TestReviewOrchestratorHandleHumanRejectFeedbackRequiredTriggersRegeneration(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	plan := newReviewTestPlan("plan-review-reject-feedback-required")
-	plan.Status = core.PlanWaitingHuman
-	plan.WaitReason = core.WaitFeedbackReq
-	plan.ReviewRound = 1
-
-	if err := store.SaveReviewRecord(&core.ReviewRecord{
-		PlanID:   plan.ID,
-		Round:    1,
-		Reviewer: "aggregator",
-		Verdict:  " \nESCALATE\t ",
-		Issues: []core.ReviewIssue{
-			{
-				Severity:    "critical",
-				Description: "coverage_gap",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("SaveReviewRecord(round1) error = %v", err)
-	}
-
-	spy := &spyRegenerator{
-		result: &core.TaskPlan{
-			ID:        plan.ID,
-			ProjectID: plan.ProjectID,
-			Name:      "regenerated-plan-feedback-required",
-			Tasks: []core.TaskItem{
-				{
-					ID:          "task-r1",
-					Title:       "补全遗漏任务",
-					Description: "根据人工反馈重建任务清单",
-					Template:    "standard",
-					Status:      core.ItemPending,
-				},
-			},
-		},
-	}
-
-	panel := ReviewOrchestrator{Store: store}
-	nextPlan, err := panel.HandleHumanReject(context.Background(), plan, HumanFeedback{
-		Category:          FeedbackCoverageGap,
-		Detail:            "该版本在反馈要求场景中仍遗漏关键验证步骤，请补齐并收敛风险。",
-		ExpectedDirection: "聚焦遗漏验证步骤并补全任务",
-	}, spy)
-	if err != nil {
-		t.Fatalf("HandleHumanReject() error = %v", err)
-	}
-
-	if !spy.called {
-		t.Fatal("regenerator should be called")
-	}
-	if spy.request.PlanID != plan.ID {
-		t.Fatalf("regeneration plan_id = %q, want %q", spy.request.PlanID, plan.ID)
-	}
-	if spy.request.RevisionFrom != 1 {
-		t.Fatalf("revision_from = %d, want 1", spy.request.RevisionFrom)
-	}
-	if spy.request.WaitReason != core.WaitFeedbackReq {
-		t.Fatalf("wait_reason = %q, want %q", spy.request.WaitReason, core.WaitFeedbackReq)
-	}
-	if spy.request.AIReviewSummary.LastDecision != DecisionEscalate {
-		t.Fatalf("ai_review_summary.last_decision = %q, want %q", spy.request.AIReviewSummary.LastDecision, DecisionEscalate)
-	}
-	if nextPlan.Status != core.PlanReviewing {
-		t.Fatalf("next plan status = %q, want %q", nextPlan.Status, core.PlanReviewing)
-	}
-	if nextPlan.WaitReason != core.WaitNone {
-		t.Fatalf("next plan wait reason = %q, want empty", nextPlan.WaitReason)
-	}
-	if nextPlan.ReviewRound != 0 {
-		t.Fatalf("next plan review_round = %d, want 0", nextPlan.ReviewRound)
-	}
-}
-
 type mockReviewStore struct {
 	mu      sync.Mutex
 	records []core.ReviewRecord
-	plans   []core.TaskPlan
 }
 
 func newMockReviewStore() *mockReviewStore {
 	return &mockReviewStore{}
-}
-
-func (s *mockReviewStore) SaveTaskPlan(plan *core.TaskPlan) error {
-	if plan == nil {
-		return errors.New("plan is nil")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.plans = append(s.plans, cloneReviewPlan(*plan))
-	return nil
 }
 
 func (s *mockReviewStore) SaveReviewRecord(r *core.ReviewRecord) error {
@@ -863,13 +587,15 @@ func (s *mockReviewStore) SaveReviewRecord(r *core.ReviewRecord) error {
 	return nil
 }
 
-func (s *mockReviewStore) GetReviewRecords(planID string) ([]core.ReviewRecord, error) {
+func (s *mockReviewStore) GetReviewRecords(issueID string) ([]core.ReviewRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var filtered []core.ReviewRecord
-	for _, record := range s.records {
-		if record.PlanID != planID {
+	key := strings.TrimSpace(issueID)
+	filtered := make([]core.ReviewRecord, 0)
+	for i := range s.records {
+		record := s.records[i]
+		if strings.TrimSpace(record.IssueID) != key {
 			continue
 		}
 		cp := record
@@ -880,166 +606,53 @@ func (s *mockReviewStore) GetReviewRecords(planID string) ([]core.ReviewRecord, 
 	return filtered, nil
 }
 
-type stubReviewer struct {
+type stubDemandReviewer struct {
+	fn func(ctx context.Context, issue *core.Issue) (core.ReviewVerdict, error)
+}
+
+func (r stubDemandReviewer) Review(ctx context.Context, issue *core.Issue) (core.ReviewVerdict, error) {
+	if r.fn != nil {
+		return r.fn(ctx, issue)
+	}
+	return core.ReviewVerdict{Status: "pass", Score: 90}, nil
+}
+
+type stubDependencyAnalyzer struct {
+	fn func(ctx context.Context, issues []*core.Issue) (*DependencyAnalysis, error)
+}
+
+func (a stubDependencyAnalyzer) Analyze(ctx context.Context, issues []*core.Issue) (*DependencyAnalysis, error) {
+	if a.fn != nil {
+		return a.fn(ctx, issues)
+	}
+	return &DependencyAnalysis{}, nil
+}
+
+type stubLegacyReviewer struct {
 	name string
 	fn   func(ctx context.Context, input ReviewerInput) (core.ReviewVerdict, error)
 }
 
-func newStubReviewer(name string, fn func(ctx context.Context, input ReviewerInput) (core.ReviewVerdict, error)) stubReviewer {
-	return stubReviewer{name: name, fn: fn}
-}
+func (r stubLegacyReviewer) Name() string { return r.name }
 
-func (r stubReviewer) Name() string { return r.name }
-
-func (r stubReviewer) Review(ctx context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
+func (r stubLegacyReviewer) Review(ctx context.Context, input ReviewerInput) (core.ReviewVerdict, error) {
 	if r.fn != nil {
 		return r.fn(ctx, input)
 	}
-	return core.ReviewVerdict{
-		Reviewer: r.name,
-		Status:   "pass",
-		Score:    80,
-	}, nil
+	return core.ReviewVerdict{Reviewer: r.name, Status: "pass", Score: 80}, nil
 }
 
-type stubAggregator struct {
-	fn func(ctx context.Context, input AggregatorInput) (AggregatorDecision, error)
-}
-
-func newStubAggregator(fn func(ctx context.Context, input AggregatorInput) (AggregatorDecision, error)) stubAggregator {
-	return stubAggregator{fn: fn}
-}
-
-func (a stubAggregator) Decide(ctx context.Context, input AggregatorInput) (AggregatorDecision, error) {
-	if a.fn != nil {
-		return a.fn(ctx, input)
-	}
-	return AggregatorDecision{Decision: DecisionApprove}, nil
-}
-
-type spyRegenerator struct {
-	mu      sync.Mutex
-	called  bool
-	request RegenerationRequest
-	result  *core.TaskPlan
-	err     error
-}
-
-func (s *spyRegenerator) Regenerate(_ context.Context, req RegenerationRequest) (*core.TaskPlan, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.called = true
-	s.request = req
-	if s.err != nil {
-		return nil, s.err
-	}
-	if s.result == nil {
-		return nil, nil
-	}
-	cp := cloneReviewPlan(*s.result)
-	return &cp, nil
-}
-
-func TestReviewAgent_RejectsMissingAcceptance(t *testing.T) {
-	t.Parallel()
-
-	store := newMockReviewStore()
-	panel := ReviewOrchestrator{
-		Store: store,
-		Reviewers: []Reviewer{
-			newStubReviewer("completeness", passVerdict("completeness")),
-			newStubReviewer("dependency", passVerdict("dependency")),
-			newStubReviewer("feasibility", passVerdict("feasibility")),
-		},
-		Aggregator: newStubAggregator(func(_ context.Context, _ AggregatorInput) (AggregatorDecision, error) {
-			return AggregatorDecision{Decision: DecisionApprove}, nil
-		}),
-	}
-
-	plan := newReviewTestPlan("plan-review-structured-missing-acceptance")
-	plan.ContractVersion = "v1"
-	plan.Tasks[0].Acceptance = nil
-
-	_, err := panel.Run(context.Background(), plan, ReviewInput{})
-	if err == nil {
-		t.Fatal("expected review run to reject missing acceptance under structured contract")
-	}
-	if !strings.Contains(err.Error(), "acceptance") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func passVerdict(reviewer string) func(context.Context, ReviewerInput) (core.ReviewVerdict, error) {
-	return func(_ context.Context, _ ReviewerInput) (core.ReviewVerdict, error) {
-		return core.ReviewVerdict{
-			Reviewer: reviewer,
-			Status:   "pass",
-			Score:    92,
-		}, nil
-	}
-}
-
-func issueVerdict(reviewer, severity, description string) func(context.Context, ReviewerInput) (core.ReviewVerdict, error) {
-	return func(_ context.Context, _ ReviewerInput) (core.ReviewVerdict, error) {
-		return core.ReviewVerdict{
-			Reviewer: reviewer,
-			Status:   "issues_found",
-			Score:    60,
-			Issues: []core.ReviewIssue{
-				{
-					Severity:    severity,
-					TaskID:      "task-1",
-					Description: description,
-					Suggestion:  "请修正",
-				},
-			},
-		}, nil
-	}
-}
-
-func reviewerVerdict(reviewer string, round int) core.ReviewVerdict {
-	if round == 1 {
-		return core.ReviewVerdict{
-			Reviewer: reviewer,
-			Status:   "issues_found",
-			Score:    70,
-			Issues: []core.ReviewIssue{
-				{
-					Severity:    "warning",
-					TaskID:      "task-1",
-					Description: "首轮发现问题",
-					Suggestion:  "请补齐",
-				},
-			},
-		}
-	}
-
-	return core.ReviewVerdict{
-		Reviewer: reviewer,
-		Status:   "pass",
-		Score:    90,
-	}
-}
-
-func newReviewTestPlan(planID string) *core.TaskPlan {
-	return &core.TaskPlan{
-		ID:         planID,
+func newReviewTestIssue(id string) *core.Issue {
+	return &core.Issue{
+		ID:         id,
 		ProjectID:  "proj-review",
-		Name:       "review-plan",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
+		SessionID:  "session-review",
+		Title:      "实现功能A",
+		Body:       "完成功能A并补充测试",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusDraft,
 		FailPolicy: core.FailBlock,
-		Tasks: []core.TaskItem{
-			{
-				ID:          "task-1",
-				PlanID:      planID,
-				Title:       "实现功能A",
-				Description: "完成功能A并补充测试",
-				Template:    "standard",
-				Status:      core.ItemPending,
-			},
-		},
 	}
 }
 

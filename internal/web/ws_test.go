@@ -120,7 +120,7 @@ func TestWSBroadcastAndPipelineSubscriptionFlow(t *testing.T) {
 	}
 }
 
-func TestWSPlanSubscriptionReceivesCoreEventsByPlanID(t *testing.T) {
+func TestWSIssueSubscriptionReceivesCoreEventsByIssueID(t *testing.T) {
 	hub := NewHub()
 	srv := NewServer(Config{Hub: hub})
 	ts := httptest.NewServer(srv.Handler())
@@ -138,29 +138,29 @@ func TestWSPlanSubscriptionReceivesCoreEventsByPlanID(t *testing.T) {
 	}
 
 	if err := conn.WriteJSON(map[string]string{
-		"type":    "subscribe_plan",
-		"plan_id": "plan-1",
+		"type":     "subscribe_issue",
+		"issue_id": "issue-1",
 	}); err != nil {
-		t.Fatalf("write subscribe_plan message: %v", err)
+		t.Fatalf("write subscribe_issue message: %v", err)
 	}
 	ack := readWSMessage(t, conn, 2*time.Second)
-	if ack.Type != "subscribed" || ack.PlanID != "plan-1" {
+	if ack.Type != "subscribed" || ack.IssueID != "issue-1" {
 		t.Fatalf("unexpected subscribe ack: %+v", ack)
 	}
 
 	hub.BroadcastCoreEvent(core.Event{
-		Type:       core.EventTaskReady,
+		Type:       core.EventIssueReady,
 		PipelineID: "pipe-2",
 		ProjectID:  "proj-1",
-		PlanID:     "plan-2",
+		IssueID:    "issue-2",
 		Timestamp:  time.Now(),
 	})
 
 	hub.BroadcastCoreEvent(core.Event{
-		Type:       core.EventTaskReady,
+		Type:       core.EventIssueReady,
 		PipelineID: "pipe-1",
 		ProjectID:  "proj-1",
-		PlanID:     "plan-1",
+		IssueID:    "issue-1",
 		Timestamp:  time.Now(),
 		Data: map[string]string{
 			"task_id": "task-1",
@@ -168,11 +168,11 @@ func TestWSPlanSubscriptionReceivesCoreEventsByPlanID(t *testing.T) {
 	})
 
 	got := readWSMessage(t, conn, 2*time.Second)
-	if got.Type != string(core.EventTaskReady) {
-		t.Fatalf("expected %q, got %q", core.EventTaskReady, got.Type)
+	if got.Type != string(core.EventIssueReady) {
+		t.Fatalf("expected %q, got %q", core.EventIssueReady, got.Type)
 	}
-	if got.PlanID != "plan-1" {
-		t.Fatalf("expected plan_id=plan-1, got %+v", got)
+	if got.IssueID != "issue-1" {
+		t.Fatalf("expected issue_id=issue-1, got %+v", got)
 	}
 	if got.PipelineID != "pipe-1" {
 		t.Fatalf("expected pipeline_id=pipe-1, got %+v", got)
@@ -182,7 +182,7 @@ func TestWSPlanSubscriptionReceivesCoreEventsByPlanID(t *testing.T) {
 	}
 }
 
-func TestWSPlanCreatedAlwaysBroadcastEvenWhenPlanIDPresent(t *testing.T) {
+func TestWSIssueCreatedAlwaysBroadcastEvenWhenIssueIDPresent(t *testing.T) {
 	hub := NewHub()
 	srv := NewServer(Config{Hub: hub})
 	ts := httptest.NewServer(srv.Handler())
@@ -200,22 +200,22 @@ func TestWSPlanCreatedAlwaysBroadcastEvenWhenPlanIDPresent(t *testing.T) {
 	}
 
 	hub.BroadcastCoreEvent(core.Event{
-		Type:      core.EventPlanCreated,
+		Type:      core.EventIssueCreated,
 		ProjectID: "proj-1",
-		PlanID:    "plan-created-1",
+		IssueID:   "issue-created-1",
 		Timestamp: time.Now(),
 	})
 
 	got := readWSMessage(t, conn, 2*time.Second)
-	if got.Type != string(core.EventPlanCreated) {
-		t.Fatalf("expected %q, got %q", core.EventPlanCreated, got.Type)
+	if got.Type != string(core.EventIssueCreated) {
+		t.Fatalf("expected %q, got %q", core.EventIssueCreated, got.Type)
 	}
-	if got.PlanID != "plan-created-1" {
-		t.Fatalf("expected plan_id=plan-created-1, got %+v", got)
+	if got.IssueID != "issue-created-1" {
+		t.Fatalf("expected issue_id=issue-created-1, got %+v", got)
 	}
 }
 
-func TestWSBroadcastCoreEventFallsBackPlanIDFromData(t *testing.T) {
+func TestWSBroadcastCoreEventFallsBackIssueIDFromData(t *testing.T) {
 	hub := NewHub()
 	srv := NewServer(Config{Hub: hub})
 	ts := httptest.NewServer(srv.Handler())
@@ -233,32 +233,32 @@ func TestWSBroadcastCoreEventFallsBackPlanIDFromData(t *testing.T) {
 	}
 
 	if err := conn.WriteJSON(map[string]string{
-		"type":    "subscribe_plan",
-		"plan_id": "plan-fallback-1",
+		"type":     "subscribe_issue",
+		"issue_id": "issue-fallback-1",
 	}); err != nil {
-		t.Fatalf("write subscribe_plan message: %v", err)
+		t.Fatalf("write subscribe_issue message: %v", err)
 	}
 	ack := readWSMessage(t, conn, 2*time.Second)
-	if ack.Type != "subscribed" || ack.PlanID != "plan-fallback-1" {
+	if ack.Type != "subscribed" || ack.IssueID != "issue-fallback-1" {
 		t.Fatalf("unexpected subscribe ack: %+v", ack)
 	}
 
 	hub.BroadcastCoreEvent(core.Event{
-		Type:      core.EventTaskReady,
+		Type:      core.EventIssueReady,
 		ProjectID: "proj-1",
 		Timestamp: time.Now(),
 		Data: map[string]string{
-			"plan_id": "plan-fallback-1",
-			"task_id": "task-fallback-1",
+			"issue_id": "issue-fallback-1",
+			"task_id":  "task-fallback-1",
 		},
 	})
 
 	got := readWSMessage(t, conn, 2*time.Second)
-	if got.Type != string(core.EventTaskReady) {
-		t.Fatalf("expected %q, got %q", core.EventTaskReady, got.Type)
+	if got.Type != string(core.EventIssueReady) {
+		t.Fatalf("expected %q, got %q", core.EventIssueReady, got.Type)
 	}
-	if got.PlanID != "plan-fallback-1" {
-		t.Fatalf("expected fallback plan_id=plan-fallback-1, got %+v", got)
+	if got.IssueID != "issue-fallback-1" {
+		t.Fatalf("expected fallback issue_id=issue-fallback-1, got %+v", got)
 	}
 	if got.Data["task_id"] != "task-fallback-1" {
 		t.Fatalf("expected task_id=task-fallback-1, got %+v", got.Data)

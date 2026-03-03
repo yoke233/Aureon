@@ -390,7 +390,7 @@ func normalizePipelinesForAPI(items []core.Pipeline) []core.Pipeline {
 }
 
 func normalizePipelineForAPI(item core.Pipeline) core.Pipeline {
-	item.TaskItemID = strings.TrimSpace(item.TaskItemID)
+	item.IssueID = strings.TrimSpace(item.IssueID)
 	return item
 }
 

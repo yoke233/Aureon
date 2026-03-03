@@ -507,12 +507,12 @@ func TestDefaultPipelineStageConfig_DefaultAgentAndE2E(t *testing.T) {
 	}
 }
 
-func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
+func TestGetPipeline_IncludesIssueID(t *testing.T) {
 	store := newTestStore(t)
 	project := core.Project{
-		ID:       "proj-pipe-task-item-id",
-		Name:     "project-pipe-task-item-id",
-		RepoPath: filepath.Join(t.TempDir(), "repo-pipe-task-item-id"),
+		ID:       "proj-pipe-issue-id",
+		Name:     "project-pipe-issue-id",
+		RepoPath: filepath.Join(t.TempDir(), "repo-pipe-issue-id"),
 	}
 	if err := store.CreateProject(&project); err != nil {
 		t.Fatalf("seed project: %v", err)
@@ -520,12 +520,12 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 
 	now := time.Now()
 	pipeline := &core.Pipeline{
-		ID:              "pipe-task-item-id-1",
+		ID:              "pipe-issue-id-1",
 		ProjectID:       project.ID,
-		Name:            "task-item-pipeline",
+		Name:            "issue-pipeline",
 		Template:        "quick",
 		Status:          core.StatusCreated,
-		TaskItemID:      "task-a3f1b2c0-1",
+		IssueID:         "issue-a3f1b2c0-1",
 		Stages:          []core.StageConfig{{Name: core.StageImplement, Agent: "codex"}},
 		Artifacts:       map[string]string{},
 		Config:          map[string]any{},
@@ -541,7 +541,7 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-pipe-task-item-id/pipelines/pipe-task-item-id-1")
+	resp, err := http.Get(ts.URL + "/api/v1/projects/proj-pipe-issue-id/pipelines/pipe-issue-id-1")
 	if err != nil {
 		t.Fatalf("GET /api/v1/projects/{pid}/pipelines/{id}: %v", err)
 	}
@@ -551,8 +551,8 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 	}
 
 	var got struct {
-		ID         string `json:"id"`
-		TaskItemID string `json:"task_item_id"`
+		ID      string `json:"id"`
+		IssueID string `json:"issue_id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode pipeline response: %v", err)
@@ -560,8 +560,8 @@ func TestGetPipeline_IncludesTaskItemID(t *testing.T) {
 	if got.ID != pipeline.ID {
 		t.Fatalf("expected pipeline id %s, got %s", pipeline.ID, got.ID)
 	}
-	if got.TaskItemID != pipeline.TaskItemID {
-		t.Fatalf("expected task_item_id %s, got %s", pipeline.TaskItemID, got.TaskItemID)
+	if got.IssueID != pipeline.IssueID {
+		t.Fatalf("expected issue_id %s, got %s", pipeline.IssueID, got.IssueID)
 	}
 }
 

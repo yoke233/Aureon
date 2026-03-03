@@ -12,27 +12,27 @@ import (
 )
 
 func TestAIReviewGate_UnknownReview(t *testing.T) {
-	store, _ := newTestStoreWithPlan(t)
+	store, _ := newTestStoreWithIssue(t)
 	gate := New(store, fakePanel{})
 
 	if err := gate.Init(context.Background()); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	if _, err := gate.Check(context.Background(), "plan-unknown"); err == nil {
+	if _, err := gate.Check(context.Background(), "issue-unknown"); err == nil {
 		t.Fatalf("expected Check(unknown reviewID) to fail")
 	}
-	if err := gate.Cancel(context.Background(), "plan-unknown"); err == nil {
+	if err := gate.Cancel(context.Background(), "issue-unknown"); err == nil {
 		t.Fatalf("expected Cancel(unknown reviewID) to fail")
 	}
 }
 
 func TestAIReviewGate_CancelWinsOverAsyncError(t *testing.T) {
-	store, plan := newTestStoreWithPlan(t)
+	store, issue := newTestStoreWithIssue(t)
 	started := make(chan struct{})
 
 	panel := fakePanel{
-		run: func(ctx context.Context, _ *core.TaskPlan, _ secretary.ReviewInput) (*secretary.ReviewResult, error) {
+		run: func(ctx context.Context, _ []*core.Issue) (*secretary.ReviewSessionResult, error) {
 			close(started)
 			<-ctx.Done()
 			return nil, errors.New("runner returned non-context error after cancellation")
@@ -43,7 +43,7 @@ func TestAIReviewGate_CancelWinsOverAsyncError(t *testing.T) {
 		t.Fatalf("Init() error = %v", err)
 	}
 
-	if _, err := gate.Submit(context.Background(), plan); err != nil {
+	if _, err := gate.Submit(context.Background(), []*core.Issue{issue}); err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	select {
@@ -52,13 +52,13 @@ func TestAIReviewGate_CancelWinsOverAsyncError(t *testing.T) {
 		t.Fatal("runner did not start")
 	}
 
-	if err := gate.Cancel(context.Background(), plan.ID); err != nil {
+	if err := gate.Cancel(context.Background(), issue.ID); err != nil {
 		t.Fatalf("Cancel() error = %v", err)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		got, err := gate.Check(context.Background(), plan.ID)
+		got, err := gate.Check(context.Background(), issue.ID)
 		if err == nil && got.Status == "cancelled" && got.Decision == "cancelled" {
 			return
 		}
@@ -68,23 +68,26 @@ func TestAIReviewGate_CancelWinsOverAsyncError(t *testing.T) {
 }
 
 func TestAIReviewGate_SubmitPendingDuplicateAndCancelIdempotent(t *testing.T) {
-	store, plan := newTestStoreWithPlan(t)
+	store, issue := newTestStoreWithIssue(t)
 	started := make(chan struct{})
 	panel := fakePanel{
-		run: func(ctx context.Context, _ *core.TaskPlan, _ secretary.ReviewInput) (*secretary.ReviewResult, error) {
+		run: func(ctx context.Context, _ []*core.Issue) (*secretary.ReviewSessionResult, error) {
 			close(started)
 			<-ctx.Done()
 			return nil, ctx.Err()
 		},
 	}
 	gate := New(store, panel)
+	if err := gate.Init(context.Background()); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
 
-	reviewID, err := gate.Submit(context.Background(), plan)
+	reviewID, err := gate.Submit(context.Background(), []*core.Issue{issue})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if reviewID != plan.ID {
-		t.Fatalf("Submit() reviewID = %q, want %q", reviewID, plan.ID)
+	if reviewID != issue.ID {
+		t.Fatalf("Submit() reviewID = %q, want %q", reviewID, issue.ID)
 	}
 
 	select {
@@ -93,7 +96,7 @@ func TestAIReviewGate_SubmitPendingDuplicateAndCancelIdempotent(t *testing.T) {
 		t.Fatalf("runner did not start")
 	}
 
-	if _, err := gate.Submit(context.Background(), plan); err == nil {
+	if _, err := gate.Submit(context.Background(), []*core.Issue{issue}); err == nil {
 		t.Fatalf("expected duplicate Submit() to fail while review is running")
 	}
 
@@ -130,49 +133,31 @@ func TestAIReviewGate_SubmitPendingDuplicateAndCancelIdempotent(t *testing.T) {
 func TestAIReviewGate_CheckCompletedStatusMapping(t *testing.T) {
 	tests := []struct {
 		name         string
-		waitReason   core.WaitReason
 		verdict      string
-		planStatus   core.TaskPlanStatus
 		wantStatus   string
 		wantDecision string
 	}{
 		{
-			name:         "approved requires final approval",
-			waitReason:   core.WaitFinalApproval,
-			verdict:      "approve",
-			planStatus:   core.PlanWaitingHuman,
+			name:         "approved from pass verdict",
+			verdict:      "pass",
 			wantStatus:   "approved",
 			wantDecision: "approve",
 		},
 		{
-			name:         "rejected requires feedback required",
-			waitReason:   core.WaitFeedbackReq,
+			name:         "rejected from escalate verdict",
 			verdict:      "escalate",
-			planStatus:   core.PlanWaitingHuman,
-			wantStatus:   "rejected",
-			wantDecision: "escalate",
-		},
-		{
-			name:         "feedback required overrides stale fix verdict",
-			waitReason:   core.WaitFeedbackReq,
-			verdict:      "fix",
-			planStatus:   core.PlanWaitingHuman,
 			wantStatus:   "rejected",
 			wantDecision: "escalate",
 		},
 		{
 			name:         "changes requested from fix verdict",
-			waitReason:   core.WaitNone,
 			verdict:      "fix",
-			planStatus:   core.PlanReviewing,
 			wantStatus:   "changes_requested",
 			wantDecision: "fix",
 		},
 		{
 			name:         "cancelled",
-			waitReason:   core.WaitNone,
 			verdict:      "cancelled",
-			planStatus:   core.PlanReviewing,
 			wantStatus:   "cancelled",
 			wantDecision: "cancelled",
 		},
@@ -181,33 +166,28 @@ func TestAIReviewGate_CheckCompletedStatusMapping(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			store, plan := newTestStoreWithPlan(t)
+			store, issue := newTestStoreWithIssue(t)
 			done := make(chan struct{})
 			panel := fakePanel{
-				run: func(_ context.Context, _ *core.TaskPlan, _ secretary.ReviewInput) (*secretary.ReviewResult, error) {
-					updated := *plan
-					updated.Status = tc.planStatus
-					updated.WaitReason = tc.waitReason
-					if err := store.SaveTaskPlan(&updated); err != nil {
-						t.Fatalf("SaveTaskPlan() error = %v", err)
-					}
-					if tc.verdict != "" {
-						if err := store.SaveReviewRecord(&core.ReviewRecord{
-							PlanID:   plan.ID,
-							Round:    1,
-							Reviewer: "aggregator",
-							Verdict:  tc.verdict,
-						}); err != nil {
-							t.Fatalf("SaveReviewRecord() error = %v", err)
-						}
+				run: func(_ context.Context, _ []*core.Issue) (*secretary.ReviewSessionResult, error) {
+					if err := store.SaveReviewRecord(&core.ReviewRecord{
+						IssueID:  issue.ID,
+						Round:    1,
+						Reviewer: "aggregator",
+						Verdict:  tc.verdict,
+					}); err != nil {
+						t.Fatalf("SaveReviewRecord() error = %v", err)
 					}
 					close(done)
-					return &secretary.ReviewResult{Plan: &updated}, nil
+					return nil, nil
 				},
 			}
 			gate := New(store, panel)
+			if err := gate.Init(context.Background()); err != nil {
+				t.Fatalf("Init() error = %v", err)
+			}
 
-			if _, err := gate.Submit(context.Background(), plan); err != nil {
+			if _, err := gate.Submit(context.Background(), []*core.Issue{issue}); err != nil {
 				t.Fatalf("Submit() error = %v", err)
 			}
 
@@ -217,7 +197,7 @@ func TestAIReviewGate_CheckCompletedStatusMapping(t *testing.T) {
 				t.Fatalf("review run did not complete")
 			}
 
-			got, err := gate.Check(context.Background(), plan.ID)
+			got, err := gate.Check(context.Background(), issue.ID)
 			if err != nil {
 				t.Fatalf("Check() error = %v", err)
 			}
@@ -236,18 +216,80 @@ func TestAIReviewGate_CheckCompletedStatusMapping(t *testing.T) {
 	}
 }
 
-type fakePanel struct {
-	run func(ctx context.Context, plan *core.TaskPlan, input secretary.ReviewInput) (*secretary.ReviewResult, error)
-}
-
-func (f fakePanel) Run(ctx context.Context, plan *core.TaskPlan, input secretary.ReviewInput) (*secretary.ReviewResult, error) {
-	if f.run == nil {
-		return &secretary.ReviewResult{Plan: plan, Decision: secretary.DecisionApprove, Round: 1}, nil
+func TestAIReviewGate_SessionDecisionPersistsFinalVerdict(t *testing.T) {
+	store, issue := newTestStoreWithIssue(t)
+	done := make(chan struct{})
+	panel := fakePanel{
+		run: func(_ context.Context, _ []*core.Issue) (*secretary.ReviewSessionResult, error) {
+			if err := store.SaveReviewRecord(&core.ReviewRecord{
+				IssueID:  issue.ID,
+				Round:    1,
+				Reviewer: "aggregator",
+				Verdict:  "issues_found",
+			}); err != nil {
+				t.Fatalf("SaveReviewRecord() error = %v", err)
+			}
+			close(done)
+			return &secretary.ReviewSessionResult{
+				Status:   core.ReviewStatusRejected,
+				Decision: secretary.DecisionEscalate,
+				Verdicts: map[string]core.ReviewVerdict{
+					issue.ID: {
+						Reviewer: "aggregator",
+						Status:   "issues_found",
+						Issues: []core.ReviewIssue{
+							{
+								Severity:    "warning",
+								IssueID:     issue.ID,
+								Description: "dependency conflict",
+							},
+						},
+						Score: 60,
+					},
+				},
+			}, nil
+		},
 	}
-	return f.run(ctx, plan, input)
+	gate := New(store, panel)
+	if err := gate.Init(context.Background()); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	if _, err := gate.Submit(context.Background(), []*core.Issue{issue}); err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("review run did not complete")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := gate.Check(context.Background(), issue.ID)
+		if err == nil && got.Status == "rejected" && got.Decision == "escalate" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("expected session decision persisted as rejected/escalate")
 }
 
-func newTestStoreWithPlan(t *testing.T) (core.Store, *core.TaskPlan) {
+type fakePanel struct {
+	run func(ctx context.Context, issues []*core.Issue) (*secretary.ReviewSessionResult, error)
+}
+
+func (f fakePanel) Run(ctx context.Context, issues []*core.Issue) (*secretary.ReviewSessionResult, error) {
+	if f.run == nil {
+		return &secretary.ReviewSessionResult{
+			Status:   core.ReviewStatusApproved,
+			Decision: secretary.DecisionApprove,
+		}, nil
+	}
+	return f.run(ctx, cloneIssues(issues))
+}
+
+func newTestStoreWithIssue(t *testing.T) (core.Store, *core.Issue) {
 	t.Helper()
 
 	store, err := storesqlite.New(":memory:")
@@ -267,17 +309,18 @@ func newTestStoreWithPlan(t *testing.T) (core.Store, *core.TaskPlan) {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 
-	plan := &core.TaskPlan{
-		ID:         "plan-20260301-reviewaipanel",
+	issue := &core.Issue{
+		ID:         "issue-20260301-reviewaipanel",
 		ProjectID:  project.ID,
-		Name:       "ai-panel-review",
-		Status:     core.PlanDraft,
-		WaitReason: core.WaitNone,
+		Title:      "ai-panel-review",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusDraft,
 		FailPolicy: core.FailBlock,
 	}
-	if err := store.CreateTaskPlan(plan); err != nil {
-		t.Fatalf("CreateTaskPlan() error = %v", err)
+	if err := store.CreateIssue(issue); err != nil {
+		t.Fatalf("CreateIssue() error = %v", err)
 	}
 
-	return store, plan
+	return store, issue
 }

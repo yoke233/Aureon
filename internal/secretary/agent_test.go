@@ -104,7 +104,7 @@ func (c *stubSecretarySessionClient) NewSession(_ context.Context, req acpclient
 	return c.newResp, nil
 }
 
-func TestAgentDecomposeBuildsPromptAndParsesTaskPlan(t *testing.T) {
+func TestAgentDecomposeBuildsPromptAndReturnsRawOutput(t *testing.T) {
 	waitCalled := false
 	runtime := &fakeRuntime{
 		session: &core.Session{
@@ -147,7 +147,7 @@ func TestAgentDecomposeBuildsPromptAndParsesTaskPlan(t *testing.T) {
 		WorkDir:                     "D:/project/ai-workflow",
 	}
 
-	plan, err := driver.Decompose(context.Background(), req)
+	rawOutput, err := driver.Decompose(context.Background(), req)
 	if err != nil {
 		t.Fatalf("decompose failed: %v", err)
 	}
@@ -195,26 +195,8 @@ func TestAgentDecomposeBuildsPromptAndParsesTaskPlan(t *testing.T) {
 		t.Fatalf("runtime command mismatch: %#v", runtime.lastOpts.Command)
 	}
 
-	if plan.Name != "oauth-rollout" {
-		t.Fatalf("unexpected plan name: %q", plan.Name)
-	}
-	if plan.Status != core.PlanDraft {
-		t.Fatalf("expected status draft, got %q", plan.Status)
-	}
-	if plan.FailPolicy != core.FailBlock {
-		t.Fatalf("expected fail_policy block, got %q", plan.FailPolicy)
-	}
-	if len(plan.Tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(plan.Tasks))
-	}
-	if plan.Tasks[0].ID != "task-1" || plan.Tasks[0].Template != "standard" {
-		t.Fatalf("unexpected first task: %#v", plan.Tasks[0])
-	}
-	if plan.Tasks[1].ID != "task-2" || plan.Tasks[1].Template != "full" {
-		t.Fatalf("unexpected second task: %#v", plan.Tasks[1])
-	}
-	if plan.Tasks[1].Status != core.ItemPending {
-		t.Fatalf("expected pending status, got %q", plan.Tasks[1].Status)
+	if rawOutput != output {
+		t.Fatalf("unexpected decompose output, got:\n%s", rawOutput)
 	}
 }
 
@@ -267,12 +249,12 @@ func TestRenderPrompt_UsesFileContentsWhenConversationMissing(t *testing.T) {
 	}
 
 	for _, needle := range []string{
-		"输入 5：计划文件内容（按路径聚合，用于 TaskPlan 解析）",
+		"输入 5：补充文件内容（按路径聚合）",
 		"<<<FILE:README.md>>>",
 		"(empty file)",
 		"<<<FILE:docs/plans/wave3.md>>>",
 		"parser 支持 file-based 输入",
-		"基于 2 个计划文件解析任务清单",
+		"补充了 2 个文件上下文：README.md, docs/plans/wave3.md",
 	} {
 		if !strings.Contains(prompt, needle) {
 			t.Fatalf("prompt must include %q, got:\n%s", needle, prompt)
@@ -340,7 +322,7 @@ func TestSecretaryUsesBoundRole(t *testing.T) {
 					Reuse:             true,
 					PreferLoadSession: true,
 				},
-				MCPTools: []string{"query_plans"},
+				MCPTools: []string{"query_issues"},
 			},
 		},
 	)
@@ -386,8 +368,8 @@ func TestSecretaryUsesBoundRole(t *testing.T) {
 	if len(client.newReqs[0].MCPServers) != 1 {
 		t.Fatalf("new session mcp servers = %d, want 1 from role config", len(client.newReqs[0].MCPServers))
 	}
-	if got := client.newReqs[0].MCPServers[0].Env["AI_WORKFLOW_MCP_TOOL"]; got != "query_plans" {
-		t.Fatalf("new session mcp tool = %q, want %q", got, "query_plans")
+	if got := client.newReqs[0].MCPServers[0].Env["AI_WORKFLOW_MCP_TOOL"]; got != "query_issues" {
+		t.Fatalf("new session mcp tool = %q, want %q", got, "query_issues")
 	}
 }
 
@@ -511,96 +493,48 @@ func TestStartSecretarySessionSkipsLoadWhenPreferLoadDisabled(t *testing.T) {
 	}
 }
 
-func TestParseTaskPlanRejectsInvalidTemplate(t *testing.T) {
-	_, err := ParseTaskPlan(`{
-  "name": "invalid-plan",
-  "tasks": [
-    {
-      "id": "task-1",
-      "title": "bad template",
-      "description": "this should fail",
-      "labels": ["backend"],
-      "depends_on": [],
-      "template": "unsupported-template"
-    }
-  ]
-}`)
-	if err == nil {
-		t.Fatal("expected parse error for invalid template")
-	}
-	if !strings.Contains(err.Error(), "invalid template") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestParseTaskPlan_IncludesInputsOutputsAcceptance(t *testing.T) {
-	plan, err := ParseTaskPlan(`{
-  "name": "structured-plan",
-  "tasks": [
-    {
-      "id": "task-1",
-      "title": "design contract",
-      "description": "define io contract",
-      "labels": ["backend"],
-      "depends_on": [],
-      "inputs": ["oauth_app_id"],
-      "outputs": ["oauth_token"],
-      "acceptance": ["callback endpoint returns 200"],
-      "constraints": ["keep api backward compatible"],
-      "template": "standard"
-    }
-  ]
-}`)
-	if err != nil {
-		t.Fatalf("parse task plan: %v", err)
-	}
-
-	if len(plan.Tasks) != 1 {
-		t.Fatalf("expected 1 task, got %d", len(plan.Tasks))
-	}
-	task := plan.Tasks[0]
-	if len(task.Inputs) != 1 || task.Inputs[0] != "oauth_app_id" {
-		t.Fatalf("unexpected inputs: %#v", task.Inputs)
-	}
-	if len(task.Outputs) != 1 || task.Outputs[0] != "oauth_token" {
-		t.Fatalf("unexpected outputs: %#v", task.Outputs)
-	}
-	if len(task.Acceptance) != 1 || task.Acceptance[0] != "callback endpoint returns 200" {
-		t.Fatalf("unexpected acceptance: %#v", task.Acceptance)
-	}
-	if len(task.Constraints) != 1 || task.Constraints[0] != "keep api backward compatible" {
-		t.Fatalf("unexpected constraints: %#v", task.Constraints)
-	}
-}
-
-func TestToTaskItem_MapsStructuredFields(t *testing.T) {
-	item, err := toTaskItem(taskItemOutput{
-		ID:          "task-2",
-		Title:       "implement oauth",
-		Description: "implement oauth endpoint",
-		Labels:      []string{"backend"},
-		DependsOn:   []string{"task-1"},
-		Inputs:      []string{"oauth_app_id"},
-		Outputs:     []string{"oauth_token"},
-		Acceptance:  []string{"endpoint returns 200"},
-		Constraints: []string{"no breaking changes"},
-		Template:    "standard",
+func TestCollectOutputPrefersDoneChunk(t *testing.T) {
+	got, err := collectOutput(&sliceParser{
+		events: []*core.StreamEvent{
+			{Type: "text", Content: `{"partial":"a"}`},
+			{Type: "done", Content: `{"name":"final-plan"}`},
+		},
 	})
 	if err != nil {
-		t.Fatalf("toTaskItem: %v", err)
+		t.Fatalf("collectOutput returned error: %v", err)
 	}
+	if got != `{"name":"final-plan"}` {
+		t.Fatalf("collectOutput should prefer done chunk, got %q", got)
+	}
+}
 
-	if len(item.Inputs) != 1 || item.Inputs[0] != "oauth_app_id" {
-		t.Fatalf("inputs mapping failed: %#v", item.Inputs)
+func TestCollectOutputJoinsTextChunksWhenDoneMissing(t *testing.T) {
+	got, err := collectOutput(&sliceParser{
+		events: []*core.StreamEvent{
+			{Type: "text", Content: "line-1"},
+			{Type: "text", Content: "line-2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("collectOutput returned error: %v", err)
 	}
-	if len(item.Outputs) != 1 || item.Outputs[0] != "oauth_token" {
-		t.Fatalf("outputs mapping failed: %#v", item.Outputs)
+	if got != "line-1\nline-2" {
+		t.Fatalf("collectOutput should join text chunks, got %q", got)
 	}
-	if len(item.Acceptance) != 1 || item.Acceptance[0] != "endpoint returns 200" {
-		t.Fatalf("acceptance mapping failed: %#v", item.Acceptance)
+}
+
+func TestCollectOutputRejectsEmptyChunks(t *testing.T) {
+	_, err := collectOutput(&sliceParser{
+		events: []*core.StreamEvent{
+			nil,
+			{Type: "text", Content: "   "},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty output")
 	}
-	if len(item.Constraints) != 1 || item.Constraints[0] != "no breaking changes" {
-		t.Fatalf("constraints mapping failed: %#v", item.Constraints)
+	if !strings.Contains(err.Error(), "empty output") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -24,6 +24,13 @@ type PlanManager interface {
 	ApplyPlanAction(ctx context.Context, planID string, action secretary.PlanAction) (*core.TaskPlan, error)
 }
 
+// A2ABridge defines A2A task APIs required by A2A JSON-RPC handlers.
+type A2ABridge interface {
+	SendMessage(ctx context.Context, input secretary.A2ASendMessageInput) (*secretary.A2ATaskSnapshot, error)
+	GetTask(ctx context.Context, input secretary.A2AGetTaskInput) (*secretary.A2ATaskSnapshot, error)
+	CancelTask(ctx context.Context, input secretary.A2ACancelTaskInput) (*secretary.A2ATaskSnapshot, error)
+}
+
 // PipelineExecutor defines pipeline human-action entrypoints used by web handlers.
 type PipelineExecutor interface {
 	ApplyAction(ctx context.Context, action core.PipelineAction) error
@@ -47,6 +54,7 @@ type Config struct {
 	Frontend               fs.FS
 	Store                  core.Store
 	PlanManager            PlanManager
+	A2ABridge              A2ABridge
 	ChatAssistant          ChatAssistant
 	EventPublisher         chatEventPublisher
 	PipelineExec           PipelineExecutor

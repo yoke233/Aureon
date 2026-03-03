@@ -6,6 +6,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/a2a"
 	"github.com/go-chi/chi/v5"
+	"github.com/yoke233/ai-workflow/internal/secretary"
 )
 
 func registerA2ARoutes(r chi.Router, cfg Config) {
@@ -16,7 +17,7 @@ func registerA2ARoutes(r chi.Router, cfg Config) {
 	}
 
 	r.Get("/.well-known/agent-card.json", handleA2AAgentCard(cfg))
-	r.With(BearerAuthMiddleware(cfg.A2AToken)).Post("/api/v1/a2a", handleA2AJSONRPC)
+	r.With(BearerAuthMiddleware(cfg.A2AToken)).Post("/api/v1/a2a", handleA2AJSONRPC(cfg))
 }
 
 func handleA2ADisabled(w http.ResponseWriter, r *http.Request) {
@@ -46,29 +47,109 @@ func handleA2AAgentCard(cfg Config) http.HandlerFunc {
 	}
 }
 
-func handleA2AJSONRPC(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeA2ARPCRequest(r)
-	if err != nil {
-		writeA2ARPCError(w, nil, a2aRPCInvalidRequest, "invalid request")
-		return
+func handleA2AJSONRPC(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, err := decodeA2ARPCRequest(r)
+		if err != nil {
+			writeA2ARPCError(w, nil, a2aRPCInvalidRequest, "invalid request")
+			return
+		}
+		if strings.TrimSpace(req.JSONRPC) != a2aJSONRPCVersion {
+			writeA2ARPCError(w, req.ID, a2aRPCInvalidRequest, "invalid request")
+			return
+		}
+
+		method := strings.TrimSpace(req.Method)
+		if method == "" {
+			writeA2ARPCError(w, req.ID, a2aRPCInvalidRequest, "invalid request")
+			return
+		}
+		switch method {
+		case a2aMethodMessageSend:
+			handleA2AMessageSend(w, r, cfg, req)
+		case a2aMethodTasksGet:
+			handleA2ATasksGet(w, r, cfg, req)
+		case a2aMethodTasksCancel:
+			handleA2ATasksCancel(w, r, cfg, req)
+		case a2aMethodMessageStream:
+			writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
+		default:
+			writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
+		}
 	}
-	if strings.TrimSpace(req.JSONRPC) != a2aJSONRPCVersion {
-		writeA2ARPCError(w, req.ID, a2aRPCInvalidRequest, "invalid request")
+}
+
+func handleA2AMessageSend(w http.ResponseWriter, r *http.Request, cfg Config, req a2aRPCRequest) {
+	if cfg.A2ABridge == nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInternalError, "internal error")
 		return
 	}
 
-	method := strings.TrimSpace(req.Method)
-	if method == "" {
-		writeA2ARPCError(w, req.ID, a2aRPCInvalidRequest, "invalid request")
+	params, err := decodeA2AMessageSendParams(req.Params)
+	if err != nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInvalidParams, "invalid params")
 		return
 	}
-	switch method {
-	case a2aMethodMessageSend, a2aMethodMessageStream, a2aMethodTasksGet, a2aMethodTasksCancel:
-		// Wave 1 只做入口与错误模型接线，具体方法在后续 wave 落地。
-		writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
-	default:
-		writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
+
+	snapshot, err := cfg.A2ABridge.SendMessage(r.Context(), secretary.A2ASendMessageInput{
+		ProjectID:    a2aProjectID(params.Metadata),
+		SessionID:    strings.TrimSpace(params.Message.ContextID),
+		Conversation: a2aMessageText(params.Message),
+	})
+	if err != nil {
+		code, message := mapA2ABridgeError(err)
+		writeA2ARPCError(w, req.ID, code, message)
+		return
 	}
+	writeA2ARPCResult(w, req.ID, a2aTaskFromSnapshot(snapshot))
+}
+
+func handleA2ATasksGet(w http.ResponseWriter, r *http.Request, cfg Config, req a2aRPCRequest) {
+	if cfg.A2ABridge == nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInternalError, "internal error")
+		return
+	}
+
+	params, err := decodeA2ATaskQueryParams(req.Params)
+	if err != nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInvalidParams, "invalid params")
+		return
+	}
+
+	snapshot, err := cfg.A2ABridge.GetTask(r.Context(), secretary.A2AGetTaskInput{
+		ProjectID: a2aProjectID(params.Metadata),
+		TaskID:    strings.TrimSpace(string(params.ID)),
+	})
+	if err != nil {
+		code, message := mapA2ABridgeError(err)
+		writeA2ARPCError(w, req.ID, code, message)
+		return
+	}
+	writeA2ARPCResult(w, req.ID, a2aTaskFromSnapshot(snapshot))
+}
+
+func handleA2ATasksCancel(w http.ResponseWriter, r *http.Request, cfg Config, req a2aRPCRequest) {
+	if cfg.A2ABridge == nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInternalError, "internal error")
+		return
+	}
+
+	params, err := decodeA2ATaskIDParams(req.Params)
+	if err != nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInvalidParams, "invalid params")
+		return
+	}
+
+	snapshot, err := cfg.A2ABridge.CancelTask(r.Context(), secretary.A2ACancelTaskInput{
+		ProjectID: a2aProjectID(params.Metadata),
+		TaskID:    strings.TrimSpace(string(params.ID)),
+	})
+	if err != nil {
+		code, message := mapA2ABridgeError(err)
+		writeA2ARPCError(w, req.ID, code, message)
+		return
+	}
+	writeA2ARPCResult(w, req.ID, a2aTaskFromSnapshot(snapshot))
 }
 
 func requestAbsoluteURL(r *http.Request, path string) string {

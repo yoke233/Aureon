@@ -17,6 +17,7 @@ import type {
   GetPipelineCheckpointsResponse,
   GetChatResponse,
   ListChatRunEventsResponse,
+  ListAdminAuditLogResponse,
   ListChatsResponse,
   ListPipelinesResponse,
   ListPlansResponse,
@@ -25,7 +26,9 @@ import type {
   PipelineActionResponse,
   PlanActionRequest,
   PlanActionResponse,
+  PlanChangeRecord,
   PlanDagResponse,
+  PlanReviewRecord,
   RepoDiffResponse,
   RepoStatusResponse,
   RepoTreeResponse,
@@ -39,6 +42,14 @@ type Primitive = string | number | boolean;
 type PaginationParams = {
   limit?: number;
   offset?: number;
+};
+
+type AdminAuditLogQuery = PaginationParams & {
+  projectId?: string;
+  action?: string;
+  user?: string;
+  since?: string;
+  until?: string;
 };
 
 export interface RequestOptions<TBody = unknown> {
@@ -302,6 +313,9 @@ export interface ApiClient {
   ): Promise<TaskActionResponse>;
   listPlans(projectId: string, pagination?: PaginationParams): Promise<ListPlansResponse>;
   getPlanDag(projectId: string, planId: string): Promise<PlanDagResponse>;
+  listPlanReviews?(projectId: string, planId: string): Promise<PlanReviewRecord[]>;
+  listPlanChanges?(projectId: string, planId: string): Promise<PlanChangeRecord[]>;
+  listAdminAuditLog?(query?: AdminAuditLogQuery): Promise<ListAdminAuditLogResponse>;
   getPipeline(projectId: string, pipelineId: string): Promise<ApiPipeline>;
   getPipelineCheckpoints(
     projectId: string,
@@ -501,6 +515,27 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
     getPlanDag: (projectId, planId) =>
       request<PlanDagResponse>({
         path: `/projects/${projectId}/plans/${planId}/dag`,
+      }),
+    listPlanReviews: (projectId, planId) =>
+      request<PlanReviewRecord[]>({
+        path: `/projects/${projectId}/plans/${planId}/reviews`,
+      }),
+    listPlanChanges: (projectId, planId) =>
+      request<PlanChangeRecord[]>({
+        path: `/projects/${projectId}/plans/${planId}/changes`,
+      }),
+    listAdminAuditLog: (query) =>
+      request<ListAdminAuditLogResponse>({
+        path: "/admin/audit-log",
+        query: {
+          project_id: query?.projectId?.trim() ? query.projectId : undefined,
+          action: query?.action?.trim() ? query.action : undefined,
+          user: query?.user?.trim() ? query.user : undefined,
+          since: query?.since?.trim() ? query.since : undefined,
+          until: query?.until?.trim() ? query.until : undefined,
+          limit: query?.limit,
+          offset: query?.offset,
+        },
       }),
     getPipeline: async (projectId, pipelineId) => {
       const response = await request<ApiPipeline>({

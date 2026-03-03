@@ -246,6 +246,55 @@ export interface PlanDagResponse {
   stats: PlanDagStats;
 }
 
+export interface PlanReviewIssue {
+  severity: string;
+  issue_id: string;
+  description: string;
+  suggestion: string;
+}
+
+export interface PlanProposedFix {
+  issue_id?: string;
+  description: string;
+  suggestion?: string;
+}
+
+export interface PlanReviewRecord {
+  id: number;
+  issue_id: string;
+  round: number;
+  reviewer: string;
+  verdict: string;
+  issues: PlanReviewIssue[];
+  fixes: PlanProposedFix[];
+  score?: number;
+  created_at: string;
+}
+
+export interface PlanChangeRecord {
+  id: string;
+  issue_id: string;
+  field: string;
+  old_value: string;
+  new_value: string;
+  reason: string;
+  changed_by: string;
+  created_at: string;
+}
+
+export interface AdminAuditLogItem {
+  id: number;
+  project_id?: string;
+  issue_id?: string;
+  pipeline_id: string;
+  stage?: string;
+  action: string;
+  message: string;
+  source: string;
+  user_id: string;
+  created_at: string;
+}
+
 export interface ApiStatsResponse {
   total_pipelines: number;
   active_pipelines: number;
@@ -261,3 +310,4 @@ export type ListChatsResponse = ChatSession[];
 export type ListChatRunEventsResponse = ChatRunEvent[];
 export type GetChatResponse = ChatSession;
 export type CreatePlanResponse = ApiTaskPlan;
+export type ListAdminAuditLogResponse = PaginatedResponse<AdminAuditLogItem>;

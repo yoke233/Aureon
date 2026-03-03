@@ -247,7 +247,11 @@ func (c *Client) handleRequest(ctx context.Context, method string, params json.R
 		if len(params) > 0 {
 			_ = json.Unmarshal(params, &req)
 		}
-		return c.handler.HandleRequestPermission(ctx, req)
+		decision, err := c.handler.HandleRequestPermission(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		return toPermissionResponse(decision), nil
 	case "terminal/create":
 		var req TerminalCreateRequest
 		if err := json.Unmarshal(params, &req); err != nil {
@@ -378,6 +382,30 @@ func mergeEnv(extra map[string]string) []string {
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+func toPermissionResponse(decision PermissionDecision) any {
+	outcome := strings.TrimSpace(decision.Outcome)
+	optionID := strings.TrimSpace(decision.OptionID)
+
+	if outcome == "" && optionID == "" {
+		return PermissionDecision{}
+	}
+	if optionID != "" || outcome == "selected" || outcome == "cancelled" {
+		payload := map[string]any{
+			"outcome": outcome,
+		}
+		if optionID != "" {
+			payload["optionId"] = optionID
+		}
+		return map[string]any{
+			"outcome": payload,
+		}
+	}
+
+	return PermissionDecision{
+		Outcome: outcome,
+	}
 }
 
 func isInvalidParamsRPCError(err error) bool {

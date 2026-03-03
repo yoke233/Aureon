@@ -4,9 +4,13 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/yoke233/ai-workflow/internal/core"
@@ -33,6 +37,30 @@ type adminReplayRequest struct {
 	TraceID    string `json:"trace_id"`
 }
 
+type adminAuditLogItem struct {
+	ID         int64  `json:"id"`
+	ProjectID  string `json:"project_id,omitempty"`
+	IssueID    string `json:"issue_id,omitempty"`
+	PipelineID string `json:"pipeline_id"`
+	Stage      string `json:"stage,omitempty"`
+	Action     string `json:"action"`
+	Message    string `json:"message"`
+	Source     string `json:"source"`
+	UserID     string `json:"user_id"`
+	CreatedAt  string `json:"created_at"`
+}
+
+type adminAuditLogResponse struct {
+	Items  []adminAuditLogItem `json:"items"`
+	Total  int                 `json:"total"`
+	Offset int                 `json:"offset"`
+}
+
+type auditPipelineMeta struct {
+	ProjectID string
+	IssueID   string
+}
+
 func registerAdminOpsRoutes(r chi.Router, store core.Store, adminToken string, replayer WebhookDeliveryReplayer) {
 	h := &adminOpsHandlers{
 		store:      store,
@@ -42,6 +70,7 @@ func registerAdminOpsRoutes(r chi.Router, store core.Store, adminToken string, r
 	r.Post("/admin/ops/force-ready", h.handleForceReady)
 	r.Post("/admin/ops/force-unblock", h.handleForceUnblock)
 	r.Post("/admin/ops/replay-delivery", h.handleReplayDelivery)
+	r.Get("/admin/audit-log", h.handleListAuditLog)
 }
 
 func (h *adminOpsHandlers) handleForceReady(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +207,276 @@ func (h *adminOpsHandlers) handleReplayDelivery(w http.ResponseWriter, r *http.R
 		"delivery_id": deliveryID,
 		"trace_id":    traceID,
 	})
+}
+
+func (h *adminOpsHandlers) handleListAuditLog(w http.ResponseWriter, r *http.Request) {
+	if !h.isAuthorized(r) {
+		writeAPIError(w, http.StatusUnauthorized, "admin operation unauthorized", "ADMIN_UNAUTHORIZED")
+		return
+	}
+	if h.store == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "store is not configured", "STORE_UNAVAILABLE")
+		return
+	}
+
+	limit, offset, err := parseAdminAuditPaginationParams(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "INVALID_QUERY_PARAM")
+		return
+	}
+
+	projectID := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	actionFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("action")))
+	userFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user")))
+
+	since, err := parseAdminAuditTimeBoundary(r, "since")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "INVALID_TIME_BOUNDARY")
+		return
+	}
+	until, err := parseAdminAuditTimeBoundary(r, "until")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error(), "INVALID_TIME_BOUNDARY")
+		return
+	}
+
+	items, err := h.collectAdminAuditItems(projectID)
+	if err != nil {
+		if isNotFoundError(err) {
+			writeAPIError(w, http.StatusNotFound, "project not found", "PROJECT_NOT_FOUND")
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, "failed to load audit log", "GET_AUDIT_LOG_FAILED")
+		return
+	}
+
+	filtered := make([]adminAuditLogItem, 0, len(items))
+	for i := range items {
+		if !matchesAdminAuditFilters(items[i], actionFilter, userFilter, since, until) {
+			continue
+		}
+		filtered = append(filtered, items[i])
+	}
+
+	total := len(filtered)
+	if offset >= total {
+		writeJSON(w, http.StatusOK, adminAuditLogResponse{
+			Items:  []adminAuditLogItem{},
+			Total:  total,
+			Offset: offset,
+		})
+		return
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	writeJSON(w, http.StatusOK, adminAuditLogResponse{
+		Items:  filtered[offset:end],
+		Total:  total,
+		Offset: offset,
+	})
+}
+
+func (h *adminOpsHandlers) collectAdminAuditItems(projectID string) ([]adminAuditLogItem, error) {
+	projects, err := h.resolveAuditProjects(projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	metas := make(map[string]auditPipelineMeta)
+	pipelineSet := make(map[string]struct{})
+	for i := range projects {
+		issues, err := listAllIssuesForProject(h.store, projects[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		for j := range issues {
+			pipelineID := strings.TrimSpace(issues[j].PipelineID)
+			if pipelineID == "" {
+				continue
+			}
+			if _, exists := metas[pipelineID]; !exists {
+				metas[pipelineID] = auditPipelineMeta{
+					ProjectID: projects[i].ID,
+					IssueID:   issues[j].ID,
+				}
+			}
+			pipelineSet[pipelineID] = struct{}{}
+		}
+	}
+
+	pipelineIDs := make([]string, 0, len(pipelineSet))
+	for pipelineID := range pipelineSet {
+		pipelineIDs = append(pipelineIDs, pipelineID)
+	}
+	sort.Strings(pipelineIDs)
+
+	items := make([]adminAuditLogItem, 0)
+	for i := range pipelineIDs {
+		actions, err := h.store.GetActions(pipelineIDs[i])
+		if err != nil {
+			return nil, err
+		}
+		meta := metas[pipelineIDs[i]]
+		for j := range actions {
+			items = append(items, adminAuditLogItem{
+				ID:         actions[j].ID,
+				ProjectID:  meta.ProjectID,
+				IssueID:    meta.IssueID,
+				PipelineID: actions[j].PipelineID,
+				Stage:      actions[j].Stage,
+				Action:     actions[j].Action,
+				Message:    actions[j].Message,
+				Source:     actions[j].Source,
+				UserID:     actions[j].UserID,
+				CreatedAt:  actions[j].CreatedAt,
+			})
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		leftTime, leftOK := parseAdminAuditTimestamp(items[i].CreatedAt)
+		rightTime, rightOK := parseAdminAuditTimestamp(items[j].CreatedAt)
+		switch {
+		case leftOK && rightOK && !leftTime.Equal(rightTime):
+			return leftTime.After(rightTime)
+		case leftOK != rightOK:
+			return leftOK
+		case items[i].ID != items[j].ID:
+			return items[i].ID > items[j].ID
+		default:
+			return items[i].PipelineID < items[j].PipelineID
+		}
+	})
+
+	return items, nil
+}
+
+func (h *adminOpsHandlers) resolveAuditProjects(projectID string) ([]core.Project, error) {
+	if strings.TrimSpace(projectID) != "" {
+		project, err := h.store.GetProject(strings.TrimSpace(projectID))
+		if err != nil {
+			return nil, err
+		}
+		return []core.Project{*project}, nil
+	}
+
+	projects, err := h.store.ListProjects(core.ProjectFilter{})
+	if err != nil {
+		return nil, err
+	}
+	if projects == nil {
+		return []core.Project{}, nil
+	}
+	return projects, nil
+}
+
+func listAllIssuesForProject(store core.Store, projectID string) ([]core.Issue, error) {
+	const pageSize = 200
+	offset := 0
+	all := make([]core.Issue, 0)
+	for {
+		items, total, err := store.ListIssues(projectID, core.IssueFilter{
+			Limit:  pageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(items) == 0 {
+			break
+		}
+		all = append(all, items...)
+		offset += len(items)
+		if offset >= total {
+			break
+		}
+	}
+	return all, nil
+}
+
+func parseAdminAuditPaginationParams(r *http.Request) (int, int, error) {
+	limit := 100
+	offset := 0
+
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed <= 0 {
+			return 0, 0, fmt.Errorf("limit must be a positive integer")
+		}
+		limit = parsed
+	}
+	if rawOffset := strings.TrimSpace(r.URL.Query().Get("offset")); rawOffset != "" {
+		parsed, err := strconv.Atoi(rawOffset)
+		if err != nil || parsed < 0 {
+			return 0, 0, fmt.Errorf("offset must be a non-negative integer")
+		}
+		offset = parsed
+	}
+
+	return limit, offset, nil
+}
+
+func parseAdminAuditTimeBoundary(r *http.Request, key string) (*time.Time, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be RFC3339 timestamp", key)
+	}
+	return &parsed, nil
+}
+
+func matchesAdminAuditFilters(
+	item adminAuditLogItem,
+	actionFilter string,
+	userFilter string,
+	since *time.Time,
+	until *time.Time,
+) bool {
+	if actionFilter != "" && strings.ToLower(strings.TrimSpace(item.Action)) != actionFilter {
+		return false
+	}
+	if userFilter != "" && strings.ToLower(strings.TrimSpace(item.UserID)) != userFilter {
+		return false
+	}
+	if since == nil && until == nil {
+		return true
+	}
+	createdAt, ok := parseAdminAuditTimestamp(item.CreatedAt)
+	if !ok {
+		return false
+	}
+	if since != nil && createdAt.Before(*since) {
+		return false
+	}
+	if until != nil && createdAt.After(*until) {
+		return false
+	}
+	return true
+}
+
+func parseAdminAuditTimestamp(raw string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	}
+	for i := range layouts {
+		if parsed, err := time.Parse(layouts[i], trimmed); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 func (h *adminOpsHandlers) isAuthorized(r *http.Request) bool {

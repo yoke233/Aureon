@@ -158,7 +158,18 @@ func (a reviewerAdapter) Review(ctx context.Context, issue *core.Issue) (core.Re
 	if a.inner == nil {
 		return core.ReviewVerdict{}, errors.New("reviewer adapter inner reviewer is nil")
 	}
-	return a.inner.Review(ctx, ReviewerInput{Issue: cloneIssueForReview(issue)})
+	clonedIssue := cloneIssueForReview(issue)
+	// Default reviewers consume plan-level issue slices via reflection.
+	// Provide a minimal plan envelope so single-issue submit path is compatible.
+	plan := struct {
+		Issues []*core.Issue
+	}{
+		Issues: []*core.Issue{clonedIssue},
+	}
+	return a.inner.Review(ctx, ReviewerInput{
+		Plan:  plan,
+		Issue: clonedIssue,
+	})
 }
 
 func (r *TwoPhaseReview) Run(ctx context.Context, issues []*core.Issue) (*ReviewSessionResult, error) {

@@ -109,6 +109,7 @@ export interface TaskPlan {
   session_id: string;
   name: string;
   status: TaskPlanStatus;
+  pipeline_id: string;
   wait_reason: string;
   tasks: TaskItem[];
   source_files?: string[];

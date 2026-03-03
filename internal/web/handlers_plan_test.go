@@ -742,6 +742,100 @@ func TestPlanListReturnsTotalWithPagination(t *testing.T) {
 	}
 }
 
+func TestPlanHistoryEndpointsReturnReviewRecordsAndChanges(t *testing.T) {
+	store := newTestStore(t)
+	project := core.Project{
+		ID:       "proj-plan-history",
+		Name:     "plan-history",
+		RepoPath: filepath.Join(t.TempDir(), "repo-plan-history"),
+	}
+	if err := store.CreateProject(&project); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+
+	issue := mustCreateIssue(t, store, core.Issue{
+		ID:         "issue-20260303-history01",
+		ProjectID:  project.ID,
+		Title:      "history issue",
+		Template:   "standard",
+		State:      core.IssueStateOpen,
+		Status:     core.IssueStatusReviewing,
+		FailPolicy: core.FailBlock,
+	})
+
+	score := 92
+	if err := store.SaveReviewRecord(&core.ReviewRecord{
+		IssueID:  issue.ID,
+		Round:    1,
+		Reviewer: "demand_reviewer",
+		Verdict:  "pass",
+		Issues: []core.ReviewIssue{
+			{
+				Severity:    "low",
+				IssueID:     issue.ID,
+				Description: "looks good",
+				Suggestion:  "keep current structure",
+			},
+		},
+		Score: &score,
+	}); err != nil {
+		t.Fatalf("seed review record: %v", err)
+	}
+
+	if err := store.SaveIssueChange(&core.IssueChange{
+		IssueID:   issue.ID,
+		Field:     "status",
+		OldValue:  string(core.IssueStatusDraft),
+		NewValue:  string(core.IssueStatusReviewing),
+		Reason:    "submit_for_review",
+		ChangedBy: "system",
+	}); err != nil {
+		t.Fatalf("seed issue change: %v", err)
+	}
+
+	srv := NewServer(Config{Store: store})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reviewsResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-history/plans/" + issue.ID + "/reviews")
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects/{pid}/plans/{id}/reviews: %v", err)
+	}
+	defer reviewsResp.Body.Close()
+	if reviewsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", reviewsResp.StatusCode)
+	}
+	var reviews []core.ReviewRecord
+	if err := json.NewDecoder(reviewsResp.Body).Decode(&reviews); err != nil {
+		t.Fatalf("decode reviews response: %v", err)
+	}
+	if len(reviews) != 1 {
+		t.Fatalf("expected one review record, got %d", len(reviews))
+	}
+	if reviews[0].Reviewer != "demand_reviewer" || reviews[0].Round != 1 {
+		t.Fatalf("unexpected review record: %#v", reviews[0])
+	}
+
+	changesResp, err := http.Get(ts.URL + "/api/v1/projects/proj-plan-history/plans/" + issue.ID + "/changes")
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects/{pid}/plans/{id}/changes: %v", err)
+	}
+	defer changesResp.Body.Close()
+	if changesResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", changesResp.StatusCode)
+	}
+	var changes []core.IssueChange
+	if err := json.NewDecoder(changesResp.Body).Decode(&changes); err != nil {
+		t.Fatalf("decode changes response: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected one issue change, got %d", len(changes))
+	}
+	if changes[0].Field != "status" || changes[0].ChangedBy != "system" {
+		t.Fatalf("unexpected issue change: %#v", changes[0])
+	}
+}
+
 func doIssuePost(t *testing.T, ts *httptest.Server, path string, body map[string]any) *http.Response {
 	t.Helper()
 	rawBody, err := json.Marshal(body)

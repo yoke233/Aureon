@@ -273,6 +273,26 @@ func TestReviewOrchestratorSubmitForReviewDelegatesRun(t *testing.T) {
 	}
 }
 
+func TestDefaultReviewOrchestratorSubmitForReviewAcceptsSingleIssue(t *testing.T) {
+	t.Parallel()
+
+	store := newMockReviewStore()
+	panel := NewDefaultReviewOrchestrator(store)
+
+	issue := newReviewTestIssue("issue-review-default-submit")
+	if err := panel.SubmitForReview(context.Background(), []*core.Issue{issue}); err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
+	}
+
+	records, err := store.GetReviewRecords(issue.ID)
+	if err != nil {
+		t.Fatalf("GetReviewRecords(%s) error = %v", issue.ID, err)
+	}
+	if len(records) == 0 {
+		t.Fatalf("expected review records for %s", issue.ID)
+	}
+}
+
 func TestTwoPhaseReviewRunValidatesInput(t *testing.T) {
 	t.Parallel()
 
@@ -316,7 +336,7 @@ func TestTwoPhaseReviewRunValidatesInput(t *testing.T) {
 			want: "issue[0] is nil",
 		},
 		{
-			name: "blank id",
+			name:  "blank id",
 			panel: base,
 			issues: []*core.Issue{
 				newReviewTestIssue("   "),
@@ -324,7 +344,7 @@ func TestTwoPhaseReviewRunValidatesInput(t *testing.T) {
 			want: "issue[0] id is required",
 		},
 		{
-			name: "duplicate id",
+			name:  "duplicate id",
 			panel: base,
 			issues: []*core.Issue{
 				newReviewTestIssue("issue-review-dup"),

@@ -14,9 +14,12 @@ import "@xyflow/react/dist/style.css";
 import type { ApiClient } from "../lib/apiClient";
 import type { WsClient } from "../lib/wsClient";
 import type {
+  AdminAuditLogItem,
+  PlanChangeRecord,
   PlanDagNode,
   PlanDagResponse,
   PlanRejectFeedbackCategory,
+  PlanReviewRecord,
 } from "../types/api";
 import type { TaskItemStatus, TaskPlan } from "../types/workflow";
 
@@ -155,6 +158,11 @@ const PlanView = ({ apiClient, wsClient, projectId, refreshToken }: PlanViewProp
   const [actionLoading, setActionLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [reviewRecords, setReviewRecords] = useState<PlanReviewRecord[]>([]);
+  const [changeRecords, setChangeRecords] = useState<PlanChangeRecord[]>([]);
+  const [auditRecords, setAuditRecords] = useState<AdminAuditLogItem[]>([]);
   const [rejectCategory, setRejectCategory] =
     useState<PlanRejectFeedbackCategory>("coverage_gap");
   const [rejectDetail, setRejectDetail] = useState("");
@@ -174,6 +182,11 @@ const PlanView = ({ apiClient, wsClient, projectId, refreshToken }: PlanViewProp
     setActionLoading(false);
     setActionMessage(null);
     setActionError(null);
+    setHistoryLoading(false);
+    setHistoryError(null);
+    setReviewRecords([]);
+    setChangeRecords([]);
+    setAuditRecords([]);
     setRejectCategory("coverage_gap");
     setRejectDetail("");
     setRejectExpectedDirection("");
@@ -325,6 +338,78 @@ const PlanView = ({ apiClient, wsClient, projectId, refreshToken }: PlanViewProp
       }))
       .filter((task) => task.issueNumber || task.issueUrl);
   }, [activePlan]);
+
+  useEffect(() => {
+    if (!activePlanId) {
+      setHistoryLoading(false);
+      setHistoryError(null);
+      setReviewRecords([]);
+      setChangeRecords([]);
+      setAuditRecords([]);
+      return;
+    }
+
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    const activePipelineID = activePlan?.pipeline_id?.trim() ?? "";
+
+    const loadHistory = async () => {
+      try {
+        const [reviews, changes, auditResponse] = await Promise.all([
+          apiClient.listPlanReviews
+            ? apiClient.listPlanReviews(projectId, activePlanId)
+            : Promise.resolve([]),
+          apiClient.listPlanChanges
+            ? apiClient.listPlanChanges(projectId, activePlanId)
+            : Promise.resolve([]),
+          apiClient.listAdminAuditLog
+            ? apiClient.listAdminAuditLog({
+                projectId,
+                limit: 200,
+                offset: 0,
+              })
+            : Promise.resolve({ items: [], total: 0, offset: 0 }),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setReviewRecords(reviews);
+        setChangeRecords(changes);
+        const matchedAudit = (auditResponse.items ?? []).filter((item) => {
+          const byIssueID = (item.issue_id ?? "").trim() === activePlanId;
+          const byPipelineID =
+            activePipelineID.length > 0 &&
+            (item.pipeline_id ?? "").trim() === activePipelineID;
+          return byIssueID || byPipelineID;
+        });
+        setAuditRecords(matchedAudit);
+      } catch (requestError) {
+        if (cancelled) {
+          return;
+        }
+        setHistoryError(getErrorMessage(requestError));
+        setReviewRecords([]);
+        setChangeRecords([]);
+        setAuditRecords([]);
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false);
+        }
+      }
+    };
+
+    void loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activePlan?.pipeline_id,
+    activePlanId,
+    apiClient,
+    projectId,
+    refreshToken,
+  ]);
 
   const canSubmitReview =
     !!activePlan &&
@@ -637,6 +722,85 @@ const PlanView = ({ apiClient, wsClient, projectId, refreshToken }: PlanViewProp
               </p>
             ) : null}
           </section>
+
+          <section className="grid gap-4 lg:grid-cols-3">
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold">Review 历史</h3>
+              {historyLoading ? <p className="mt-2 text-xs text-slate-500">加载中...</p> : null}
+              {!historyLoading && reviewRecords.length === 0 ? (
+                <p className="mt-2 text-xs text-slate-500">暂无 review 记录。</p>
+              ) : null}
+              {reviewRecords.length > 0 ? (
+                <ul className="mt-2 space-y-2 text-xs text-slate-700">
+                  {reviewRecords.map((record) => (
+                    <li key={record.id} className="rounded border border-slate-200 p-2">
+                      <p>
+                        round={record.round} · reviewer={record.reviewer}
+                      </p>
+                      <p>
+                        verdict={record.verdict}
+                        {typeof record.score === "number" ? ` · score=${record.score}` : ""}
+                      </p>
+                      <p>
+                        issues={record.issues.length} · fixes={record.fixes.length}
+                      </p>
+                      <p className="text-slate-500">{record.created_at}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold">修改记录</h3>
+              {historyLoading ? <p className="mt-2 text-xs text-slate-500">加载中...</p> : null}
+              {!historyLoading && changeRecords.length === 0 ? (
+                <p className="mt-2 text-xs text-slate-500">暂无修改记录。</p>
+              ) : null}
+              {changeRecords.length > 0 ? (
+                <ul className="mt-2 space-y-2 text-xs text-slate-700">
+                  {changeRecords.map((change) => (
+                    <li key={change.id} className="rounded border border-slate-200 p-2">
+                      <p>field={change.field}</p>
+                      <p>
+                        {change.old_value || "(empty)"} -&gt; {change.new_value || "(empty)"}
+                      </p>
+                      <p>reason={change.reason || "(none)"}</p>
+                      <p>
+                        by={change.changed_by || "(unknown)"} · {change.created_at}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold">审计记录</h3>
+              {historyLoading ? <p className="mt-2 text-xs text-slate-500">加载中...</p> : null}
+              {!historyLoading && auditRecords.length === 0 ? (
+                <p className="mt-2 text-xs text-slate-500">暂无审计记录。</p>
+              ) : null}
+              {auditRecords.length > 0 ? (
+                <ul className="mt-2 space-y-2 text-xs text-slate-700">
+                  {auditRecords.map((item) => (
+                    <li key={`${item.id}-${item.pipeline_id}`} className="rounded border border-slate-200 p-2">
+                      <p>action={item.action}</p>
+                      <p>source={item.source || "(unknown)"} · user={item.user_id || "(unknown)"}</p>
+                      <p className="break-all">{item.message || "(empty message)"}</p>
+                      <p className="text-slate-500">{item.created_at}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          </section>
+
+          {historyError ? (
+            <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {historyError}
+            </p>
+          ) : null}
 
           {error ? (
             <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">

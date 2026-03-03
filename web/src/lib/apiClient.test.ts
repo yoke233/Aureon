@@ -180,6 +180,63 @@ describe("apiClient", () => {
     });
   });
 
+  it("计划历史与审计接口会命中正确路由并透传查询参数", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [],
+            total: 0,
+            offset: 0,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({
+      baseUrl: "http://localhost:8080/api/v1",
+    });
+
+    await client.listPlanReviews?.("proj-1", "plan-1");
+    await client.listPlanChanges?.("proj-1", "plan-1");
+    await client.listAdminAuditLog?.({
+      projectId: "proj-1",
+      action: "force_ready",
+      user: "admin",
+      since: "2026-03-01T00:00:00Z",
+      until: "2026-03-03T23:59:59Z",
+      limit: 50,
+      offset: 10,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://localhost:8080/api/v1/projects/proj-1/plans/plan-1/reviews",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "http://localhost:8080/api/v1/projects/proj-1/plans/plan-1/changes",
+    );
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "http://localhost:8080/api/v1/admin/audit-log?project_id=proj-1&action=force_ready&user=admin&since=2026-03-01T00%3A00%3A00Z&until=2026-03-03T23%3A59%3A59Z&limit=50&offset=10",
+    );
+  });
+
   it("getPipeline/listPlans 能携带 task_item_id 与结构化任务字段", async () => {
     const fetchMock = vi
       .fn()

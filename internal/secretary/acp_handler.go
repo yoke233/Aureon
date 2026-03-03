@@ -32,12 +32,13 @@ type ACPHandlerSessionContext struct {
 type ACPHandler struct {
 	acpclient.NopHandler
 
-	cwd           string
-	sessionID     string
-	chatSessionID string
-	projectID     string
-	publisher     acpEventPublisher
-	recorder      ChatRunEventRecorder
+	cwd              string
+	sessionID        string
+	chatSessionID    string
+	projectID        string
+	permissionPolicy []acpclient.PermissionRule
+	publisher        acpEventPublisher
+	recorder         ChatRunEventRecorder
 
 	mu          sync.Mutex
 	changedSet  map[string]struct{}
@@ -96,6 +97,20 @@ func (h *ACPHandler) SetChatSessionID(chatSessionID string) {
 	h.chatSessionID = strings.TrimSpace(chatSessionID)
 }
 
+func (h *ACPHandler) SetPermissionPolicy(policy []acpclient.PermissionRule) {
+	if h == nil {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(policy) == 0 {
+		h.permissionPolicy = nil
+		return
+	}
+	h.permissionPolicy = append([]acpclient.PermissionRule(nil), policy...)
+}
+
 func (h *ACPHandler) HandleWriteFile(_ context.Context, req acpclient.WriteFileRequest) (acpclient.WriteFileResult, error) {
 	if h == nil {
 		return acpclient.WriteFileResult{}, errors.New("acp handler is nil")
@@ -118,6 +133,33 @@ func (h *ACPHandler) HandleWriteFile(_ context.Context, req acpclient.WriteFileR
 	h.publishFilesChanged(filePaths)
 
 	return acpclient.WriteFileResult{BytesWritten: len(content)}, nil
+}
+
+func (h *ACPHandler) HandleRequestPermission(_ context.Context, req acpclient.PermissionRequest) (acpclient.PermissionDecision, error) {
+	if h == nil {
+		return acpclient.PermissionDecision{}, errors.New("acp handler is nil")
+	}
+
+	decisionAction := h.resolvePermissionPolicy(req)
+	options := req.Options
+	if len(options) == 0 {
+		if strings.HasPrefix(decisionAction, "reject_") {
+			return acpclient.PermissionDecision{Outcome: "deny"}, nil
+		}
+		if decisionAction == "cancelled" {
+			return acpclient.PermissionDecision{Outcome: "cancelled"}, nil
+		}
+		return acpclient.PermissionDecision{Outcome: "allow"}, nil
+	}
+
+	optionID := selectPermissionOptionID(options, decisionAction)
+	if strings.TrimSpace(optionID) == "" {
+		return acpclient.PermissionDecision{Outcome: "cancelled"}, nil
+	}
+	return acpclient.PermissionDecision{
+		Outcome:  "selected",
+		OptionID: optionID,
+	}, nil
 }
 
 func (h *ACPHandler) SessionContext() ACPHandlerSessionContext {
@@ -290,4 +332,140 @@ func (h *ACPHandler) publishFilesChanged(filePaths []string) {
 		},
 		Timestamp: time.Now(),
 	})
+}
+
+func (h *ACPHandler) resolvePermissionPolicy(req acpclient.PermissionRequest) string {
+	action := normalizePermissionPattern(req.Action)
+	resource := strings.TrimSpace(req.Resource)
+	policy := h.permissionPolicySnapshot()
+	matchedRule := false
+
+	for i := range policy {
+		rule := policy[i]
+		if !matchPermissionPattern(action, rule.Pattern) {
+			continue
+		}
+		if !h.permissionScopeAllowed(resource, rule.Scope) {
+			continue
+		}
+		matchedRule = true
+		ruleAction := normalizePermissionAction(rule.Action)
+		if ruleAction != "" {
+			return ruleAction
+		}
+	}
+	if matchedRule {
+		return "cancelled"
+	}
+	if !isKnownPermissionAction(action) {
+		return "cancelled"
+	}
+
+	return "allow_once"
+}
+
+func (h *ACPHandler) permissionPolicySnapshot() []acpclient.PermissionRule {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.permissionPolicy) == 0 {
+		return nil
+	}
+	out := make([]acpclient.PermissionRule, len(h.permissionPolicy))
+	copy(out, h.permissionPolicy)
+	return out
+}
+
+func (h *ACPHandler) permissionScopeAllowed(resource string, scope string) bool {
+	normalizedScope := strings.ToLower(strings.TrimSpace(scope))
+	switch normalizedScope {
+	case "", "global":
+		return true
+	case "cwd":
+		trimmedResource := strings.TrimSpace(resource)
+		if trimmedResource == "" {
+			return true
+		}
+		_, _, err := h.normalizePathInScope(trimmedResource)
+		return err == nil
+	default:
+		return false
+	}
+}
+
+func normalizePermissionPattern(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "write_file", "write_text_file", "fs/write_file", "fs/write_text_file":
+		return "fs/write_text_file"
+	case "read_file", "read_text_file", "fs/read_file", "fs/read_text_file":
+		return "fs/read_text_file"
+	case "terminal_create", "terminal/create":
+		return "terminal/create"
+	default:
+		return normalized
+	}
+}
+
+func normalizePermissionAction(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "allow_once":
+		return "allow_once"
+	case "allow_always":
+		return "allow_always"
+	case "reject_once":
+		return "reject_once"
+	case "reject_always":
+		return "reject_always"
+	case "cancelled":
+		return "cancelled"
+	default:
+		return ""
+	}
+}
+
+func isKnownPermissionAction(action string) bool {
+	switch action {
+	case "fs/read_text_file", "fs/write_text_file", "terminal/create":
+		return true
+	default:
+		return false
+	}
+}
+
+func matchPermissionPattern(action string, pattern string) bool {
+	normalizedPattern := normalizePermissionPattern(pattern)
+	if normalizedPattern == "*" {
+		return true
+	}
+	if normalizedPattern == "" {
+		return false
+	}
+	return normalizedPattern == action
+}
+
+func selectPermissionOptionID(options []acpclient.PermissionOption, action string) string {
+	preferredKinds := []string{}
+	switch action {
+	case "allow_always":
+		preferredKinds = []string{"allow_always", "allow_once"}
+	case "allow_once":
+		preferredKinds = []string{"allow_once", "allow_always"}
+	case "reject_always":
+		preferredKinds = []string{"reject_always", "reject_once"}
+	case "reject_once":
+		preferredKinds = []string{"reject_once", "reject_always"}
+	default:
+		return ""
+	}
+
+	for _, wantedKind := range preferredKinds {
+		for i := range options {
+			if strings.EqualFold(strings.TrimSpace(options[i].Kind), wantedKind) {
+				if optionID := strings.TrimSpace(options[i].OptionID); optionID != "" {
+					return optionID
+				}
+			}
+		}
+	}
+	return ""
 }

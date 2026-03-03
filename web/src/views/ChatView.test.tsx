@@ -57,6 +57,7 @@ const buildPlan = (id: string): ApiTaskPlan => ({
   session_id: "chat-1",
   name: "plan-name",
   status: "draft",
+  pipeline_id: "",
   wait_reason: "",
   tasks: [],
   fail_policy: "block",

@@ -78,6 +78,42 @@ func TestClientCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestHandleRequestPermissionFormatsSelectedOutcome(t *testing.T) {
+	c := &Client{
+		handler: &permissionDecisionHandler{
+			decision: PermissionDecision{
+				Outcome:  "selected",
+				OptionID: "opt-allow-always",
+			},
+		},
+	}
+
+	result, err := c.handleRequest(context.Background(), "session/request_permission", json.RawMessage(`{"action":"write_file"}`))
+	if err != nil {
+		t.Fatalf("handleRequest() error = %v", err)
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal permission result: %v", err)
+	}
+
+	var decoded struct {
+		Outcome struct {
+			Outcome  string `json:"outcome"`
+			OptionID string `json:"optionId"`
+		} `json:"outcome"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode permission result: %v", err)
+	}
+	if decoded.Outcome.Outcome != "selected" {
+		t.Fatalf("result outcome = %q, want %q", decoded.Outcome.Outcome, "selected")
+	}
+	if decoded.Outcome.OptionID != "opt-allow-always" {
+		t.Fatalf("result optionId = %q, want %q", decoded.Outcome.OptionID, "opt-allow-always")
+	}
+}
+
 func testLaunchConfig(t *testing.T) LaunchConfig {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -152,6 +188,15 @@ func (h *recordingHandler) updateCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.updateHits
+}
+
+type permissionDecisionHandler struct {
+	NopHandler
+	decision PermissionDecision
+}
+
+func (h *permissionDecisionHandler) HandleRequestPermission(context.Context, PermissionRequest) (PermissionDecision, error) {
+	return h.decision, nil
 }
 
 func TestClientNewSessionRetriesWithoutMetadataOnInvalidParams(t *testing.T) {

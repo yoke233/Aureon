@@ -206,3 +206,87 @@ func (f *fakeWebhookReplayer) ReplayByDeliveryID(_ context.Context, deliveryID s
 	f.lastDeliveryID = deliveryID
 	return f.replayed, f.err
 }
+
+func TestAdminOps_ListAuditLog_WithFilters(t *testing.T) {
+	store := newTestStore(t)
+	issue := seedAdminIssueFixture(t, store, "pipe-admin-audit-list", core.IssueStatusReady)
+
+	if err := store.RecordAction(core.HumanAction{
+		PipelineID: issue.PipelineID,
+		Action:     "force_ready",
+		Message:    "trace_id=trace-audit-list",
+		Source:     "admin",
+		UserID:     "admin",
+	}); err != nil {
+		t.Fatalf("RecordAction() error = %v", err)
+	}
+
+	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		ts.URL+"/api/v1/admin/audit-log?project_id="+issue.ProjectID+"&action=force_ready&user=admin&limit=10&offset=0",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	req.RemoteAddr = "127.0.0.1:50001"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/admin/audit-log: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var payload adminAuditLogResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Total < 1 || len(payload.Items) < 1 {
+		t.Fatalf("expected at least one audit item, got total=%d items=%d", payload.Total, len(payload.Items))
+	}
+	first := payload.Items[0]
+	if first.ProjectID != issue.ProjectID {
+		t.Fatalf("project_id = %q, want %q", first.ProjectID, issue.ProjectID)
+	}
+	if first.IssueID != issue.ID {
+		t.Fatalf("issue_id = %q, want %q", first.IssueID, issue.ID)
+	}
+	if first.Action != "force_ready" || first.UserID != "admin" {
+		t.Fatalf("unexpected audit item: %+v", first)
+	}
+}
+
+func TestAdminOps_ListAuditLog_RejectsInvalidSinceBoundary(t *testing.T) {
+	store := newTestStore(t)
+	seedAdminIssueFixture(t, store, "pipe-admin-audit-since", core.IssueStatusDraft)
+
+	srv := NewServer(Config{Store: store, BearerToken: "admin-token"})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, err := http.NewRequest(
+		http.MethodGet,
+		ts.URL+"/api/v1/admin/audit-log?since=not-a-time",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	req.RemoteAddr = "127.0.0.1:50001"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/v1/admin/audit-log: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", resp.StatusCode)
+	}
+}

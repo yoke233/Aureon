@@ -159,10 +159,17 @@ type WriteFileResult struct {
 }
 
 type PermissionRequest struct {
-	Action   string            `json:"action,omitempty"`
-	Reason   string            `json:"reason,omitempty"`
-	Resource string            `json:"resource,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Action   string             `json:"action,omitempty"`
+	Reason   string             `json:"reason,omitempty"`
+	Resource string             `json:"resource,omitempty"`
+	Metadata map[string]string  `json:"metadata,omitempty"`
+	Options  []PermissionOption `json:"options,omitempty"`
+}
+
+type PermissionOption struct {
+	OptionID string `json:"optionId,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Name     string `json:"name,omitempty"`
 }
 
 type PermissionDecision struct {

@@ -6,7 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import PlanView, { resolveMiniMapNodeColor } from "./PlanView";
 import type { ApiClient } from "../lib/apiClient";
 import type { WsClient } from "../lib/wsClient";
-import type { ApiTaskItem, ApiTaskPlan, ListPlansResponse } from "../types/api";
+import type {
+  AdminAuditLogItem,
+  ApiTaskItem,
+  ApiTaskPlan,
+  ListPlansResponse,
+  PlanChangeRecord,
+  PlanReviewRecord,
+} from "../types/api";
 
 vi.mock("@xyflow/react", () => {
   return {
@@ -31,21 +38,21 @@ const buildPlan = (
   name: string,
   overrides?: Partial<ApiTaskPlan>,
 ): ApiTaskPlan => ({
-  id,
-  project_id: "proj-1",
-  session_id: "chat-1",
-  name,
-  status: "draft",
-  wait_reason: "",
-  tasks: [],
-  fail_policy: "block",
-  review_round: 0,
-  spec_profile: "default",
-  contract_version: "v1",
-  contract_checksum: "checksum",
-  created_at: "2026-03-01T10:00:00.000Z",
-  updated_at: "2026-03-01T10:00:00.000Z",
-  ...overrides,
+  id: overrides?.id ?? id,
+  project_id: overrides?.project_id ?? "proj-1",
+  session_id: overrides?.session_id ?? "chat-1",
+  name: overrides?.name ?? name,
+  status: overrides?.status ?? "draft",
+  pipeline_id: overrides?.pipeline_id ?? "",
+  wait_reason: overrides?.wait_reason ?? "",
+  tasks: overrides?.tasks ?? [],
+  fail_policy: overrides?.fail_policy ?? "block",
+  review_round: overrides?.review_round ?? 0,
+  spec_profile: overrides?.spec_profile ?? "default",
+  contract_version: overrides?.contract_version ?? "v1",
+  contract_checksum: overrides?.contract_checksum ?? "checksum",
+  created_at: overrides?.created_at ?? "2026-03-01T10:00:00.000Z",
+  updated_at: overrides?.updated_at ?? "2026-03-01T10:00:00.000Z",
 });
 
 const buildTask = (id: string, overrides?: Partial<ApiTaskItem>): ApiTaskItem => ({
@@ -69,6 +76,9 @@ const buildTask = (id: string, overrides?: Partial<ApiTaskItem>): ApiTaskItem =>
 });
 
 const createMockApiClient = (): ApiClient => {
+  const defaultReviewRecords: PlanReviewRecord[] = [];
+  const defaultChangeRecords: PlanChangeRecord[] = [];
+  const defaultAuditItems: AdminAuditLogItem[] = [];
   return {
     request: vi.fn(),
     get: vi.fn(),
@@ -93,6 +103,13 @@ const createMockApiClient = (): ApiClient => {
     listPlans: vi.fn().mockResolvedValue({
       items: [buildPlan("plan-1", "Plan One"), buildPlan("plan-2", "Plan Two")],
       total: 2,
+      offset: 0,
+    }),
+    listPlanReviews: vi.fn().mockResolvedValue(defaultReviewRecords),
+    listPlanChanges: vi.fn().mockResolvedValue(defaultChangeRecords),
+    listAdminAuditLog: vi.fn().mockResolvedValue({
+      items: defaultAuditItems,
+      total: defaultAuditItems.length,
       offset: 0,
     }),
     getPlanDag: vi.fn().mockImplementation(async (_projectID: string, planID: string) => ({
@@ -441,6 +458,88 @@ describe("PlanView", () => {
       expect(screen.getByTestId("plan-github-links")).toBeTruthy();
     });
     expect(screen.getByText("Issue #201")).toBeTruthy();
+  });
+
+  it("会加载并展示 review/修改/审计历史区块", async () => {
+    const apiClient = createMockApiClient();
+    vi.mocked(apiClient.listPlanReviews!).mockResolvedValue([
+      {
+        id: 1,
+        issue_id: "plan-1",
+        round: 2,
+        reviewer: "demand_reviewer",
+        verdict: "pass",
+        issues: [],
+        fixes: [],
+        score: 96,
+        created_at: "2026-03-03T01:00:00Z",
+      },
+    ]);
+    vi.mocked(apiClient.listPlanChanges!).mockResolvedValue([
+      {
+        id: "1",
+        issue_id: "plan-1",
+        field: "status",
+        old_value: "draft",
+        new_value: "reviewing",
+        reason: "submit_for_review",
+        changed_by: "system",
+        created_at: "2026-03-03T01:05:00Z",
+      },
+    ]);
+    vi.mocked(apiClient.listAdminAuditLog!).mockResolvedValue({
+      items: [
+        {
+          id: 9,
+          project_id: "proj-1",
+          issue_id: "plan-1",
+          pipeline_id: "pipe-1",
+          action: "force_ready",
+          message: "trace_id=trace-1",
+          source: "admin",
+          user_id: "admin",
+          created_at: "2026-03-03T01:08:00Z",
+        },
+      ],
+      total: 1,
+      offset: 0,
+    });
+    vi.mocked(apiClient.listPlans).mockResolvedValue({
+      items: [
+        buildPlan("plan-1", "Plan One", {
+          pipeline_id: "pipe-1",
+        }),
+      ],
+      total: 1,
+      offset: 0,
+    });
+    const wsClient = createMockWsClient();
+
+    render(
+      <PlanView
+        apiClient={apiClient}
+        wsClient={wsClient}
+        projectId="proj-1"
+        refreshToken={0}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiClient.listPlanReviews!).toHaveBeenCalledWith("proj-1", "plan-1");
+      expect(apiClient.listPlanChanges!).toHaveBeenCalledWith("proj-1", "plan-1");
+      expect(apiClient.listAdminAuditLog!).toHaveBeenCalledWith({
+        projectId: "proj-1",
+        limit: 200,
+        offset: 0,
+      });
+    });
+
+    expect(screen.getByText("Review 历史")).toBeTruthy();
+    expect(screen.getByText("round=2 · reviewer=demand_reviewer")).toBeTruthy();
+    expect(screen.getByText("修改记录")).toBeTruthy();
+    expect(screen.getByText("field=status")).toBeTruthy();
+    expect(screen.getByText("审计记录")).toBeTruthy();
+    expect(screen.getByText("action=force_ready")).toBeTruthy();
   });
 });
 

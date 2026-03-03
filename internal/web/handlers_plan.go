@@ -112,6 +112,8 @@ func registerIssueRoutes(r chi.Router, store core.Store, issueManager IssueManag
 		r.Get(base, h.listIssues)
 		r.Get(base+"/{id}", h.getIssue)
 		r.Get(base+"/{id}/dag", h.getIssueDAG)
+		r.Get(base+"/{id}/reviews", h.listIssueReviews)
+		r.Get(base+"/{id}/changes", h.listIssueChanges)
 		r.Post(base+"/{id}/review", h.submitForReview)
 		r.Post(base+"/{id}/action", h.applyIssueAction)
 	}
@@ -606,6 +608,40 @@ func (h *issueHandlers) submitForReview(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, issueStatusResponse{
 		Status: string(status),
 	})
+}
+
+func (h *issueHandlers) listIssueReviews(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForProject(w, r)
+	if !ok {
+		return
+	}
+
+	records, err := h.store.GetReviewRecords(issue.ID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "failed to load review records", "GET_REVIEW_RECORDS_FAILED")
+		return
+	}
+	if records == nil {
+		records = []core.ReviewRecord{}
+	}
+	writeJSON(w, http.StatusOK, records)
+}
+
+func (h *issueHandlers) listIssueChanges(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForProject(w, r)
+	if !ok {
+		return
+	}
+
+	changes, err := h.store.GetIssueChanges(issue.ID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "failed to load issue changes", "GET_ISSUE_CHANGES_FAILED")
+		return
+	}
+	if changes == nil {
+		changes = []core.IssueChange{}
+	}
+	writeJSON(w, http.StatusOK, changes)
 }
 
 func (h *issueHandlers) applyIssueAction(w http.ResponseWriter, r *http.Request) {

@@ -555,6 +555,17 @@ func runServer(ctx context.Context, args []string) error {
 		stopErr := scheduler.Stop(stopCtx)
 		return errors.Join(err, managerStopErr, stopErr)
 	}
+	var a2aBridge web.A2ABridge
+	if a2aPlanManager, ok := planManager.(secretary.A2APlanManager); ok {
+		a2aBridge, err = secretary.NewA2ABridge(store, a2aPlanManager)
+		if err != nil {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			managerStopErr := planManager.Stop(stopCtx)
+			stopErr := scheduler.Stop(stopCtx)
+			return errors.Join(fmt.Errorf("build a2a bridge: %w", err), managerStopErr, stopErr)
+		}
+	}
 
 	hub := web.NewHub()
 	if bootstrapSet.RoleResolver == nil {
@@ -591,9 +602,13 @@ func runServer(ctx context.Context, args []string) error {
 		Addr:               listenAddr,
 		AuthEnabled:        cfg.Server.AuthEnabled,
 		BearerToken:        cfg.Server.AuthToken,
+		A2AEnabled:         cfg.A2A.Enabled,
+		A2AToken:           cfg.A2A.Token,
+		A2AVersion:         cfg.A2A.Version,
 		WebhookSecret:      cfg.GitHub.WebhookSecret,
 		Store:              store,
 		PlanManager:        planManager,
+		A2ABridge:          a2aBridge,
 		ChatAssistant:      chatAssistant,
 		EventPublisher:     bus,
 		PipelineExec:       exec,

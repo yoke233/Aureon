@@ -24,6 +24,13 @@ type PlanManager interface {
 	ApplyPlanAction(ctx context.Context, planID string, action secretary.PlanAction) (*core.TaskPlan, error)
 }
 
+// A2ABridge defines A2A task APIs required by A2A JSON-RPC handlers.
+type A2ABridge interface {
+	SendMessage(ctx context.Context, input secretary.A2ASendMessageInput) (*secretary.A2ATaskSnapshot, error)
+	GetTask(ctx context.Context, input secretary.A2AGetTaskInput) (*secretary.A2ATaskSnapshot, error)
+	CancelTask(ctx context.Context, input secretary.A2ACancelTaskInput) (*secretary.A2ATaskSnapshot, error)
+}
+
 // PipelineExecutor defines pipeline human-action entrypoints used by web handlers.
 type PipelineExecutor interface {
 	ApplyAction(ctx context.Context, action core.PipelineAction) error
@@ -39,11 +46,15 @@ type Config struct {
 	Addr                   string
 	AuthEnabled            bool
 	BearerToken            string
+	A2AEnabled             bool
+	A2AToken               string
+	A2AVersion             string
 	WebhookSecret          string
 	AllowedOrigins         []string
 	Frontend               fs.FS
 	Store                  core.Store
 	PlanManager            PlanManager
+	A2ABridge              A2ABridge
 	ChatAssistant          ChatAssistant
 	EventPublisher         chatEventPublisher
 	PipelineExec           PipelineExecutor
@@ -98,6 +109,7 @@ func NewServer(cfg Config) *Server {
 
 	r.Get("/health", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
+	registerA2ARoutes(r, cfg)
 	webhookReplayer := registerWebhookRoutes(r, cfg.Store, cfg.PipelineExec, strings.TrimSpace(cfg.WebhookSecret), cfg.PipelineStageRoles)
 	if cfg.WebhookReplayer != nil {
 		webhookReplayer = cfg.WebhookReplayer

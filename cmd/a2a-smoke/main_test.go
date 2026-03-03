@@ -231,6 +231,163 @@ func TestTokenHeader_InjectsBearerForCardAndRPC(t *testing.T) {
 	}
 }
 
+func TestRunSmoke_ProjectIDMetadataInjectedForSendAndGet(t *testing.T) {
+	t.Helper()
+
+	var sendProjectID string
+	var getProjectID string
+	var rpcCallCount int
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/agent-card.json":
+			writeJSON(w, http.StatusOK, &a2a.AgentCard{
+				Name:               "test-agent",
+				Description:        "test",
+				URL:                srv.URL + "/rpc",
+				PreferredTransport: a2a.TransportProtocolJSONRPC,
+				ProtocolVersion:    "0.3",
+				Capabilities:       a2a.AgentCapabilities{Streaming: true},
+				DefaultInputModes:  []string{"text/plain"},
+				DefaultOutputModes: []string{"text/plain"},
+				Skills:             []a2a.AgentSkill{},
+				Version:            "0.1.0",
+			})
+			return
+		case "/rpc":
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode rpc request: %v", err)
+			}
+			id := req["id"]
+			method, _ := req["method"].(string)
+			params, _ := req["params"].(map[string]any)
+			metadata, _ := params["metadata"].(map[string]any)
+			projectID, _ := metadata["project_id"].(string)
+			rpcCallCount++
+
+			switch method {
+			case "message/send":
+				sendProjectID = projectID
+				writeRPCResult(w, id, &a2a.Task{
+					ID:        a2a.TaskID("task-project-meta"),
+					ContextID: "ctx-project-meta",
+					Status: a2a.TaskStatus{
+						State: a2a.TaskStateWorking,
+					},
+				})
+				return
+			case "tasks/get":
+				getProjectID = projectID
+				writeRPCResult(w, id, &a2a.Task{
+					ID:        a2a.TaskID("task-project-meta"),
+					ContextID: "ctx-project-meta",
+					Status: a2a.TaskStatus{
+						State: a2a.TaskStateCompleted,
+					},
+				})
+				return
+			default:
+				t.Fatalf("unexpected rpc method: %q", method)
+			}
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer srv.Close()
+
+	cfg := smokeConfig{
+		CardBaseURL:  srv.URL,
+		ProjectID:    "proj-meta",
+		Prompt:       "hello metadata",
+		A2AVersion:   "0.3",
+		Timeout:      5 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+		MaxPoll:      2,
+		HTTPClient:   srv.Client(),
+	}
+
+	if err := runSmoke(context.Background(), cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runSmoke() error = %v", err)
+	}
+	if rpcCallCount < 2 {
+		t.Fatalf("rpc call count = %d, want >= 2", rpcCallCount)
+	}
+	if sendProjectID != "proj-meta" {
+		t.Fatalf("send project_id = %q, want %q", sendProjectID, "proj-meta")
+	}
+	if getProjectID != "proj-meta" {
+		t.Fatalf("get project_id = %q, want %q", getProjectID, "proj-meta")
+	}
+}
+
+func TestRunSmoke_AllowNonTerminalDoesNotFail(t *testing.T) {
+	t.Helper()
+
+	var rpcCallCount int
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/agent-card.json":
+			writeJSON(w, http.StatusOK, &a2a.AgentCard{
+				Name:               "test-agent",
+				Description:        "test",
+				URL:                srv.URL + "/rpc",
+				PreferredTransport: a2a.TransportProtocolJSONRPC,
+				ProtocolVersion:    "0.3",
+				Capabilities:       a2a.AgentCapabilities{Streaming: true},
+				DefaultInputModes:  []string{"text/plain"},
+				DefaultOutputModes: []string{"text/plain"},
+				Skills:             []a2a.AgentSkill{},
+				Version:            "0.1.0",
+			})
+			return
+		case "/rpc":
+			id := decodeRPCID(t, r)
+			rpcCallCount++
+			writeRPCResult(w, id, &a2a.Task{
+				ID:        a2a.TaskID("task-non-terminal"),
+				ContextID: "ctx-non-terminal",
+				Status: a2a.TaskStatus{
+					State: a2a.TaskStateWorking,
+				},
+			})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	cfg := smokeConfig{
+		CardBaseURL:  srv.URL,
+		Prompt:       "hello non terminal",
+		A2AVersion:   "0.3",
+		Timeout:      5 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+		MaxPoll:      1,
+		AllowNonTerm: true,
+		HTTPClient:   srv.Client(),
+	}
+
+	if err := runSmoke(context.Background(), cfg, &out); err != nil {
+		t.Fatalf("runSmoke() error = %v", err)
+	}
+	if rpcCallCount < 2 {
+		t.Fatalf("rpc call count = %d, want >= 2", rpcCallCount)
+	}
+	output := out.String()
+	if !strings.Contains(output, "task_state=working") {
+		t.Fatalf("expected output contains non-terminal state, out=%s", output)
+	}
+	if !strings.Contains(output, "task_non_terminal=true") {
+		t.Fatalf("expected output contains task_non_terminal=true, out=%s", output)
+	}
+}
+
 func TestBearerAuthHeader_IsIdempotent(t *testing.T) {
 	got, ok := bearerAuthHeader("Bearer already-prefixed")
 	if !ok {

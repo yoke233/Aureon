@@ -3,6 +3,7 @@ package secretary
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,51 @@ func TestA2ABridge_SendMessageDelegatesToCreateDraft(t *testing.T) {
 	}
 	if manager.createDraftCalls != 1 {
 		t.Fatalf("create draft calls = %d, want 1", manager.createDraftCalls)
+	}
+}
+
+func TestA2ABridge_SendMessageFallbackWhenCreateDraftFails(t *testing.T) {
+	store := newA2ABridgeTestStore(t)
+	project := mustCreateA2ABridgeProject(t, store, "proj-a2a-send-fallback")
+
+	manager := &fakeA2ABridgeManager{
+		createDraftFn: func(_ context.Context, _ CreateDraftInput) (*core.TaskPlan, error) {
+			return nil, errors.New("decompose unavailable")
+		},
+		getPlanFn: func(_ context.Context, planID string) (*core.TaskPlan, error) {
+			return store.GetTaskPlan(planID)
+		},
+	}
+
+	bridge, err := NewA2ABridge(store, manager)
+	if err != nil {
+		t.Fatalf("NewA2ABridge() error = %v", err)
+	}
+
+	task, err := bridge.SendMessage(context.Background(), A2ASendMessageInput{
+		ProjectID:    project.ID,
+		SessionID:    "chat-a2a-fallback",
+		Conversation: "fallback request",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if strings.TrimSpace(task.TaskID) == "" {
+		t.Fatal("expected fallback task id to be present")
+	}
+	if task.State != A2ATaskStateInputRequired {
+		t.Fatalf("task state = %q, want %q", task.State, A2ATaskStateInputRequired)
+	}
+
+	fetched, err := bridge.GetTask(context.Background(), A2AGetTaskInput{
+		ProjectID: project.ID,
+		TaskID:    task.TaskID,
+	})
+	if err != nil {
+		t.Fatalf("GetTask() error = %v", err)
+	}
+	if fetched.State != A2ATaskStateInputRequired {
+		t.Fatalf("fetched state = %q, want %q", fetched.State, A2ATaskStateInputRequired)
 	}
 }
 

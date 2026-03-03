@@ -110,7 +110,13 @@ func (b *A2ABridge) SendMessage(ctx context.Context, input A2ASendMessageInput) 
 		},
 	})
 	if err != nil {
-		return nil, err
+		// When agent decomposition is unavailable, keep A2A endpoint available by
+		// storing a minimal pending task snapshot that clients can query/cancel.
+		fallback, fallbackErr := b.createFallbackTask(project.ID, input.SessionID)
+		if fallbackErr != nil {
+			return nil, err
+		}
+		return snapshotFromTaskPlan(fallback), nil
 	}
 	if plan == nil {
 		return nil, errors.New("create draft returned nil task plan")
@@ -278,4 +284,28 @@ func isNotFoundError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
+func (b *A2ABridge) createFallbackTask(projectID string, sessionID string) (*core.TaskPlan, error) {
+	resolvedSessionID := ""
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID != "" {
+		if _, err := b.store.GetChatSession(trimmedSessionID); err == nil {
+			resolvedSessionID = trimmedSessionID
+		}
+	}
+
+	plan := &core.TaskPlan{
+		ID:         core.NewTaskPlanID(),
+		ProjectID:  strings.TrimSpace(projectID),
+		SessionID:  resolvedSessionID,
+		Name:       "a2a-message",
+		Status:     core.PlanWaitingHuman,
+		WaitReason: core.WaitFeedbackReq,
+		FailPolicy: core.FailBlock,
+	}
+	if err := b.store.SaveTaskPlan(plan); err != nil {
+		return nil, fmt.Errorf("create fallback a2a task: %w", err)
+	}
+	return b.store.GetTaskPlan(plan.ID)
 }

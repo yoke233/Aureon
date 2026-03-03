@@ -30,12 +30,14 @@ const (
 type smokeConfig struct {
 	CardBaseURL  string
 	RPCURL       string
+	ProjectID    string
 	Prompt       string
 	A2AVersion   string
 	Token        string
 	Timeout      time.Duration
 	PollInterval time.Duration
 	MaxPoll      int
+	AllowNonTerm bool
 	Verbose      bool
 	Legacy       bool
 	InsecureTLS  bool
@@ -46,12 +48,14 @@ func main() {
 	var (
 		cardBaseURL     string
 		rpcURL          string
+		projectID       string
 		prompt          string
 		a2aVersion      string
 		token           string
 		timeout         time.Duration
 		pollInterval    time.Duration
 		maxPoll         int
+		allowNonTerm    bool
 		verbose         bool
 		legacy          bool
 		insecureSkipTLS bool
@@ -59,12 +63,14 @@ func main() {
 
 	flag.StringVar(&cardBaseURL, "card-base-url", defaultCardBaseURL, "AgentCard 基础地址（自动请求 /.well-known/agent-card.json）")
 	flag.StringVar(&rpcURL, "rpc-url", "", "A2A JSON-RPC 端点地址（优先级高于 card-base-url）")
+	flag.StringVar(&projectID, "project-id", "", "可选：project_id 元数据（多项目场景建议显式传入）")
 	flag.StringVar(&prompt, "prompt", defaultPrompt, "发送给 A2A agent 的文本")
 	flag.StringVar(&a2aVersion, "a2a-version", defaultA2AVersion, "请求头 A2A-Version（官方 a2a-go 当前稳定线建议 0.3）")
 	flag.StringVar(&token, "token", "", "A2A Bearer Token（可选）")
 	flag.DurationVar(&timeout, "timeout", 60*time.Second, "整体调用超时")
 	flag.DurationVar(&pollInterval, "poll-interval", 1*time.Second, "任务轮询间隔")
 	flag.IntVar(&maxPoll, "max-poll", 20, "最大轮询次数（<=0 表示不轮询）")
+	flag.BoolVar(&allowNonTerm, "allow-nonterminal", false, "轮询结束后若仍非终态，输出状态但不返回错误")
 	flag.BoolVar(&verbose, "verbose", false, "输出更多调试信息")
 	flag.BoolVar(&legacy, "legacy", false, "兼容旧用法（保留参数，等价于默认 0.3）")
 	flag.BoolVar(&insecureSkipTLS, "insecure-skip-tls-verify", false, "跳过 TLS 证书校验（仅测试环境）")
@@ -90,12 +96,14 @@ func main() {
 	cfg := smokeConfig{
 		CardBaseURL:  cardBaseURL,
 		RPCURL:       rpcURL,
+		ProjectID:    projectID,
 		Prompt:       prompt,
 		A2AVersion:   a2aVersion,
 		Token:        token,
 		Timeout:      timeout,
 		PollInterval: pollInterval,
 		MaxPoll:      maxPoll,
+		AllowNonTerm: allowNonTerm,
 		Verbose:      verbose,
 		Legacy:       legacy,
 		InsecureTLS:  insecureSkipTLS,
@@ -141,9 +149,11 @@ func runSmoke(parent context.Context, cfg smokeConfig, out io.Writer) error {
 	}
 	defer client.Destroy()
 
+	reqMeta := smokeRequestMetadata(cfg.ProjectID)
 	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: cfg.Prompt})
 	result, err := client.SendMessage(ctx, &a2a.MessageSendParams{
-		Message: msg,
+		Metadata: cloneMetadata(reqMeta),
+		Message:  msg,
 		Config: &a2a.MessageSendConfig{
 			Blocking: boolPtr(true),
 		},
@@ -178,7 +188,8 @@ func runSmoke(parent context.Context, cfg smokeConfig, out io.Writer) error {
 		}
 
 		latest, getErr := client.GetTask(ctx, &a2a.TaskQueryParams{
-			ID: a2a.TaskID(taskID),
+			ID:       a2a.TaskID(taskID),
+			Metadata: cloneMetadata(reqMeta),
 		})
 		if getErr != nil {
 			return fmt.Errorf("get task failed task_id=%s: %w", taskID, getErr)
@@ -191,6 +202,10 @@ func runSmoke(parent context.Context, cfg smokeConfig, out io.Writer) error {
 		}
 	}
 
+	if cfg.AllowNonTerm {
+		fmt.Fprintln(out, "task_non_terminal=true")
+		return nil
+	}
 	return fmt.Errorf("task %s did not reach terminal state after %d polls", taskID, cfg.MaxPoll)
 }
 
@@ -314,6 +329,27 @@ func compactJSON(raw []byte) string {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func smokeRequestMetadata(projectID string) map[string]any {
+	trimmed := strings.TrimSpace(projectID)
+	if trimmed == "" {
+		return nil
+	}
+	return map[string]any{
+		"project_id": trimmed,
+	}
+}
+
+func cloneMetadata(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func bearerAuthHeader(token string) (string, bool) {

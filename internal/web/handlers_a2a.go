@@ -72,7 +72,7 @@ func handleA2AJSONRPC(cfg Config) http.HandlerFunc {
 		case a2aMethodTasksCancel:
 			handleA2ATasksCancel(w, r, cfg, req)
 		case a2aMethodMessageStream:
-			writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
+			handleA2AMessageStream(w, r, cfg, req)
 		default:
 			writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
 		}

@@ -16,6 +16,21 @@
 
 ## 3. 最短验证链路
 
+### 3.0 一键依赖自检（建议先跑）
+
+```powershell
+Set-Location -LiteralPath D:\project\ai-workflow
+pwsh -NoProfile -File .\scripts\litebox\check-windows-deps.ps1 `
+  -ForBuildRunner `
+  -ForACP `
+  -RunnerPath D:\tmp\litebox-research\target\release\litebox_runner_linux_on_windows_userland.exe
+```
+
+预期：
+
+1. 必需项全部 `OK` 时退出码为 `0`
+2. 若有必需项缺失，脚本会给出安装建议并返回非 0
+
 ### 3.1 验证 runner（推荐先跑）
 
 ```powershell
@@ -97,4 +112,3 @@ go run .\cmd\acp-smoke `
 3. 研究索引与复盘：
    - `docs/learning/litebox/README.zh-CN.md`
    - `docs/learning/litebox/research-notes.zh-CN.md`
-

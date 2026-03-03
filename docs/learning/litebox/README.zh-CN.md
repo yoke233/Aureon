@@ -21,3 +21,5 @@
    - [cmd/litebox-acp/main.go](/D:/project/ai-workflow/cmd/litebox-acp/main.go)
 2. 桥接命令测试  
    - [cmd/litebox-acp/main_test.go](/D:/project/ai-workflow/cmd/litebox-acp/main_test.go)
+3. Windows 依赖自检脚本  
+   - [scripts/litebox/check-windows-deps.ps1](/D:/project/ai-workflow/scripts/litebox/check-windows-deps.ps1)

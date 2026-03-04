@@ -246,7 +246,6 @@ func (r defaultDependencyAnalyzer) Review(_ context.Context, input ReviewerInput
 	}
 
 	issues := make([]core.ReviewIssue, 0)
-	graphNodes := make([]*core.Issue, 0, len(planIssues))
 	for i := range planIssues {
 		issue := planIssues[i]
 		issueID := strings.TrimSpace(issue.ID)
@@ -258,28 +257,10 @@ func (r defaultDependencyAnalyzer) Review(_ context.Context, input ReviewerInput
 			})
 			continue
 		}
-		graphNodes = append(graphNodes, &core.Issue{
-			ID:        issueID,
-			DependsOn: normalizeStringList(issue.DependsOn),
-		})
 	}
 
-	if len(issues) == 0 {
-		dag := Build(graphNodes)
-		if err := dag.Validate(); err != nil {
-			issueID := ""
-			if dagErr, ok := err.(*DAGError); ok {
-				issueID = strings.TrimSpace(dagErr.NodeID)
-			}
-			issues = append(issues, core.ReviewIssue{
-				Severity:    "error",
-				IssueID:     issueID,
-				Description: err.Error(),
-				Suggestion:  "fix issue dependencies to keep DAG acyclic and references valid",
-			})
-		}
-	}
-
+	// V2 no longer uses runtime DAG dependencies. Dependency analyzer only
+	// keeps minimal input sanity checks to avoid blocking issue-level flow.
 	return buildReviewVerdict(r.Name(), issues), nil
 }
 

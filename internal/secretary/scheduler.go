@@ -35,15 +35,13 @@ type readyDispatch struct {
 type runningSession struct {
 	SessionID string
 	ProjectID string
-	Graph     *DAG
 	Running   map[string]string
 	IssueByID map[string]*core.Issue
-	Parents   map[string][]string
 	HaltNew   bool
 	Recovered bool
 }
 
-func newRunningSession(sessionID, projectID string, issues []*core.Issue, graph *DAG) *runningSession {
+func newRunningSession(sessionID, projectID string, issues []*core.Issue) *runningSession {
 	issueByID := make(map[string]*core.Issue, len(issues))
 	for _, issue := range issues {
 		if issue == nil {
@@ -52,30 +50,15 @@ func newRunningSession(sessionID, projectID string, issues []*core.Issue, graph 
 		issueByID[issue.ID] = issue
 	}
 
-	parents := make(map[string][]string, len(graph.Nodes))
-	for issueID := range graph.Nodes {
-		parents[issueID] = []string{}
-	}
-	for from, downstream := range graph.Downstream {
-		for _, to := range downstream {
-			parents[to] = append(parents[to], from)
-		}
-	}
-	for issueID := range parents {
-		sort.Strings(parents[issueID])
-	}
-
 	return &runningSession{
 		SessionID: sessionID,
 		ProjectID: projectID,
-		Graph:     graph,
 		Running:   make(map[string]string),
 		IssueByID: issueByID,
-		Parents:   parents,
 	}
 }
 
-// DepScheduler schedules Issues by DAG dependencies and maps each issue to one pipeline.
+// DepScheduler schedules issues by profile queue and maps each issue to one pipeline.
 type DepScheduler struct {
 	store   core.Store
 	bus     eventSubscriber
@@ -262,7 +245,7 @@ func (s *DepScheduler) RecoverPlan(ctx context.Context, _ string) error {
 	return s.RecoverExecutingIssues(ctx, "")
 }
 
-// ScheduleIssues builds DAG, validates and transitive-reduces it, then dispatches initial ready issues.
+// ScheduleIssues puts issues into profile-aware ready queues and dispatches runnable items.
 func (s *DepScheduler) ScheduleIssues(ctx context.Context, issues []*core.Issue) error {
 	if s == nil || s.store == nil {
 		return errors.New("scheduler store is not configured")
@@ -289,24 +272,8 @@ func (s *DepScheduler) scheduleSession(ctx context.Context, sessionID string, is
 		return nil
 	}
 
-	s.mu.Lock()
-	if _, exists := s.sessions[sessionID]; exists {
-		s.mu.Unlock()
-		return nil
-	}
-	s.mu.Unlock()
-
 	projectID := strings.TrimSpace(issues[0].ProjectID)
-	graph := Build(issues)
-	if err := graph.Validate(); err != nil {
-		return err
-	}
-	graph.TransitiveReduce()
-	if err := graph.Validate(); err != nil {
-		return err
-	}
-
-	rs := newRunningSession(sessionID, projectID, issues, graph)
+	rs := newRunningSession(sessionID, projectID, issues)
 
 	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
 		issue := rs.IssueByID[issueID]
@@ -340,9 +307,7 @@ func (s *DepScheduler) scheduleSession(ctx context.Context, sessionID string, is
 			s.publishIssueEvent(core.EventIssueQueued, issue, nil, "")
 		}
 	}
-	s.syncIssueDependencies(issues)
-
-	if err := s.markReadyByInDegreeLocked(rs); err != nil {
+	if err := s.markReadyByProfileQueueLocked(rs); err != nil {
 		return err
 	}
 
@@ -390,16 +355,7 @@ func (s *DepScheduler) recoverSession(ctx context.Context, sessionID string, iss
 	}
 
 	projectID := strings.TrimSpace(issues[0].ProjectID)
-	graph := Build(issues)
-	if err := graph.Validate(); err != nil {
-		return err
-	}
-	graph.TransitiveReduce()
-	if err := graph.Validate(); err != nil {
-		return err
-	}
-
-	rs := newRunningSession(sessionID, projectID, issues, graph)
+	rs := newRunningSession(sessionID, projectID, issues)
 	rs.Recovered = true
 	replayEvents := make([]core.Event, 0)
 
@@ -414,7 +370,6 @@ func (s *DepScheduler) recoverSession(ctx context.Context, sessionID string, iss
 
 		switch issue.Status {
 		case core.IssueStatusDone:
-			rs.unlockDownstream(issueID)
 		case core.IssueStatusExecuting:
 			if strings.TrimSpace(issue.PipelineID) == "" {
 				issue.Status = core.IssueStatusQueued
@@ -450,7 +405,7 @@ func (s *DepScheduler) recoverSession(ctx context.Context, sessionID string, iss
 		}
 	}
 
-	if err := s.markReadyByInDegreeLocked(rs); err != nil {
+	if err := s.markReadyByProfileQueueLocked(rs); err != nil {
 		return err
 	}
 	if err := s.registerSessionRuntime(sessionID, rs); err != nil {
@@ -473,27 +428,39 @@ func (s *DepScheduler) registerSessionRuntime(sessionID string, rs *runningSessi
 		return nil
 	}
 
-	acquired := 0
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.sessions[sessionID]; exists {
-		return nil
+	if existing, exists := s.sessions[sessionID]; exists && existing != nil {
+		for issueID, issue := range rs.IssueByID {
+			if issue == nil {
+				continue
+			}
+			existing.IssueByID[issueID] = issue
+		}
+		for issueID, pipelineID := range rs.Running {
+			if strings.TrimSpace(pipelineID) == "" {
+				continue
+			}
+			existing.Running[issueID] = pipelineID
+		}
+		rs = existing
+	} else {
+		s.sessions[sessionID] = rs
 	}
 
-	s.sessions[sessionID] = rs
 	for issueID, pipelineID := range rs.Running {
+		if strings.TrimSpace(pipelineID) == "" {
+			continue
+		}
+		if _, exists := s.pipelineIndex[pipelineID]; exists {
+			continue
+		}
 		s.pipelineIndex[pipelineID] = pipelineRef{sessionID: sessionID, issueID: issueID}
 		if !s.tryAcquireSlot() {
 			delete(s.pipelineIndex, pipelineID)
-			delete(s.sessions, sessionID)
-			for acquired > 0 {
-				s.releaseSlot()
-				acquired--
-			}
 			return fmt.Errorf("recover session %s exceeds max concurrency %d", sessionID, cap(s.sem))
 		}
-		acquired++
 	}
 	return nil
 }
@@ -559,7 +526,6 @@ func (s *DepScheduler) handlePipelineEventLocked(evt core.Event) error {
 			return err
 		}
 		s.publishIssueEvent(core.EventIssueDone, issue, nil, "")
-		rs.unlockDownstream(issue.ID)
 	case core.EventPipelineFailed:
 		issue.Status = core.IssueStatusFailed
 		if err := s.saveIssue(issue); err != nil {
@@ -568,7 +534,6 @@ func (s *DepScheduler) handlePipelineEventLocked(evt core.Event) error {
 		s.publishIssueEvent(core.EventIssueFailed, issue, nil, evt.Error)
 		switch issue.FailPolicy {
 		case core.FailSkip:
-			rs.unlockDownstream(issue.ID)
 		case core.FailHuman:
 			rs.HaltNew = true
 		default:
@@ -580,7 +545,7 @@ func (s *DepScheduler) handlePipelineEventLocked(evt core.Event) error {
 		return nil
 	}
 
-	if err := s.markReadyByInDegreeLocked(rs); err != nil {
+	if err := s.markReadyByProfileQueueLocked(rs); err != nil {
 		return err
 	}
 
@@ -593,55 +558,67 @@ func (s *DepScheduler) handlePipelineEventLocked(evt core.Event) error {
 }
 
 func (s *DepScheduler) applyBlockPolicyLocked(rs *runningSession, failedIssueID string) error {
-	queue := []string{failedIssueID}
-	seen := map[string]struct{}{failedIssueID: {}}
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-
-		for _, downID := range rs.Graph.Downstream[current] {
-			if _, ok := seen[downID]; !ok {
-				seen[downID] = struct{}{}
-				queue = append(queue, downID)
-			}
-
-			downIssue := rs.IssueByID[downID]
-			if downIssue == nil || isIssueTerminal(downIssue.Status) || downIssue.Status == core.IssueStatusExecuting {
-				continue
-			}
-
-			downIssue.Status = core.IssueStatusFailed
-			if err := s.saveIssue(downIssue); err != nil {
-				return err
-			}
-			s.publishIssueEvent(core.EventIssueFailed, downIssue, map[string]string{
-				"reason":          "blocked_by_dependency_failure",
-				"cause_issue_id":  failedIssueID,
-				"dependency_mode": "hard",
-			}, "")
+	rs.HaltNew = true
+	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
+		if issueID == failedIssueID {
+			continue
 		}
+		issue := rs.IssueByID[issueID]
+		if issue == nil || isIssueTerminal(issue.Status) || issue.Status == core.IssueStatusExecuting {
+			continue
+		}
+		issue.Status = core.IssueStatusFailed
+		issue.PipelineID = ""
+		if err := s.saveIssue(issue); err != nil {
+			return err
+		}
+		s.publishIssueEvent(core.EventIssueFailed, issue, map[string]string{
+			"reason":         "blocked_by_session_failure",
+			"cause_issue_id": failedIssueID,
+		}, "")
 	}
 	return nil
 }
 
-func (s *DepScheduler) markReadyByInDegreeLocked(rs *runningSession) error {
+func (s *DepScheduler) markReadyByProfileQueueLocked(rs *runningSession) error {
 	if rs == nil {
 		return nil
 	}
+
+	queuedByProfile := map[core.WorkflowProfileType][]string{
+		core.WorkflowProfileStrict:      {},
+		core.WorkflowProfileNormal:      {},
+		core.WorkflowProfileFastRelease: {},
+	}
+
 	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
 		issue := rs.IssueByID[issueID]
 		if issue == nil || issue.Status != core.IssueStatusQueued {
 			continue
 		}
-		if rs.Graph.InDegree[issueID] != 0 {
+		profile := workflowProfileFromIssue(issue)
+		queuedByProfile[profile] = append(queuedByProfile[profile], issueID)
+	}
+
+	for _, profile := range workflowDispatchProfileOrder() {
+		queue := queuedByProfile[profile]
+		if len(queue) == 0 {
 			continue
 		}
-		issue.Status = core.IssueStatusReady
-		if err := s.saveIssue(issue); err != nil {
-			return err
+		sort.Strings(queue)
+		for _, issueID := range queue {
+			issue := rs.IssueByID[issueID]
+			if issue == nil || issue.Status != core.IssueStatusQueued {
+				continue
+			}
+			issue.Status = core.IssueStatusReady
+			if err := s.saveIssue(issue); err != nil {
+				return err
+			}
+			s.publishIssueEvent(core.EventIssueReady, issue, map[string]string{
+				"workflow_profile": string(profile),
+			}, "")
 		}
-		s.publishIssueEvent(core.EventIssueReady, issue, nil, "")
 	}
 	return nil
 }
@@ -682,7 +659,8 @@ func (s *DepScheduler) dispatchIssue(ctx context.Context, sessionID, issueID str
 		return false, nil
 	}
 
-	pipeline, err := buildPipelineFromIssue(issue)
+	profile := workflowProfileFromIssue(issue)
+	pipeline, err := buildPipelineFromIssue(issue, profile)
 	if err != nil {
 		s.releaseSlot()
 		s.mu.Unlock()
@@ -704,7 +682,9 @@ func (s *DepScheduler) dispatchIssue(ctx context.Context, sessionID, issueID str
 		s.rollbackDispatch(sessionID, issueID, pipeline.ID)
 		return false, err
 	}
-	s.publishIssueEvent(core.EventIssueExecuting, issue, nil, "")
+	s.publishIssueEvent(core.EventIssueExecuting, issue, map[string]string{
+		"workflow_profile": string(profile),
+	}, "")
 
 	runCtx := context.Background()
 	if ctx != nil {
@@ -860,15 +840,9 @@ func (s *DepScheduler) saveIssue(issue *core.Issue) error {
 }
 
 func (s *DepScheduler) syncIssueDependencies(issues []*core.Issue) {
-	if s == nil || s.tracker == nil {
-		return
-	}
-	for _, issue := range issues {
-		if issue == nil {
-			continue
-		}
-		_ = s.tracker.SyncDependencies(context.Background(), issue, issues)
-	}
+	// V2 removes runtime dependency orchestration; keep no-op hook to avoid
+	// touching caller graph in this wave.
+	_ = issues
 }
 
 func (s *DepScheduler) publishEvent(evt core.Event) {
@@ -934,20 +908,40 @@ func pipelineRecoveryEvent(status core.PipelineStatus) (core.EventType, bool) {
 	}
 }
 
-func (rs *runningSession) unlockDownstream(issueID string) {
-	for _, downID := range rs.Graph.Downstream[issueID] {
-		rs.decrementInDegree(downID)
+func workflowDispatchProfileOrder() []core.WorkflowProfileType {
+	return []core.WorkflowProfileType{
+		core.WorkflowProfileStrict,
+		core.WorkflowProfileNormal,
+		core.WorkflowProfileFastRelease,
 	}
 }
 
-func (rs *runningSession) decrementInDegree(issueID string) {
-	if rs.Graph.InDegree[issueID] > 0 {
-		rs.Graph.InDegree[issueID]--
+func workflowProfileFromIssue(issue *core.Issue) core.WorkflowProfileType {
+	if issue == nil {
+		return core.WorkflowProfileNormal
 	}
+	for _, label := range issue.Labels {
+		trimmed := strings.TrimSpace(strings.ToLower(label))
+		if !strings.HasPrefix(trimmed, "profile:") {
+			continue
+		}
+		candidate := core.WorkflowProfileType(strings.TrimSpace(strings.TrimPrefix(trimmed, "profile:")))
+		if candidate.Validate() == nil {
+			return candidate
+		}
+	}
+	if candidate := core.WorkflowProfileType(strings.TrimSpace(strings.ToLower(issue.Template))); candidate.Validate() == nil {
+		return candidate
+	}
+	return core.WorkflowProfileNormal
 }
 
 func (rs *runningSession) readyToDispatchIDs() []string {
-	ready := make([]string, 0, len(rs.IssueByID))
+	readyByProfile := map[core.WorkflowProfileType][]string{
+		core.WorkflowProfileStrict:      {},
+		core.WorkflowProfileNormal:      {},
+		core.WorkflowProfileFastRelease: {},
+	}
 	for _, issueID := range sortedIssueIDs(rs.IssueByID) {
 		issue := rs.IssueByID[issueID]
 		if issue == nil {
@@ -959,12 +953,19 @@ func (rs *runningSession) readyToDispatchIDs() []string {
 		if _, running := rs.Running[issueID]; running {
 			continue
 		}
-		ready = append(ready, issueID)
+		profile := workflowProfileFromIssue(issue)
+		readyByProfile[profile] = append(readyByProfile[profile], issueID)
 	}
-	return ready
+	ordered := make([]string, 0, len(rs.IssueByID))
+	for _, profile := range workflowDispatchProfileOrder() {
+		ids := readyByProfile[profile]
+		sort.Strings(ids)
+		ordered = append(ordered, ids...)
+	}
+	return ordered
 }
 
-func buildPipelineFromIssue(issue *core.Issue) (*core.Pipeline, error) {
+func buildPipelineFromIssue(issue *core.Issue, profile core.WorkflowProfileType) (*core.Pipeline, error) {
 	if issue == nil {
 		return nil, errors.New("issue cannot be nil")
 	}
@@ -985,15 +986,17 @@ func buildPipelineFromIssue(issue *core.Issue) (*core.Pipeline, error) {
 
 	now := time.Now()
 	return &core.Pipeline{
-		ID:              engine.NewPipelineID(),
-		ProjectID:       issue.ProjectID,
-		Name:            name,
-		Description:     issue.Body,
-		Template:        template,
-		Status:          core.StatusCreated,
-		Stages:          stages,
-		Artifacts:       map[string]string{},
-		Config:          map[string]any{},
+		ID:          engine.NewPipelineID(),
+		ProjectID:   issue.ProjectID,
+		Name:        name,
+		Description: issue.Body,
+		Template:    template,
+		Status:      core.StatusCreated,
+		Stages:      stages,
+		Artifacts:   map[string]string{},
+		Config: map[string]any{
+			"workflow_profile": string(profile),
+		},
 		IssueID:         issue.ID,
 		MaxTotalRetries: 5,
 		QueuedAt:        now,

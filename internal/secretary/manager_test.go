@@ -94,11 +94,11 @@ func TestManager_CreateIssuesPersistsDraftWithDefaults(t *testing.T) {
 	if issue.FailPolicy != core.FailBlock {
 		t.Fatalf("created fail_policy = %q, want %q", issue.FailPolicy, core.FailBlock)
 	}
-	if len(issue.DependsOn) != 1 || issue.DependsOn[0] != "issue-prep" {
-		t.Fatalf("created depends_on = %#v, want [issue-prep]", issue.DependsOn)
+	if len(issue.DependsOn) != 0 {
+		t.Fatalf("created depends_on = %#v, want [] in v2", issue.DependsOn)
 	}
-	if len(issue.Blocks) != 1 || issue.Blocks[0] != "issue-deploy" {
-		t.Fatalf("created blocks = %#v, want [issue-deploy]", issue.Blocks)
+	if len(issue.Blocks) != 0 {
+		t.Fatalf("created blocks = %#v, want [] in v2", issue.Blocks)
 	}
 
 	persisted, err := store.GetIssue(issue.ID)

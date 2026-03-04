@@ -16,6 +16,8 @@ const (
 	wsPongWait   = 60 * time.Second
 	wsPingPeriod = 30 * time.Second
 	wsMaxMessage = 1 << 20
+
+	maxBufferedChatSessionEvents = 32
 )
 
 type WSMessage struct {
@@ -23,6 +25,7 @@ type WSMessage struct {
 	PipelineID string         `json:"pipeline_id,omitempty"`
 	ProjectID  string         `json:"project_id,omitempty"`
 	IssueID    string         `json:"issue_id,omitempty"`
+	SessionID  string         `json:"session_id,omitempty"`
 	Data       map[string]any `json:"data,omitempty"`
 }
 
@@ -30,13 +33,16 @@ type wsClientMessage struct {
 	Type       string `json:"type"`
 	PipelineID string `json:"pipeline_id,omitempty"`
 	IssueID    string `json:"issue_id,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
 }
 
 type Hub struct {
 	upgrader websocket.Upgrader
 
-	mu      sync.RWMutex
-	clients map[*wsClient]struct{}
+	mu                    sync.RWMutex
+	clients               map[*wsClient]struct{}
+	chatSessionSubs       map[string]map[*wsClient]struct{}
+	chatSessionEventCache map[string][][]byte
 }
 
 type wsClient struct {
@@ -58,7 +64,9 @@ func NewHub() *Hub {
 				return true
 			},
 		},
-		clients: make(map[*wsClient]struct{}),
+		clients:               make(map[*wsClient]struct{}),
+		chatSessionSubs:       make(map[string]map[*wsClient]struct{}),
+		chatSessionEventCache: make(map[string][][]byte),
 	}
 }
 
@@ -91,6 +99,15 @@ func (h *Hub) unregister(client *wsClient) {
 	h.mu.Lock()
 	if _, ok := h.clients[client]; ok {
 		delete(h.clients, client)
+		for sessionID, subscribers := range h.chatSessionSubs {
+			if _, subscribed := subscribers[client]; !subscribed {
+				continue
+			}
+			delete(subscribers, client)
+			if len(subscribers) == 0 {
+				delete(h.chatSessionSubs, sessionID)
+			}
+		}
 		close(client.send)
 	}
 	h.mu.Unlock()
@@ -105,6 +122,29 @@ func (h *Hub) ConnectionCount() int {
 func (h *Hub) Broadcast(msg WSMessage) {
 	payload, err := json.Marshal(msg)
 	if err != nil {
+		return
+	}
+
+	if isChatSessionEventType(msg.Type) {
+		sessionID := resolveSessionIDFromMessage(msg)
+		if sessionID == "" {
+			return
+		}
+
+		h.mu.Lock()
+		subscribers := h.chatSessionSubs[sessionID]
+		if len(subscribers) == 0 {
+			h.appendChatSessionEventCacheLocked(sessionID, payload)
+			h.mu.Unlock()
+			return
+		}
+		for client := range subscribers {
+			select {
+			case client.send <- payload:
+			default:
+			}
+		}
+		h.mu.Unlock()
 		return
 	}
 
@@ -157,12 +197,17 @@ func (h *Hub) BroadcastCoreEvent(evt core.Event) {
 	if issueID == "" && evt.Data != nil {
 		issueID = strings.TrimSpace(evt.Data["issue_id"])
 	}
+	sessionID := ""
+	if evt.Data != nil {
+		sessionID = strings.TrimSpace(evt.Data["session_id"])
+	}
 
 	h.Broadcast(WSMessage{
 		Type:       string(evt.Type),
 		PipelineID: evt.PipelineID,
 		ProjectID:  evt.ProjectID,
 		IssueID:    issueID,
+		SessionID:  sessionID,
 		Data:       data,
 	})
 }
@@ -257,6 +302,23 @@ func (c *wsClient) handleClientMessage(msg wsClientMessage) {
 		delete(c.issueSubs, id)
 		c.subMu.Unlock()
 		c.sendJSON(WSMessage{Type: "unsubscribed", IssueID: id})
+	case "subscribe_chat_session":
+		id := strings.TrimSpace(msg.SessionID)
+		if id == "" {
+			c.sendError("session_id is required")
+			return
+		}
+		c.hub.subscribeChatSession(c, id)
+		c.sendJSON(WSMessage{Type: "subscribed", SessionID: id})
+		c.hub.replayChatSessionEventCache(c, id)
+	case "unsubscribe_chat_session":
+		id := strings.TrimSpace(msg.SessionID)
+		if id == "" {
+			c.sendError("session_id is required")
+			return
+		}
+		c.hub.unsubscribeChatSession(c, id)
+		c.sendJSON(WSMessage{Type: "unsubscribed", SessionID: id})
 	default:
 		c.sendError("unsupported message type")
 	}
@@ -312,4 +374,123 @@ func (c *wsClient) sendJSON(msg WSMessage) {
 	case c.send <- payload:
 	default:
 	}
+}
+
+func (h *Hub) subscribeChatSession(client *wsClient, sessionID string) {
+	if h == nil || client == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, exists := h.clients[client]; !exists {
+		return
+	}
+	subscribers, ok := h.chatSessionSubs[id]
+	if !ok {
+		subscribers = make(map[*wsClient]struct{})
+		h.chatSessionSubs[id] = subscribers
+	}
+	subscribers[client] = struct{}{}
+}
+
+func (h *Hub) unsubscribeChatSession(client *wsClient, sessionID string) {
+	if h == nil || client == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	subscribers, ok := h.chatSessionSubs[id]
+	if !ok {
+		return
+	}
+	delete(subscribers, client)
+	if len(subscribers) == 0 {
+		delete(h.chatSessionSubs, id)
+	}
+}
+
+func (h *Hub) replayChatSessionEventCache(client *wsClient, sessionID string) {
+	if h == nil || client == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, exists := h.clients[client]; !exists {
+		return
+	}
+	cachedPayloads, ok := h.chatSessionEventCache[id]
+	if !ok || len(cachedPayloads) == 0 {
+		return
+	}
+	for _, payload := range cachedPayloads {
+		select {
+		case client.send <- payload:
+		default:
+		}
+	}
+	delete(h.chatSessionEventCache, id)
+}
+
+func (h *Hub) appendChatSessionEventCacheLocked(sessionID string, payload []byte) {
+	if h == nil {
+		return
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" || len(payload) == 0 {
+		return
+	}
+	cached := h.chatSessionEventCache[id]
+	payloadCopy := append([]byte(nil), payload...)
+	if len(cached) >= maxBufferedChatSessionEvents {
+		cached = append(cached[1:], payloadCopy)
+		h.chatSessionEventCache[id] = cached
+		return
+	}
+	h.chatSessionEventCache[id] = append(cached, payloadCopy)
+}
+
+func isChatSessionEventType(eventType string) bool {
+	switch core.EventType(strings.TrimSpace(eventType)) {
+	case core.EventChatRunStarted,
+		core.EventChatRunUpdate,
+		core.EventChatRunCompleted,
+		core.EventChatRunFailed,
+		core.EventChatRunCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveSessionIDFromMessage(msg WSMessage) string {
+	if id := strings.TrimSpace(msg.SessionID); id != "" {
+		return id
+	}
+	if msg.Data == nil {
+		return ""
+	}
+	raw, ok := msg.Data["session_id"]
+	if !ok {
+		return ""
+	}
+	sessionID, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(sessionID)
 }

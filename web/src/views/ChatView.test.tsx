@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatView from "./ChatView";
+import { ApiError } from "../lib/apiClient";
 import type { ApiClient } from "../lib/apiClient";
 import type { WsClient } from "../lib/wsClient";
 import type { ApiTaskPlan } from "../types/api";
@@ -153,9 +154,13 @@ const createMockApiClient = (): ApiClient => {
 const createMockWsHarness = (): {
   wsClient: WsClient;
   emit: (envelope: WsEnvelope<Record<string, unknown>>) => void;
+  emitStatus: (status: "idle" | "connecting" | "open" | "closed") => void;
 } => {
   let wildcardHandler:
     | ((payload: WsEnvelope<Record<string, unknown>>) => void)
+    | null = null;
+  let statusHandler:
+    | ((status: "idle" | "connecting" | "open" | "closed") => void)
     | null = null;
 
   const wsClient = {
@@ -172,7 +177,14 @@ const createMockWsHarness = (): {
         }
       };
     }),
-    onStatusChange: vi.fn().mockReturnValue(() => {}),
+    onStatusChange: vi.fn().mockImplementation((handler) => {
+      statusHandler = handler as (status: "idle" | "connecting" | "open" | "closed") => void;
+      return () => {
+        if (statusHandler === handler) {
+          statusHandler = null;
+        }
+      };
+    }),
     getStatus: vi.fn().mockReturnValue("open"),
   } as unknown as WsClient;
 
@@ -180,6 +192,9 @@ const createMockWsHarness = (): {
     wsClient,
     emit: (envelope) => {
       wildcardHandler?.(envelope);
+    },
+    emitStatus: (status) => {
+      statusHandler?.(status);
     },
   };
 };
@@ -354,6 +369,193 @@ describe("ChatView", () => {
       expect(screen.getByText("应出现")).toBeTruthy();
     });
     expect(screen.queryByText("不应出现")).toBeNull();
+  });
+
+  it("创建会话后会发送 subscribe_chat_session，并在切换会话时先退订旧会话", async () => {
+    const apiClient = createMockApiClient();
+    const wsHarness = createMockWsHarness();
+
+    render(<ChatView apiClient={apiClient} wsClient={wsHarness.wsClient} projectId="proj-1" />);
+
+    fireEvent.change(screen.getByLabelText("新消息"), {
+      target: { value: "请创建会话" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送并创建会话" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Session ID: chat-1")).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(wsHarness.wsClient.send).toHaveBeenCalledWith({
+        type: "subscribe_chat_session",
+        session_id: "chat-1",
+      });
+    });
+
+    wsHarness.emit({
+      type: "chat_run_completed",
+      project_id: "proj-1",
+      data: { session_id: "chat-1" },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "chat-2" }));
+    await waitFor(() => {
+      expect(wsHarness.wsClient.send).toHaveBeenCalledWith({
+        type: "unsubscribe_chat_session",
+        session_id: "chat-1",
+      });
+      expect(wsHarness.wsClient.send).toHaveBeenCalledWith({
+        type: "subscribe_chat_session",
+        session_id: "chat-2",
+      });
+    });
+  });
+
+  it("WS 重连后会自动补发当前会话的 subscribe_chat_session", async () => {
+    const apiClient = createMockApiClient();
+    const wsHarness = createMockWsHarness();
+
+    render(<ChatView apiClient={apiClient} wsClient={wsHarness.wsClient} projectId="proj-1" />);
+
+    fireEvent.change(screen.getByLabelText("新消息"), {
+      target: { value: "请创建会话" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送并创建会话" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Session ID: chat-1")).toBeTruthy();
+    });
+
+    const sendMock = wsHarness.wsClient.send as unknown as { mockClear: () => void };
+    sendMock.mockClear();
+    wsHarness.emitStatus("open");
+
+    await waitFor(() => {
+      expect(wsHarness.wsClient.send).toHaveBeenCalledWith({
+        type: "subscribe_chat_session",
+        session_id: "chat-1",
+      });
+    });
+  });
+
+  it("收到同会话 started 且本端未发起时，显示跨端运行提示", async () => {
+    const apiClient = createMockApiClient();
+    const wsHarness = createMockWsHarness();
+
+    render(<ChatView apiClient={apiClient} wsClient={wsHarness.wsClient} projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "chat-1" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "chat-1" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Session ID: chat-1")).toBeTruthy();
+    });
+
+    wsHarness.emit({
+      type: "chat_run_started",
+      project_id: "proj-1",
+      data: { session_id: "chat-1" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("当前会话正在其他终端运行，界面已进入同步监听。")).toBeTruthy();
+    });
+
+    wsHarness.emit({
+      type: "chat_run_completed",
+      project_id: "proj-1",
+      data: { session_id: "chat-1" },
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText("当前会话正在其他终端运行，界面已进入同步监听。"),
+      ).toBeNull();
+    });
+  });
+
+  it("跨端运行同步时按钮显示同步中且不可取消", async () => {
+    const apiClient = createMockApiClient();
+    const wsHarness = createMockWsHarness();
+
+    render(<ChatView apiClient={apiClient} wsClient={wsHarness.wsClient} projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "chat-1" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "chat-1" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Session ID: chat-1")).toBeTruthy();
+    });
+
+    wsHarness.emit({
+      type: "chat_run_started",
+      project_id: "proj-1",
+      data: { session_id: "chat-1" },
+    });
+
+    const syncButton = await screen.findByRole("button", { name: "同步中" });
+    expect(syncButton.getAttribute("disabled")).not.toBeNull();
+    fireEvent.click(syncButton);
+    expect(apiClient.cancelChat).not.toHaveBeenCalled();
+
+    wsHarness.emit({
+      type: "chat_run_completed",
+      project_id: "proj-1",
+      data: { session_id: "chat-1" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    });
+  });
+
+  it("createChat 返回 409 busy 时会自动刷新会话与运行事件", async () => {
+    const apiClient = createMockApiClient();
+    (apiClient.createChat as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError(409, "chat session is already running", {
+        code: "CHAT_SESSION_BUSY",
+      }),
+    );
+    const wsHarness = createMockWsHarness();
+
+    render(<ChatView apiClient={apiClient} wsClient={wsHarness.wsClient} projectId="proj-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "chat-1" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "chat-1" }));
+    await waitFor(() => {
+      expect(screen.getByText("Session ID: chat-1")).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText("新消息"), {
+      target: { value: "继续执行" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(apiClient.createChat).toHaveBeenCalledWith("proj-1", {
+        message: "继续执行",
+        session_id: "chat-1",
+      });
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByText("该会话正在其他终端运行，已自动同步最新状态。"),
+      ).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(apiClient.getChat).toHaveBeenCalledWith("proj-1", "chat-1");
+      expect(apiClient.listChatRunEvents).toHaveBeenCalledWith("proj-1", "chat-1");
+      expect(apiClient.listChats).toHaveBeenCalledWith("proj-1");
+    });
   });
 
   it("忽略 started 之前或早于 started 时间戳的增量，避免串入上一轮内容", async () => {

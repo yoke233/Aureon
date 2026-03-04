@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiClient } from "../lib/apiClient";
+import { ApiError, type ApiClient } from "../lib/apiClient";
 import type { ChatMessage } from "../types/workflow";
 import type { ChatRunEvent } from "../types/api";
 import type { WsClient } from "../lib/wsClient";
@@ -40,6 +40,8 @@ interface RunEventItem {
 }
 
 const MAX_RUN_EVENTS = 60;
+const CROSS_TERMINAL_RUN_NOTICE = "当前会话正在其他终端运行，界面已进入同步监听。";
+const CHAT_SESSION_BUSY_NOTICE = "该会话正在其他终端运行，已自动同步最新状态。";
 
 const CHAT_RUN_EVENT_TYPES = new Set<ChatEventType>([
   "chat_run_started",
@@ -415,6 +417,7 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
   const [planFromFilesLoading, setPlanFromFilesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [planNotice, setPlanNotice] = useState<string | null>(null);
+  const [crossTerminalRunNotice, setCrossTerminalRunNotice] = useState<string | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
   const [chatsLoading, setChatsLoading] = useState(false);
   const [chatsError, setChatsError] = useState<string | null>(null);
@@ -425,6 +428,7 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
   const chatListRequestIdRef = useRef(0);
   const runEventsRequestIdRef = useRef(0);
   const activeRunStartedAtRef = useRef(0);
+  const localRunStartPendingRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -440,6 +444,7 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     setIsStreaming(false);
     setError(null);
     setPlanNotice(null);
+    setCrossTerminalRunNotice(null);
     setChatSessions([]);
     setChatsLoading(false);
     setChatsError(null);
@@ -451,9 +456,13 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     chatListRequestIdRef.current += 1;
     runEventsRequestIdRef.current += 1;
     activeRunStartedAtRef.current = 0;
+    localRunStartPendingRef.current = false;
   }, [projectId]);
 
-  const canSubmit = chatLoading ? !!sessionId && !chatCancelling : draft.trim().length > 0;
+  const syncingFromOtherTerminal = chatLoading && !!crossTerminalRunNotice;
+  const canSubmit = chatLoading
+    ? !!sessionId && !chatCancelling && !syncingFromOtherTerminal
+    : draft.trim().length > 0;
   const filePaths = useMemo(() => parseFilePathsDraft(filePathsDraft), [filePathsDraft]);
   const canCreatePlanFromFiles =
     !!sessionId && filePaths.length > 0 && !planFromFilesLoading && !chatLoading;
@@ -590,8 +599,10 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     setIsStreaming(false);
     setStreamingText("");
     activeRunStartedAtRef.current = 0;
+    localRunStartPendingRef.current = true;
     setError(null);
     setPlanNotice(null);
+    setCrossTerminalRunNotice(null);
     const requestId = chatRequestIdRef.current + 1;
     chatRequestIdRef.current = requestId;
     const targetProjectId = projectId;
@@ -626,10 +637,23 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
       if (chatRequestIdRef.current !== requestId) {
         return;
       }
+      localRunStartPendingRef.current = false;
       setChatLoading(false);
       setChatCancelling(false);
       setIsStreaming(false);
       setStreamingText("");
+      if (requestError instanceof ApiError && requestError.status === 409) {
+        setError(CHAT_SESSION_BUSY_NOTICE);
+        if (currentSessionId) {
+          const normalizedSessionID = currentSessionId.trim();
+          if (normalizedSessionID) {
+            void refreshSession(targetProjectId, normalizedSessionID);
+            void refreshChatRunEvents(targetProjectId, normalizedSessionID);
+            void refreshChatSessions(targetProjectId);
+          }
+        }
+        return;
+      }
       setError(getErrorMessage(requestError));
     }
   };
@@ -720,16 +744,79 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     setChatLoading(false);
     setChatCancelling(false);
     setPlanNotice(null);
+    setCrossTerminalRunNotice(null);
     setError(null);
     setRunEvents([]);
+    localRunStartPendingRef.current = false;
     await refreshSession(projectId, normalizedSessionID);
     await refreshChatRunEvents(projectId, normalizedSessionID);
   };
 
   const targetSessionIdRef = useRef<string | null>(sessionId);
+  const subscribedSessionIdRef = useRef<string | null>(null);
   useEffect(() => {
     targetSessionIdRef.current = sessionId;
   }, [sessionId]);
+
+  const sendChatSessionSubscription = useCallback(
+    (type: "subscribe_chat_session" | "unsubscribe_chat_session", rawSessionId: string | null) => {
+      const normalizedSessionID = (rawSessionId ?? "").trim();
+      if (!normalizedSessionID) {
+        return;
+      }
+      try {
+        wsClient.send({
+          type,
+          session_id: normalizedSessionID,
+        });
+      } catch {
+        // 连接未就绪时忽略，重连后会由 onStatusChange 触发补订阅。
+      }
+    },
+    [wsClient],
+  );
+
+  useEffect(() => {
+    const nextSessionID = (sessionId ?? "").trim();
+    const previousSessionID = subscribedSessionIdRef.current;
+
+    if (previousSessionID && previousSessionID !== nextSessionID) {
+      sendChatSessionSubscription("unsubscribe_chat_session", previousSessionID);
+    }
+    if (nextSessionID && previousSessionID !== nextSessionID) {
+      sendChatSessionSubscription("subscribe_chat_session", nextSessionID);
+    }
+
+    subscribedSessionIdRef.current = nextSessionID || null;
+  }, [sessionId, sendChatSessionSubscription]);
+
+  useEffect(() => {
+    const unsubscribeStatus = wsClient.onStatusChange((status) => {
+      if (status !== "open") {
+        return;
+      }
+      const activeSessionID = targetSessionIdRef.current;
+      if (!activeSessionID) {
+        return;
+      }
+      sendChatSessionSubscription("subscribe_chat_session", activeSessionID);
+      subscribedSessionIdRef.current = activeSessionID;
+    });
+    return () => {
+      unsubscribeStatus();
+    };
+  }, [sendChatSessionSubscription, wsClient]);
+
+  useEffect(() => {
+    return () => {
+      const activeSessionID = subscribedSessionIdRef.current;
+      if (!activeSessionID) {
+        return;
+      }
+      sendChatSessionSubscription("unsubscribe_chat_session", activeSessionID);
+      subscribedSessionIdRef.current = null;
+    };
+  }, [sendChatSessionSubscription]);
 
   useEffect(() => {
     void refreshChatSessions(projectId);
@@ -761,12 +848,17 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
 
       switch (envelope.type as ChatEventType) {
         case "chat_run_started": {
+          const startedByCurrentTerminal = localRunStartPendingRef.current;
+          localRunStartPendingRef.current = false;
           activeRunStartedAtRef.current = toEventTimestampMs(data.timestamp) || Date.now();
           setChatLoading(true);
           setChatCancelling(false);
           setIsStreaming(true);
           setStreamingText("");
           setError(null);
+          setCrossTerminalRunNotice(
+            startedByCurrentTerminal ? null : CROSS_TERMINAL_RUN_NOTICE,
+          );
           pushRunEvent(wsSessionID, "chat_run_started", "运行已开始");
           break;
         }
@@ -788,11 +880,13 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
           break;
         }
         case "chat_run_completed": {
+          localRunStartPendingRef.current = false;
           activeRunStartedAtRef.current = 0;
           setChatLoading(false);
           setChatCancelling(false);
           setIsStreaming(false);
           setStreamingText("");
+          setCrossTerminalRunNotice(null);
           pushRunEvent(wsSessionID, "chat_run_completed", "运行完成");
           void refreshSession(projectId, wsSessionID);
           void refreshChatRunEvents(projectId, wsSessionID);
@@ -800,11 +894,13 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
           break;
         }
         case "chat_run_cancelled": {
+          localRunStartPendingRef.current = false;
           activeRunStartedAtRef.current = 0;
           setChatLoading(false);
           setChatCancelling(false);
           setIsStreaming(false);
           setStreamingText("");
+          setCrossTerminalRunNotice(null);
           setError("当前请求已取消");
           pushRunEvent(wsSessionID, "chat_run_cancelled", "运行已取消");
           void refreshChatRunEvents(projectId, wsSessionID);
@@ -812,11 +908,13 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
           break;
         }
         case "chat_run_failed": {
+          localRunStartPendingRef.current = false;
           activeRunStartedAtRef.current = 0;
           setChatLoading(false);
           setChatCancelling(false);
           setIsStreaming(false);
           setStreamingText("");
+          setCrossTerminalRunNotice(null);
           const reason = toStringValue(data.error);
           setError(reason || "chat 执行失败");
           pushRunEvent(wsSessionID, "chat_run_failed", reason || "chat 执行失败");
@@ -844,7 +942,13 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     });
   }, [sortedMessages, streamingText]);
 
-  const submitButtonLabel = chatLoading ? "停止" : sessionId ? "发送" : "发送并创建会话";
+  const submitButtonLabel = chatLoading
+    ? syncingFromOtherTerminal
+      ? "同步中"
+      : "停止"
+    : sessionId
+      ? "发送"
+      : "发送并创建会话";
   const visibleRunEvents = useMemo(() => {
     if (!sessionId) {
       return runEvents.slice(-20);
@@ -966,6 +1070,9 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
               disabled={!canSubmit}
               onClick={() => {
                 if (chatLoading) {
+                  if (syncingFromOtherTerminal) {
+                    return;
+                  }
                   void handleCancelChat();
                   return;
                 }
@@ -1081,6 +1188,11 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
         {planNotice ? (
           <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {planNotice}
+          </p>
+        ) : null}
+        {crossTerminalRunNotice ? (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {crossTerminalRunNotice}
           </p>
         ) : null}
         {error ? (

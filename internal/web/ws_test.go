@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -330,6 +332,336 @@ func TestWSBroadcastCoreEventParsesACPUpdateJSON(t *testing.T) {
 	}
 }
 
+func TestWSChatSessionSubscriptionRoutesChatEventsBySessionID(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	connA, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client A: %v", err)
+	}
+	defer connA.Close()
+
+	connB, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client B: %v", err)
+	}
+	defer connB.Close()
+
+	if !waitForConnections(hub, 2, time.Second) {
+		t.Fatal("ws connections did not register in hub")
+	}
+
+	if err := connA.WriteJSON(map[string]string{
+		"type":       "subscribe_chat_session",
+		"session_id": "chat-1",
+	}); err != nil {
+		t.Fatalf("write subscribe_chat_session message: %v", err)
+	}
+
+	ack := readWSMessage(t, connA, 2*time.Second)
+	if ack.Type != "subscribed" {
+		t.Fatalf("expected subscribed ack, got %+v", ack)
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunStarted,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-1",
+		},
+	})
+
+	gotA := readWSMessage(t, connA, 2*time.Second)
+	if gotA.Type != string(core.EventChatRunStarted) {
+		t.Fatalf("expected chat_run_started for subscribed client, got %+v", gotA)
+	}
+	if gotA.Data["session_id"] != "chat-1" {
+		t.Fatalf("expected session_id=chat-1, got %+v", gotA.Data)
+	}
+
+	assertNoWSMessage(t, connB, 200*time.Millisecond)
+
+	if err := connA.WriteJSON(map[string]string{
+		"type":       "unsubscribe_chat_session",
+		"session_id": "chat-1",
+	}); err != nil {
+		t.Fatalf("write unsubscribe_chat_session message: %v", err)
+	}
+	unsubAck := readWSMessage(t, connA, 2*time.Second)
+	if unsubAck.Type != "unsubscribed" {
+		t.Fatalf("expected unsubscribed ack, got %+v", unsubAck)
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunUpdate,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-1",
+		},
+	})
+
+	assertNoWSMessage(t, connA, 200*time.Millisecond)
+	assertNoWSMessage(t, connB, 200*time.Millisecond)
+}
+
+func TestWSChatSessionSubscriptionCleansUpOnDisconnect(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	connA, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client A: %v", err)
+	}
+
+	connB, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client B: %v", err)
+	}
+	defer connB.Close()
+
+	if !waitForConnections(hub, 2, time.Second) {
+		t.Fatal("ws connections did not register in hub")
+	}
+
+	if err := connA.WriteJSON(map[string]string{
+		"type":       "subscribe_chat_session",
+		"session_id": "chat-1",
+	}); err != nil {
+		t.Fatalf("write subscribe_chat_session message: %v", err)
+	}
+	ack := readWSMessage(t, connA, 2*time.Second)
+	if ack.Type != "subscribed" {
+		t.Fatalf("expected subscribed ack, got %+v", ack)
+	}
+
+	hub.mu.RLock()
+	_, exists := hub.chatSessionSubs["chat-1"]
+	hub.mu.RUnlock()
+	if !exists {
+		t.Fatal("expected chat-1 subscribers to exist before disconnect")
+	}
+
+	if err := connA.Close(); err != nil {
+		t.Fatalf("close ws client A: %v", err)
+	}
+
+	if !waitForConnections(hub, 1, time.Second) {
+		t.Fatal("ws connection A did not unregister from hub")
+	}
+	if !waitForNoChatSessionSubscribers(hub, "chat-1", time.Second) {
+		t.Fatal("chat-1 subscribers were not cleaned after disconnect")
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunStarted,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-1",
+		},
+	})
+	assertNoWSMessage(t, connB, 200*time.Millisecond)
+}
+
+func TestWSChatSessionSubscriptionBroadcastsToMultipleSubscribers(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	connA, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client A: %v", err)
+	}
+	defer connA.Close()
+
+	connB, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client B: %v", err)
+	}
+	defer connB.Close()
+
+	connC, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client C: %v", err)
+	}
+	defer connC.Close()
+
+	if !waitForConnections(hub, 3, time.Second) {
+		t.Fatal("ws connections did not register in hub")
+	}
+
+	if err := connA.WriteJSON(map[string]string{
+		"type":       "subscribe_chat_session",
+		"session_id": "chat-1",
+	}); err != nil {
+		t.Fatalf("client A subscribe chat-1: %v", err)
+	}
+	if err := connB.WriteJSON(map[string]string{
+		"type":       "subscribe_chat_session",
+		"session_id": "chat-1",
+	}); err != nil {
+		t.Fatalf("client B subscribe chat-1: %v", err)
+	}
+	if err := connC.WriteJSON(map[string]string{
+		"type":       "subscribe_chat_session",
+		"session_id": "chat-2",
+	}); err != nil {
+		t.Fatalf("client C subscribe chat-2: %v", err)
+	}
+
+	if ack := readWSMessage(t, connA, 2*time.Second); ack.Type != "subscribed" || ack.SessionID != "chat-1" {
+		t.Fatalf("unexpected client A subscribe ack: %+v", ack)
+	}
+	if ack := readWSMessage(t, connB, 2*time.Second); ack.Type != "subscribed" || ack.SessionID != "chat-1" {
+		t.Fatalf("unexpected client B subscribe ack: %+v", ack)
+	}
+	if ack := readWSMessage(t, connC, 2*time.Second); ack.Type != "subscribed" || ack.SessionID != "chat-2" {
+		t.Fatalf("unexpected client C subscribe ack: %+v", ack)
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunStarted,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-1",
+		},
+	})
+
+	startA := readWSMessage(t, connA, 2*time.Second)
+	if startA.Type != string(core.EventChatRunStarted) || startA.Data["session_id"] != "chat-1" {
+		t.Fatalf("unexpected client A started event: %+v", startA)
+	}
+	startB := readWSMessage(t, connB, 2*time.Second)
+	if startB.Type != string(core.EventChatRunStarted) || startB.Data["session_id"] != "chat-1" {
+		t.Fatalf("unexpected client B started event: %+v", startB)
+	}
+	assertNoWSMessage(t, connC, 200*time.Millisecond)
+
+	if err := connB.WriteJSON(map[string]string{
+		"type":       "unsubscribe_chat_session",
+		"session_id": "chat-1",
+	}); err != nil {
+		t.Fatalf("client B unsubscribe chat-1: %v", err)
+	}
+	if ack := readWSMessage(t, connB, 2*time.Second); ack.Type != "unsubscribed" || ack.SessionID != "chat-1" {
+		t.Fatalf("unexpected client B unsubscribe ack: %+v", ack)
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunCompleted,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-1",
+		},
+	})
+
+	completedA := readWSMessage(t, connA, 2*time.Second)
+	if completedA.Type != string(core.EventChatRunCompleted) || completedA.Data["session_id"] != "chat-1" {
+		t.Fatalf("unexpected client A completed event: %+v", completedA)
+	}
+	assertNoWSMessage(t, connB, 200*time.Millisecond)
+	assertNoWSMessage(t, connC, 200*time.Millisecond)
+}
+
+func TestWSChatSessionSubscriptionReplaysCachedEventsForLateSubscriber(t *testing.T) {
+	hub := NewHub()
+	srv := NewServer(Config{Hub: hub})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws client: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitForConnections(hub, 1, time.Second) {
+		t.Fatal("ws connection did not register in hub")
+	}
+
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunStarted,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-late",
+		},
+	})
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunUpdate,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-late",
+		},
+	})
+	hub.BroadcastCoreEvent(core.Event{
+		Type:      core.EventChatRunCompleted,
+		ProjectID: "proj-1",
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"session_id": "chat-late",
+		},
+	})
+
+	hub.mu.RLock()
+	cachedCount := len(hub.chatSessionEventCache["chat-late"])
+	hub.mu.RUnlock()
+	if cachedCount != 3 {
+		t.Fatalf("expected 3 cached events before subscribe, got %d", cachedCount)
+	}
+
+	if err := conn.WriteJSON(map[string]string{
+		"type":       "subscribe_chat_session",
+		"session_id": "chat-late",
+	}); err != nil {
+		t.Fatalf("subscribe chat-late: %v", err)
+	}
+
+	ack := readWSMessage(t, conn, 2*time.Second)
+	if ack.Type != "subscribed" || ack.SessionID != "chat-late" {
+		t.Fatalf("unexpected subscribe ack: %+v", ack)
+	}
+
+	started := readWSMessage(t, conn, 2*time.Second)
+	if started.Type != string(core.EventChatRunStarted) {
+		t.Fatalf("expected started replay event, got %+v", started)
+	}
+	if started.Data["session_id"] != "chat-late" {
+		t.Fatalf("expected started replay session_id=chat-late, got %+v", started.Data)
+	}
+
+	updated := readWSMessage(t, conn, 2*time.Second)
+	if updated.Type != string(core.EventChatRunUpdate) {
+		t.Fatalf("expected update replay event, got %+v", updated)
+	}
+	if updated.Data["session_id"] != "chat-late" {
+		t.Fatalf("expected update replay session_id=chat-late, got %+v", updated.Data)
+	}
+
+	completed := readWSMessage(t, conn, 2*time.Second)
+	if completed.Type != string(core.EventChatRunCompleted) {
+		t.Fatalf("expected completed replay event, got %+v", completed)
+	}
+	if completed.Data["session_id"] != "chat-late" {
+		t.Fatalf("expected completed replay session_id=chat-late, got %+v", completed.Data)
+	}
+}
+
 func waitForConnections(hub *Hub, want int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -339,6 +671,24 @@ func waitForConnections(hub *Hub, want int, timeout time.Duration) bool {
 		time.Sleep(10 * time.Millisecond)
 	}
 	return hub.ConnectionCount() == want
+}
+
+func waitForNoChatSessionSubscribers(hub *Hub, sessionID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	id := strings.TrimSpace(sessionID)
+	for time.Now().Before(deadline) {
+		hub.mu.RLock()
+		subscribers := hub.chatSessionSubs[id]
+		subscriberCount := len(subscribers)
+		hub.mu.RUnlock()
+		if subscriberCount == 0 {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	hub.mu.RLock()
+	defer hub.mu.RUnlock()
+	return len(hub.chatSessionSubs[id]) == 0
 }
 
 func readWSMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration) WSMessage {
@@ -355,4 +705,18 @@ func readWSMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration) WS
 		t.Fatalf("unmarshal ws message: %v, payload=%s", err, string(payload))
 	}
 	return msg
+}
+
+func assertNoWSMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration) {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	_, _, err := conn.ReadMessage()
+	if err == nil {
+		t.Fatalf("expected no ws message within %s, but received one", timeout)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return
+	}
+	t.Fatalf("expected read timeout, got err=%v", err)
 }

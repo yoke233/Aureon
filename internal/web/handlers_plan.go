@@ -176,13 +176,6 @@ func registerIssueRoutes(r chi.Router, store core.Store, issueManager IssueManag
 	}
 
 	registerResourceRoutes("/projects/{projectID}/issues")
-	// Backward-compatible aliases during cutover.
-	registerResourceRoutes("/projects/{projectID}/plans")
-}
-
-// registerPlanRoutes is kept as a compatibility alias for existing call sites.
-func registerPlanRoutes(r chi.Router, store core.Store, issueManager IssueManager, issueParserRoleID string) {
-	registerIssueRoutes(r, store, issueManager, issueParserRoleID)
 }
 
 func (h *issueHandlers) createIssues(w http.ResponseWriter, r *http.Request) {

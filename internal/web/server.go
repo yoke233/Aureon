@@ -177,6 +177,12 @@ func NewServer(cfg Config) *Server {
 		registerAdminOpsRoutes(r, cfg.Store, cfg.BearerToken, webhookReplayer)
 		r.Get("/ws", hub.HandleWS)
 	})
+	r.Route("/api/v2", func(r chi.Router) {
+		if cfg.AuthEnabled {
+			r.Use(BearerAuthMiddleware(cfg.BearerToken))
+		}
+		registerV2Routes(r, cfg.Store, issueManager, issueParserRoleID, cfg.PipelineExec, cfg.PipelineStageRoles)
+	})
 	if frontendFS != nil {
 		spa := newSPAFallbackHandler(frontendFS)
 		r.NotFound(spa.ServeHTTP)

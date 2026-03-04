@@ -83,6 +83,8 @@ func runWithArgs(args []string) error {
 		}
 	case "server":
 		return cmdServer(args[1:])
+	case "mcp-serve":
+		return cmdMCPServe()
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -106,5 +108,6 @@ Usage:
   ai-flow scheduler once
   ai-flow github replay --delivery-id <id>
   ai-flow github validate
-  ai-flow server [--port <port>]`)
+  ai-flow server [--port <port>]
+  ai-flow mcp-serve                  (MCP server over stdio, requires AI_WORKFLOW_DB_PATH)`)
 }

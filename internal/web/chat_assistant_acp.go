@@ -51,6 +51,7 @@ type ACPChatAssistantDeps struct {
 	ClientFactory    ChatACPClientFactory
 	EventPublisher   ChatEventPublisher
 	RunEventRecorder teamleader.ChatRunEventRecorder
+	MCPEnv           teamleader.MCPEnvConfig
 }
 
 // ACPChatAssistant runs one-turn chat on ACP protocol.
@@ -148,6 +149,7 @@ func (a *ACPChatAssistant) Reply(ctx context.Context, req ChatAssistantRequest) 
 		role,
 		strings.TrimSpace(req.AgentSessionID),
 		launchCfg.WorkDir,
+		a.deps.MCPEnv,
 	)
 	if err != nil {
 		return ChatAssistantResponse{}, err
@@ -234,6 +236,7 @@ func startWebChatSession(
 	role acpclient.RoleProfile,
 	persistedSessionID string,
 	cwd string,
+	mcpEnv teamleader.MCPEnvConfig,
 ) (acpproto.SessionId, error) {
 	if client == nil {
 		return "", errors.New("chat acp client is required")
@@ -243,7 +246,7 @@ func startWebChatSession(
 		"role_id": roleID,
 	}
 	trimmedCWD := strings.TrimSpace(cwd)
-	effectiveMCPServers := teamleader.MCPToolsFromRoleConfig(role)
+	effectiveMCPServers := teamleader.MCPToolsFromRoleConfig(role, mcpEnv)
 	if sessionID := strings.TrimSpace(persistedSessionID); shouldLoadPersistedChatSession(role.SessionPolicy, sessionID) {
 		loaded, err := client.LoadSession(ctx, acpproto.LoadSessionRequest{
 			SessionId:  acpproto.SessionId(sessionID),

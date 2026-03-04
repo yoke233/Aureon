@@ -151,6 +151,7 @@ func NewServer(cfg Config) *Server {
 	r.Get("/health", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
 	registerA2ARoutes(r, cfg)
+	registerMCPRoutes(r, cfg)
 	webhookReplayer := registerWebhookRoutes(r, cfg.Store, cfg.RunExec, strings.TrimSpace(cfg.WebhookSecret), cfg.RunstageRoles, cfg.SCM)
 	if cfg.WebhookReplayer != nil {
 		webhookReplayer = cfg.WebhookReplayer

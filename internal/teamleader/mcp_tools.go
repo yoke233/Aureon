@@ -1,61 +1,67 @@
 package teamleader
 
 import (
+	"os"
 	"strings"
 
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/yoke233/ai-workflow/internal/acpclient"
 )
 
-const (
-	internalMCPServerCommand = "internal"
-	mcpToolEnvKey            = "AI_WORKFLOW_MCP_TOOL"
-)
-
-var supportedMCPQueryTools = map[string]struct{}{
-	"query_issues":        {},
-	"query_issue_detail":  {},
-	"query_Runs":          {},
-	"query_Run_logs":      {},
-	"query_project_stats": {},
+// MCPEnvConfig holds environment configuration for the MCP server.
+type MCPEnvConfig struct {
+	DBPath     string
+	DevMode    bool
+	SourceRoot string
+	ServerAddr string // e.g. "http://127.0.0.1:8080" — when set, prefer SSE over stdio
 }
 
-// MCPToolsFromRoleConfig maps role.mcp.tools to NewSessionRequest.MCPServers.
-func MCPToolsFromRoleConfig(role acpclient.RoleProfile) []acpproto.McpServer {
+// MCPToolsFromRoleConfig returns an McpServer config for the ACP session.
+// If ServerAddr is set, it returns an SSE transport pointing to the server's
+// /mcp endpoint (no subprocess). Otherwise it falls back to stdio subprocess.
+func MCPToolsFromRoleConfig(role acpclient.RoleProfile, mcpEnv MCPEnvConfig) []acpproto.McpServer {
 	if len(role.MCPTools) == 0 {
 		return nil
 	}
 
-	servers := make([]acpproto.McpServer, 0, len(role.MCPTools))
-	seen := make(map[string]struct{}, len(role.MCPTools))
-
-	for _, rawTool := range role.MCPTools {
-		tool := strings.TrimSpace(rawTool)
-		if tool == "" {
-			continue
-		}
-		if _, ok := supportedMCPQueryTools[tool]; !ok {
-			continue
-		}
-		if _, ok := seen[tool]; ok {
-			continue
-		}
-		seen[tool] = struct{}{}
-
-		servers = append(servers, acpproto.McpServer{
-			Stdio: &acpproto.McpServerStdio{
-				Name:    "workflow-query-" + tool,
-				Command: internalMCPServerCommand,
-				Args:    []string{},
-				Env: []acpproto.EnvVariable{
-					{Name: mcpToolEnvKey, Value: tool},
-				},
+	// SSE mode: connect to the running web server's MCP endpoint directly.
+	if addr := strings.TrimSpace(mcpEnv.ServerAddr); addr != "" {
+		url := strings.TrimRight(addr, "/") + "/mcp"
+		return []acpproto.McpServer{{
+			Sse: &acpproto.McpServerSseInline{
+				Name: "ai-workflow-query",
+				Type: "sse",
+				Url:  url,
 			},
-		})
+		}}
 	}
 
-	if len(servers) == 0 {
+	// Stdio fallback: spawn the current binary as mcp-serve subprocess.
+	if mcpEnv.DBPath == "" {
 		return nil
 	}
-	return servers
+	self, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+
+	env := []acpproto.EnvVariable{
+		{Name: "AI_WORKFLOW_DB_PATH", Value: mcpEnv.DBPath},
+	}
+	if mcpEnv.DevMode {
+		env = append(env,
+			acpproto.EnvVariable{Name: "AI_WORKFLOW_DEV_MODE", Value: "true"},
+			acpproto.EnvVariable{Name: "AI_WORKFLOW_SOURCE_ROOT", Value: mcpEnv.SourceRoot},
+			acpproto.EnvVariable{Name: "AI_WORKFLOW_SERVER_ADDR", Value: mcpEnv.ServerAddr},
+		)
+	}
+
+	return []acpproto.McpServer{{
+		Stdio: &acpproto.McpServerStdio{
+			Name:    "ai-workflow-query",
+			Command: self,
+			Args:    []string{"mcp-serve"},
+			Env:     env,
+		},
+	}}
 }

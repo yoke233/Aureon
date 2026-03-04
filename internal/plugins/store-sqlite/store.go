@@ -210,11 +210,19 @@ FROM runs WHERE id=?`
 }
 
 func (s *SQLiteStore) ListRuns(projectID string, filter core.RunFilter) ([]core.Run, error) {
-	query := `SELECT id, project_id, name, template, status, current_stage, COALESCE(issue_id, ''), created_at FROM runs WHERE project_id=?`
+	query := `SELECT id, project_id, name, template, status, COALESCE(conclusion, ''), current_stage, COALESCE(error_message, ''), COALESCE(issue_id, ''), created_at FROM runs WHERE project_id=?`
 	args := []any{projectID}
 	if filter.Status != "" {
 		query += ` AND status=?`
 		args = append(args, filter.Status)
+	}
+	if filter.Conclusion != "" {
+		query += ` AND conclusion=?`
+		args = append(args, filter.Conclusion)
+	}
+	if filter.IssueID != "" {
+		query += ` AND issue_id=?`
+		args = append(args, filter.IssueID)
 	}
 	query += ` ORDER BY created_at DESC`
 	if filter.Limit > 0 {
@@ -235,7 +243,7 @@ func (s *SQLiteStore) ListRuns(projectID string, filter core.RunFilter) ([]core.
 	var out []core.Run
 	for rows.Next() {
 		var p core.Run
-		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Name, &p.Template, &p.Status, &p.CurrentStage, &p.IssueID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.ProjectID, &p.Name, &p.Template, &p.Status, &p.Conclusion, &p.CurrentStage, &p.ErrorMessage, &p.IssueID, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

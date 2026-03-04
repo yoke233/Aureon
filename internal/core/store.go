@@ -5,9 +5,11 @@ type ProjectFilter struct {
 }
 
 type RunFilter struct {
-	Status RunStatus
-	Limit  int
-	Offset int
+	Status     RunStatus
+	Conclusion RunConclusion
+	IssueID    string
+	Limit      int
+	Offset     int
 }
 
 type IssueFilter struct {

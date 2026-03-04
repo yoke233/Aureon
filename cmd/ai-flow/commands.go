@@ -795,6 +795,10 @@ func runServer(ctx context.Context, args []string) error {
 		RoleResolver:     bootstrapSet.RoleResolver,
 		EventPublisher:   bus,
 		RunEventRecorder: runEventRecorder,
+		MCPEnv: teamleader.MCPEnvConfig{
+			DBPath:     expandStorePath(cfg.Store.Path),
+			ServerAddr: "http://" + listenAddr,
+		},
 	})
 	var merger teamleader.PRMerger
 	if cfg.GitHub.Enabled {
@@ -1048,6 +1052,15 @@ func (f *acpHandlerFactoryAdapter) SetPermissionPolicy(handler acpproto.Client, 
 	if h, ok := handler.(*teamleader.ACPHandler); ok {
 		h.SetPermissionPolicy(policy)
 	}
+}
+
+func expandStorePath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }
 
 // isTransientChunkEvent returns true for high-frequency streaming chunk events

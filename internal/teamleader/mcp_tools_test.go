@@ -1,51 +1,122 @@
 package teamleader
 
 import (
+	"os"
 	"testing"
 
 	"github.com/yoke233/ai-workflow/internal/acpclient"
 )
 
 func TestMCPToolsFromRoleConfig(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	role := acpclient.RoleProfile{
-		MCPTools: []string{
-			" query_issues ",
-			"query_issue_detail",
-			"query_Runs",
-			"query_Run_logs",
-			"query_project_stats",
-			"query_issues",
-			"unknown_tool",
-		},
+		MCPTools: []string{"query_issues", "query_project_stats"},
+	}
+	env := MCPEnvConfig{DBPath: "/tmp/test.db"}
+
+	got := MCPToolsFromRoleConfig(role, env)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 mcp server, got %d", len(got))
+	}
+	srv := got[0]
+	if srv.Stdio == nil {
+		t.Fatal("expected stdio server")
+	}
+	if srv.Stdio.Name != "ai-workflow-query" {
+		t.Fatalf("name = %q, want %q", srv.Stdio.Name, "ai-workflow-query")
+	}
+	if srv.Stdio.Command != self {
+		t.Fatalf("command = %q, want %q", srv.Stdio.Command, self)
+	}
+	if len(srv.Stdio.Args) != 1 || srv.Stdio.Args[0] != "mcp-serve" {
+		t.Fatalf("args = %v, want [mcp-serve]", srv.Stdio.Args)
+	}
+	// Check env
+	foundDB := false
+	for _, e := range srv.Stdio.Env {
+		if e.Name == "AI_WORKFLOW_DB_PATH" && e.Value == "/tmp/test.db" {
+			foundDB = true
+		}
+	}
+	if !foundDB {
+		t.Fatal("AI_WORKFLOW_DB_PATH not found in env")
+	}
+}
+
+func TestMCPToolsFromRoleConfig_EmptyTools(t *testing.T) {
+	role := acpclient.RoleProfile{MCPTools: nil}
+	got := MCPToolsFromRoleConfig(role, MCPEnvConfig{DBPath: "/tmp/test.db"})
+	if got != nil {
+		t.Fatalf("expected nil, got %v", got)
+	}
+}
+
+func TestMCPToolsFromRoleConfig_EmptyDBPath(t *testing.T) {
+	role := acpclient.RoleProfile{MCPTools: []string{"query_issues"}}
+	got := MCPToolsFromRoleConfig(role, MCPEnvConfig{})
+	if got != nil {
+		t.Fatalf("expected nil for empty DBPath, got %v", got)
+	}
+}
+
+func TestMCPToolsFromRoleConfig_SSEMode(t *testing.T) {
+	role := acpclient.RoleProfile{MCPTools: []string{"query_issues"}}
+	env := MCPEnvConfig{
+		DBPath:     "/tmp/test.db",
+		ServerAddr: "http://localhost:8080",
 	}
 
-	got := MCPToolsFromRoleConfig(role)
-	if len(got) != 5 {
-		t.Fatalf("expected 5 mcp servers, got %d", len(got))
+	got := MCPToolsFromRoleConfig(role, env)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(got))
+	}
+	srv := got[0]
+	if srv.Sse == nil {
+		t.Fatal("expected SSE config, got nil")
+	}
+	if srv.Sse.Name != "ai-workflow-query" {
+		t.Errorf("name = %q, want %q", srv.Sse.Name, "ai-workflow-query")
+	}
+	if srv.Sse.Url != "http://localhost:8080/mcp" {
+		t.Errorf("url = %q, want %q", srv.Sse.Url, "http://localhost:8080/mcp")
+	}
+	if srv.Stdio != nil {
+		t.Error("expected no stdio config in SSE mode")
+	}
+}
+
+func TestMCPToolsFromRoleConfig_DevMode(t *testing.T) {
+	role := acpclient.RoleProfile{MCPTools: []string{"query_issues"}}
+	env := MCPEnvConfig{
+		DBPath:     "/tmp/test.db",
+		DevMode:    true,
+		SourceRoot: "/src",
 	}
 
-	wantByName := map[string]string{
-		"workflow-query-query_issues":        "query_issues",
-		"workflow-query-query_issue_detail":  "query_issue_detail",
-		"workflow-query-query_Runs":          "query_Runs",
-		"workflow-query-query_Run_logs":      "query_Run_logs",
-		"workflow-query-query_project_stats": "query_project_stats",
+	got := MCPToolsFromRoleConfig(role, env)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(got))
 	}
-
-	for _, server := range got {
-		if server.Stdio == nil {
-			t.Fatalf("expected stdio server, got %#v", server)
-		}
-
-		wantTool, ok := wantByName[server.Stdio.Name]
-		if !ok {
-			t.Fatalf("unexpected server name: %q", server.Stdio.Name)
-		}
-		if server.Stdio.Command != "internal" {
-			t.Fatalf("server %q command = %q, want %q", server.Stdio.Name, server.Stdio.Command, "internal")
-		}
-		if len(server.Stdio.Env) != 1 || server.Stdio.Env[0].Name != "AI_WORKFLOW_MCP_TOOL" || server.Stdio.Env[0].Value != wantTool {
-			t.Fatalf("server %q env = %#v, want AI_WORKFLOW_MCP_TOOL=%q", server.Stdio.Name, server.Stdio.Env, wantTool)
+	if got[0].Stdio == nil {
+		t.Fatal("expected stdio config for dev mode without ServerAddr")
+	}
+	envVars := got[0].Stdio.Env
+	wantKeys := map[string]string{
+		"AI_WORKFLOW_DB_PATH":     "/tmp/test.db",
+		"AI_WORKFLOW_DEV_MODE":    "true",
+		"AI_WORKFLOW_SOURCE_ROOT": "/src",
+	}
+	found := map[string]string{}
+	for _, e := range envVars {
+		found[e.Name] = e.Value
+	}
+	for k, v := range wantKeys {
+		if found[k] != v {
+			t.Errorf("env %s = %q, want %q", k, found[k], v)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/yoke233/ai-workflow/internal/acpclient"
+	"github.com/yoke233/ai-workflow/internal/teamleader"
 )
 
 func TestShouldLoadPersistedChatSession(t *testing.T) {
@@ -70,6 +71,7 @@ func TestStartWebChatSessionSkipsLoadWhenReuseDisabled(t *testing.T) {
 		role,
 		"sid-old",
 		"D:/repo/demo",
+		teamleader.MCPEnvConfig{},
 	)
 	if err != nil {
 		t.Fatalf("startWebChatSession() error = %v", err)
@@ -104,6 +106,7 @@ func TestStartWebChatSessionSkipsLoadWhenPreferLoadDisabled(t *testing.T) {
 		role,
 		"sid-old",
 		"D:/repo/demo",
+		teamleader.MCPEnvConfig{},
 	)
 	if err != nil {
 		t.Fatalf("startWebChatSession() error = %v", err)

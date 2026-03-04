@@ -773,7 +773,7 @@ func runServer(ctx context.Context, args []string) error {
 		runEventRecorder = recorder
 	}
 	chatAssistant := web.NewACPChatAssistantWithDeps(web.ACPChatAssistantDeps{
-		DefaultRoleID:    strings.TrimSpace(cfg.RoleBinds.Secretary.Role),
+		DefaultRoleID:    resolveTeamLeaderRoleID(cfg.RoleBinds),
 		RoleResolver:     bootstrapSet.RoleResolver,
 		EventPublisher:   bus,
 		RunEventRecorder: runEventRecorder,
@@ -890,6 +890,10 @@ func cloneStringMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func resolveTeamLeaderRoleID(roleBindings config.RoleBindings) string {
+	return strings.TrimSpace(roleBindings.Secretary.Role)
 }
 
 func parseServerPort(args []string) (int, error) {

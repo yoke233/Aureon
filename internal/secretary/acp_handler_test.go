@@ -80,8 +80,8 @@ func TestHandleWriteFilePublishesChangedEvent(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(events))
 	}
-	if events[0].Type != core.EventSecretaryFilesChanged {
-		t.Fatalf("event type = %q, want %q", events[0].Type, core.EventSecretaryFilesChanged)
+	if events[0].Type != core.EventTeamLeaderFilesChanged {
+		t.Fatalf("event type = %q, want %q", events[0].Type, core.EventTeamLeaderFilesChanged)
 	}
 	if events[0].Data["session_id"] != "chat-1" {
 		t.Fatalf("event session_id = %q, want %q", events[0].Data["session_id"], "chat-1")
@@ -415,8 +415,8 @@ func TestHandleSessionUpdatePublishesMinimalData(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("published events = %d, want 1", len(events))
 	}
-	if events[0].Type != core.EventChatRunUpdate {
-		t.Fatalf("event type = %q, want %q", events[0].Type, core.EventChatRunUpdate)
+	if events[0].Type != core.EventRunUpdate {
+		t.Fatalf("event type = %q, want %q", events[0].Type, core.EventRunUpdate)
 	}
 
 	wantData := map[string]string{
@@ -465,7 +465,7 @@ func TestHandleSessionUpdatePersistsNonChunkEvent(t *testing.T) {
 	if events[0].SessionID != "chat-session-1" || events[0].ProjectID != "proj-1" {
 		t.Fatalf("unexpected persisted event identity: %#v", events[0])
 	}
-	if events[0].EventType != "chat_run_update" || events[0].UpdateType != "tool_call" {
+	if events[0].EventType != "run_update" || events[0].UpdateType != "tool_call" {
 		t.Fatalf("unexpected persisted event type fields: %#v", events[0])
 	}
 	if events[0].Payload == nil {

@@ -97,17 +97,24 @@ func TestLoadDefaults_UsesACPAgentProfiles(t *testing.T) {
 	}
 }
 
-func TestLoadDefaults_SecretaryRoleUsesClaude(t *testing.T) {
+func TestLoadDefaults_TeamLeaderRoleUsesClaude(t *testing.T) {
 	cfg := Defaults()
-	secretaryAgent := ""
+	teamLeaderAgent := ""
 	for _, role := range cfg.Roles {
-		if role.Name == "secretary" {
-			secretaryAgent = role.Agent
+		if role.Name == "team_leader" {
+			teamLeaderAgent = role.Agent
 			break
 		}
 	}
-	if secretaryAgent != "claude" {
-		t.Fatalf("expected secretary role bind to claude agent, got %q", secretaryAgent)
+	if teamLeaderAgent != "claude" {
+		t.Fatalf("expected team_leader role bind to claude agent, got %q", teamLeaderAgent)
+	}
+}
+
+func TestLoadDefaults_TeamLeaderRoleBindingDefault(t *testing.T) {
+	cfg := Defaults()
+	if got := cfg.RoleBinds.Secretary.Role; got != "team_leader" {
+		t.Fatalf("expected role_bindings.team_leader default to team_leader role, got %q", got)
 	}
 }
 
@@ -183,7 +190,7 @@ a2a:
 	}
 }
 
-func TestRoleDrivenConfigLoad(t *testing.T) {
+func TestRoleDrivenConfigLoadTeamLeaderBinding(t *testing.T) {
 	cfg := loadTestConfig(t, `
 agents:
   - name: claude
@@ -205,7 +212,7 @@ roles:
     session:
       reuse: true
 role_bindings:
-  secretary:
+  team_leader:
     role: worker
   pipeline:
     stage_roles:
@@ -226,6 +233,9 @@ role_bindings:
 	}
 	if got := cfg.RoleBinds.Pipeline.StageRoles["implement"]; got != "worker" {
 		t.Fatalf("expected stage role implement=worker, got %q", got)
+	}
+	if got := cfg.RoleBinds.Secretary.Role; got != "worker" {
+		t.Fatalf("expected role_bindings.team_leader.role=worker, got %q", got)
 	}
 }
 
@@ -279,8 +289,8 @@ role_bindings:
 
 	ApplyConfigLayer(&cfg, layer)
 
-	if got := cfg.RoleBinds.Secretary.Role; got != "secretary" {
-		t.Fatalf("expected secretary role binding kept, got %q", got)
+	if got := cfg.RoleBinds.Secretary.Role; got != "team_leader" {
+		t.Fatalf("expected team_leader role binding kept, got %q", got)
 	}
 	if got := cfg.RoleBinds.PlanParser.Role; got != "plan_parser" {
 		t.Fatalf("expected plan_parser role binding kept, got %q", got)
@@ -290,6 +300,18 @@ role_bindings:
 	}
 	if got := cfg.RoleBinds.Pipeline.StageRoles["implement"]; got != "reviewer" {
 		t.Fatalf("expected pipeline implement role overwritten to reviewer, got %q", got)
+	}
+}
+
+func TestRoleDrivenConfigLegacySecretaryBindingFailFast(t *testing.T) {
+	const raw = `
+role_bindings:
+  secretary:
+    role: worker
+`
+	layer, err := loadLayerFromBytes([]byte(raw))
+	if err == nil || layer != nil {
+		t.Fatalf("expected strict unknown-field error for legacy role_bindings.secretary, got layer=%v err=%v", layer, err)
 	}
 }
 

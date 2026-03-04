@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// IssueState represents whether the issue is open or closed in tracker terms.
+// IssueState represents tracker-facing open/closed state in V2.
 type IssueState string
 
 const (
@@ -15,7 +15,7 @@ const (
 	IssueStateClosed IssueState = "closed"
 )
 
-// IssueStatus represents internal issue lifecycle status.
+// IssueStatus represents orchestration progress for one issue.
 type IssueStatus string
 
 const (
@@ -30,6 +30,23 @@ const (
 	IssueStatusAbandoned  IssueStatus = "abandoned"
 )
 
+var validIssueStates = map[IssueState]struct{}{
+	IssueStateOpen:   {},
+	IssueStateClosed: {},
+}
+
+var validIssueStatuses = map[IssueStatus]struct{}{
+	IssueStatusDraft:      {},
+	IssueStatusReviewing:  {},
+	IssueStatusQueued:     {},
+	IssueStatusReady:      {},
+	IssueStatusExecuting:  {},
+	IssueStatusDone:       {},
+	IssueStatusFailed:     {},
+	IssueStatusSuperseded: {},
+	IssueStatusAbandoned:  {},
+}
+
 type FailurePolicy string
 
 const (
@@ -38,7 +55,10 @@ const (
 	FailHuman FailurePolicy = "human"
 )
 
-// Issue represents one persistent task/track item for execution.
+// Issue is the V2 requirement unit and single tracker-facing aggregate.
+//
+// NOTE: DependsOn/Blocks/PipelineID are retained as cutover fields during
+// transition away from task-plan runtime semantics.
 type Issue struct {
 	ID           string        `json:"id"`
 	ProjectID    string        `json:"project_id"`
@@ -65,6 +85,22 @@ type Issue struct {
 	ClosedAt     *time.Time    `json:"closed_at,omitempty"`
 }
 
+// Validate checks whether the issue state is supported.
+func (s IssueState) Validate() error {
+	if _, ok := validIssueStates[s]; !ok {
+		return fmt.Errorf("invalid issue state %q", s)
+	}
+	return nil
+}
+
+// Validate checks whether the issue status is supported.
+func (s IssueStatus) Validate() error {
+	if _, ok := validIssueStatuses[s]; !ok {
+		return fmt.Errorf("invalid issue status %q", s)
+	}
+	return nil
+}
+
 // NewIssueID generates an ID in format: issue-YYYYMMDD-xxxxxxxx.
 func NewIssueID() string {
 	return fmt.Sprintf("issue-%s-%s", time.Now().Format("20060102"), randomHex(4))
@@ -80,6 +116,16 @@ func (i Issue) Validate() error {
 	}
 	if strings.ContainsAny(i.Template, " \t\r\n") {
 		return errors.New("issue template must not contain spaces")
+	}
+	if i.State != "" {
+		if err := i.State.Validate(); err != nil {
+			return err
+		}
+	}
+	if i.Status != "" {
+		if err := i.Status.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

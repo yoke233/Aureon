@@ -413,7 +413,7 @@ func (h *ACPHandler) HandleSessionUpdate(_ context.Context, update acpclient.Ses
 		if err := recorder.AppendChatRunEvent(core.ChatRunEvent{
 			SessionID:  chatSessionID,
 			ProjectID:  projectID,
-			EventType:  string(core.EventChatRunUpdate),
+			EventType:  string(core.EventRunUpdate),
 			UpdateType: updateType,
 			Payload:    payload,
 			CreatedAt:  time.Now().UTC(),
@@ -424,7 +424,7 @@ func (h *ACPHandler) HandleSessionUpdate(_ context.Context, update acpclient.Ses
 
 	if h.publisher != nil {
 		h.publisher.Publish(core.Event{
-			Type:      core.EventChatRunUpdate,
+			Type:      core.EventRunUpdate,
 			ProjectID: projectID,
 			Data:      data,
 			Timestamp: time.Now(),
@@ -506,7 +506,7 @@ func (h *ACPHandler) publishFilesChanged(filePaths []string) {
 	h.mu.Unlock()
 
 	h.publisher.Publish(core.Event{
-		Type:      core.EventSecretaryFilesChanged,
+		Type:      core.EventTeamLeaderFilesChanged,
 		ProjectID: projectID,
 		Data: map[string]string{
 			"session_id": sessionID,

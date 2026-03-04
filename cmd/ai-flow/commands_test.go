@@ -452,6 +452,22 @@ func TestSecretaryIssueManagerAdapterCreateIssuesDefaultFailPolicy(t *testing.T)
 	}
 }
 
+func TestResolveTeamLeaderRoleIDReturnsBindingRole(t *testing.T) {
+	roleBindings := config.RoleBindings{
+		Secretary: config.SingleRoleBinding{Role: " team-leader "},
+	}
+
+	if got := resolveTeamLeaderRoleID(roleBindings); got != "team-leader" {
+		t.Fatalf("resolveTeamLeaderRoleID() = %q, want %q", got, "team-leader")
+	}
+}
+
+func TestResolveTeamLeaderRoleIDReturnsEmptyWhenUnset(t *testing.T) {
+	if got := resolveTeamLeaderRoleID(config.RoleBindings{}); got != "" {
+		t.Fatalf("resolveTeamLeaderRoleID() = %q, want empty", got)
+	}
+}
+
 func reserveFreePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

@@ -20,7 +20,7 @@ import (
 	runtimeprocess "github.com/yoke233/ai-workflow/internal/plugins/runtime-process"
 	scmgithub "github.com/yoke233/ai-workflow/internal/plugins/scm-github"
 	scmlocalgit "github.com/yoke233/ai-workflow/internal/plugins/scm-local-git"
-storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 	trackergithub "github.com/yoke233/ai-workflow/internal/plugins/tracker-github"
 	trackerlocal "github.com/yoke233/ai-workflow/internal/plugins/tracker-local"
 	workspaceworktree "github.com/yoke233/ai-workflow/internal/plugins/workspace-worktree"
@@ -37,7 +37,7 @@ type BootstrapSet struct {
 	Tracker      core.Tracker
 	SCM          core.SCM
 	Notifier     core.Notifier
-	Workspace core.WorkspacePlugin
+	Workspace    core.WorkspacePlugin
 }
 
 const (
@@ -306,7 +306,7 @@ func buildWithRegistry(registry *core.Registry, cfg config.Config) (*BootstrapSe
 		Tracker:      trackerPlugin,
 		SCM:          scmPlugin,
 		Notifier:     notifierPlugin,
-		Workspace: workspacePlugin,
+		Workspace:    workspacePlugin,
 	}, nil
 }
 
@@ -608,4 +608,3 @@ func expandPath(path string) string {
 	}
 	return trimmed
 }
-

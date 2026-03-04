@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultWebChatRoleID  = "secretary"
+	defaultWebChatRoleID  = "team_leader"
 	defaultWebChatTimeout = 90 * time.Second
 )
 
@@ -373,6 +373,19 @@ func newLegacyProviderRoleResolver(
 		},
 	}
 	roles := []acpclient.RoleProfile{
+		{
+			ID:      "team_leader",
+			AgentID: agentID,
+			Capabilities: acpclient.ClientCapabilities{
+				FSRead:   true,
+				FSWrite:  true,
+				Terminal: true,
+			},
+			SessionPolicy: acpclient.SessionPolicy{
+				Reuse:             true,
+				PreferLoadSession: true,
+			},
+		},
 		{
 			ID:      "secretary",
 			AgentID: agentID,

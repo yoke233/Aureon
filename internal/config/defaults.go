@@ -58,7 +58,7 @@ func Defaults() Config {
 		},
 		Roles: []RoleConfig{
 			{
-				Name:           "secretary",
+				Name:           "team_leader",
 				Agent:          "claude",
 				PromptTemplate: "secretary_system",
 				Capabilities: CapabilitiesConfig{
@@ -125,7 +125,7 @@ func Defaults() Config {
 		},
 		RoleBinds: RoleBindings{
 			Secretary: SingleRoleBinding{
-				Role: "secretary",
+				Role: "team_leader",
 			},
 			Pipeline: PipelineRoleBindings{
 				StageRoles: map[string]string{

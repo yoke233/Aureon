@@ -17,14 +17,14 @@ const (
 	EventAgentOutput     EventType = "agent_output"
 	EventPipelineStuck   EventType = "pipeline_stuck"
 
-	// Secretary lifecycle events.
-	EventSecretaryThinking      EventType = "secretary_thinking"
-	EventSecretaryFilesChanged  EventType = "secretary_files_changed"
-	EventChatRunStarted         EventType = "chat_run_started"
-	EventChatRunUpdate          EventType = "chat_run_update"
-	EventChatRunCompleted       EventType = "chat_run_completed"
-	EventChatRunFailed          EventType = "chat_run_failed"
-	EventChatRunCancelled       EventType = "chat_run_cancelled"
+	// Team Leader and run lifecycle events.
+	EventTeamLeaderThinking     EventType = "team_leader_thinking"
+	EventTeamLeaderFilesChanged EventType = "team_leader_files_changed"
+	EventRunStarted             EventType = "run_started"
+	EventRunUpdate              EventType = "run_update"
+	EventRunCompleted           EventType = "run_completed"
+	EventRunFailed              EventType = "run_failed"
+	EventRunCancelled           EventType = "run_cancelled"
 	EventIssueCreated           EventType = "issue_created"
 	EventIssueReviewing         EventType = "issue_reviewing"
 	EventReviewDone             EventType = "review_done"
@@ -60,7 +60,7 @@ type Event struct {
 
 func IsIssueScopedEvent(eventType EventType) bool {
 	switch eventType {
-	case EventSecretaryThinking,
+	case EventTeamLeaderThinking,
 		EventIssueCreated,
 		EventIssueReviewing,
 		EventReviewDone,

@@ -266,7 +266,7 @@ type MCPConfig struct {
 }
 
 type RoleBindings struct {
-	Secretary          SingleRoleBinding    `yaml:"secretary"`
+	Secretary          SingleRoleBinding    `yaml:"team_leader"`
 	Pipeline           PipelineRoleBindings `yaml:"pipeline"`
 	ReviewOrchestrator ReviewRoleBindings   `yaml:"review_orchestrator"`
 	PlanParser         SingleRoleBinding    `yaml:"plan_parser"`
@@ -286,7 +286,7 @@ type ReviewRoleBindings struct {
 }
 
 type RoleBindingsLayer struct {
-	Secretary          *SingleRoleBindingLayer    `yaml:"secretary"`
+	Secretary          *SingleRoleBindingLayer    `yaml:"team_leader"`
 	Pipeline           *PipelineRoleBindingsLayer `yaml:"pipeline"`
 	ReviewOrchestrator *ReviewRoleBindingsLayer   `yaml:"review_orchestrator"`
 	PlanParser         *SingleRoleBindingLayer    `yaml:"plan_parser"`

@@ -7,7 +7,7 @@ import (
 	"github.com/yoke233/ai-workflow/internal/core"
 )
 
-func TestBuildCommand(t *testing.T) {
+func TestBuildCommand_DefaultSandbox(t *testing.T) {
 	a := New("codex", "gpt-5.3-codex", "high")
 	cmd, err := a.BuildCommand(core.ExecOpts{
 		Prompt:  "fix the bug",
@@ -17,17 +17,37 @@ func TestBuildCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(cmd, " ")
-	if !strings.Contains(joined, "exec") {
-		t.Error("missing exec subcommand")
+	for _, want := range []string{
+		"exec",
+		"-a never",
+		"--json",
+		"-m gpt-5.3-codex",
+		"--sandbox workspace-write",
+		"shell_environment_policy.inherit=all",
+		"--add-dir /tmp",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in: %s", want, joined)
+		}
 	}
-	if !strings.Contains(joined, "-a never") {
-		t.Error("missing approval flag")
+}
+
+func TestBuildCommand_ReadOnlySandbox(t *testing.T) {
+	a := New("codex", "gpt-5.3-codex", "high")
+	cmd, err := a.BuildCommand(core.ExecOpts{
+		Prompt:  "review code",
+		WorkDir: "/tmp/project",
+		Env:     map[string]string{"AI_WORKFLOW_SANDBOX": "read-only"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(joined, "--json") {
-		t.Error("missing json flag")
+	joined := strings.Join(cmd, " ")
+	if !strings.Contains(joined, "--sandbox read-only") {
+		t.Errorf("expected read-only sandbox, got: %s", joined)
 	}
-	if !strings.Contains(joined, "-m gpt-5.3-codex") {
-		t.Error("missing model flag")
+	if strings.Contains(joined, "--add-dir") {
+		t.Error("read-only sandbox should not have --add-dir")
 	}
 }
 

@@ -36,20 +36,29 @@ func (a *CodexAgent) BuildCommand(opts core.ExecOpts) ([]string, error) {
 		prompt = opts.AppendContext + "\n\n" + prompt
 	}
 
-	args := []string{
-		// `-a` is a global flag (before `exec`), otherwise `codex exec -a ...` fails.
-		a.binary, "-a", "never",
-		"exec",
-		// Options must come before the prompt when `COMMAND` passthrough exists,
-		// otherwise flags can be interpreted as the command to execute.
-		"--json",
-		"--color", "never",
-		"-m", a.model,
-		"-c", "model_reasoning_effort=" + a.reasoning,
+	sandboxMode := "workspace-write"
+	if opts.Env != nil {
+		if v := strings.TrimSpace(opts.Env["AI_WORKFLOW_SANDBOX"]); v != "" {
+			sandboxMode = v
+		}
 	}
 
-	// When a schema is supplied (typically for TeamLeader decomposition), force a
-	// schema-shaped final response and avoid tool use drifting.
+	args := []string{
+		a.binary, "-a", "never",
+		"exec",
+		"--json",
+		"--color", "never",
+		"--sandbox", sandboxMode,
+		"-m", a.model,
+		"-c", "model_reasoning_effort=" + a.reasoning,
+		"-c", "shell_environment_policy.inherit=all",
+	}
+
+	// workspace-write needs /tmp for Go build artifacts, test caches, etc.
+	if sandboxMode == "workspace-write" {
+		args = append(args, "--add-dir", "/tmp")
+	}
+
 	if opts.Env != nil {
 		if schema := opts.Env["AI_WORKFLOW_CODEX_OUTPUT_SCHEMA"]; strings.TrimSpace(schema) != "" {
 			args = append(args, "--disable", "shell_tool", "--output-schema", schema)
@@ -58,7 +67,6 @@ func (a *CodexAgent) BuildCommand(opts core.ExecOpts) ([]string, error) {
 	if opts.WorkDir != "" {
 		args = append(args, "-C", opts.WorkDir)
 	}
-	// Ensure prompt is parsed as a single positional argument.
 	args = append(args, "--", prompt)
 	return args, nil
 }

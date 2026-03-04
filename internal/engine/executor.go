@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/yoke233/ai-workflow/internal/acpclient"
 	"github.com/yoke233/ai-workflow/internal/core"
 	"github.com/yoke233/ai-workflow/internal/eventbus"
@@ -19,18 +20,41 @@ import (
 	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
+// ACPEventPublisher receives events from ACP handlers.
+type ACPEventPublisher interface {
+	Publish(evt core.Event)
+}
+
+// ACPHandlerFactory creates ACP protocol handlers for pipeline stage execution.
+type ACPHandlerFactory interface {
+	NewHandler(cwd string, publisher ACPEventPublisher) acpproto.Client
+	SetPermissionPolicy(handler acpproto.Client, policy []acpclient.PermissionRule)
+}
+
+// acpSessionEntry holds a live ACP client and session for cross-stage reuse.
+type acpSessionEntry struct {
+	client    *acpclient.Client
+	sessionID acpproto.SessionId
+}
+
 type Executor struct {
-	store        core.Store
-	bus          *eventbus.Bus
-	agents       map[string]core.AgentPlugin
-	roleResolver *acpclient.RoleResolver
-	stageRoles   map[core.StageID]string
-	runtime      core.RuntimePlugin
-	workspace    core.WorkspacePlugin
-	logger       *slog.Logger
+	store             core.Store
+	bus               *eventbus.Bus
+	agents            map[string]core.AgentPlugin
+	roleResolver      *acpclient.RoleResolver
+	stageRoles        map[core.StageID]string
+	runtime           core.RuntimePlugin
+	workspace         core.WorkspacePlugin
+	acpHandlerFactory ACPHandlerFactory
+	logger            *slog.Logger
 
 	sessionMu     sync.Mutex
 	activeSession map[string]string
+
+	// acpPool keeps ACP sessions alive across stages for the same run.
+	// Key: "runID:stageID" where stageID is the stage that created the session.
+	acpPoolMu sync.Mutex
+	acpPool   map[string]*acpSessionEntry
 }
 
 func NewExecutor(
@@ -48,11 +72,16 @@ func NewExecutor(
 		logger:  logger,
 
 		activeSession: make(map[string]string),
+		acpPool:       make(map[string]*acpSessionEntry),
 	}
 }
 
 func (e *Executor) SetRoleResolver(resolver *acpclient.RoleResolver) {
 	e.roleResolver = resolver
+}
+
+func (e *Executor) SetACPHandlerFactory(factory ACPHandlerFactory) {
+	e.acpHandlerFactory = factory
 }
 
 func (e *Executor) SetWorkspace(workspace core.WorkspacePlugin) {
@@ -125,6 +154,9 @@ func (e *Executor) run(ctx context.Context, RunID string, allowAlreadyRunning bo
 	if err != nil {
 		return err
 	}
+	// Clean up any pooled ACP sessions when the run finishes (success, failure, or panic).
+	defer e.acpPoolCleanup(p.ID)
+
 	project, err := e.store.GetProject(p.ProjectID)
 	if err != nil {
 		return err
@@ -205,7 +237,7 @@ func (e *Executor) run(ctx context.Context, RunID string, allowAlreadyRunning bo
 		stageSkipped := false
 		for attempt := 0; ; attempt++ {
 			agentUsed := ""
-			if resolvedAgent, resolveErr := e.resolveStageAgentName(&stage); resolveErr == nil {
+			if resolvedAgent, _, resolveErr := e.resolveStageAgentName(&stage); resolveErr == nil {
 				agentUsed = resolvedAgent
 			}
 
@@ -541,9 +573,20 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 		return fmt.Errorf("worktree path is empty for agent stage %s", stage.Name)
 	}
 
-	agentName, agent, err := e.resolveStageAgent(stage)
+	roleName := strings.TrimSpace(stage.Role)
+	if roleName == "" {
+		return fmt.Errorf("stage role is required for stage %q", stage.Name)
+	}
+	if e.roleResolver == nil {
+		return fmt.Errorf("role resolver is not configured for stage %q", stage.Name)
+	}
+	agentProfile, roleProfile, err := e.roleResolver.Resolve(roleName)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve role %q for stage %q: %w", roleName, stage.Name, err)
+	}
+	agentName := strings.TrimSpace(agentProfile.ID)
+	if agentName == "" {
+		return fmt.Errorf("resolved empty agent id for stage %q role %q", stage.Name, roleName)
 	}
 
 	promptStage := stage.PromptTemplate
@@ -567,6 +610,27 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 		return fmt.Errorf("render prompt: %w", err)
 	}
 
+	// Prefer ACP protocol when launch command and handler factory are available.
+	if strings.TrimSpace(agentProfile.LaunchCommand) != "" && e.acpHandlerFactory != nil {
+		return e.runACPStage(ctx, agentName, agentProfile, roleProfile, p, stage, prompt)
+	}
+
+	// Fallback to CLI agent plugin path.
+	return e.runCLIStage(ctx, agentName, p, stage, prompt)
+}
+
+// runCLIStage executes a pipeline stage via CLI agent plugin (legacy path).
+func (e *Executor) runCLIStage(
+	ctx context.Context,
+	agentName string,
+	p *core.Run,
+	stage *core.StageConfig,
+	prompt string,
+) error {
+	agent, ok := e.agents[agentName]
+	if !ok {
+		return fmt.Errorf("agent plugin %q not found for stage %q", agentName, stage.Name)
+	}
 	opts := core.ExecOpts{
 		Prompt:   prompt,
 		WorkDir:  p.WorktreePath,
@@ -596,6 +660,7 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 	defer e.unregisterSession(p.ID, sess.ID)
 
 	parser := agent.NewStreamParser(sess.Stdout)
+	gotDone := false
 	for {
 		evt, err := parser.Next()
 		if err != nil {
@@ -603,6 +668,9 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 				break
 			}
 			return fmt.Errorf("parse stream: %w", err)
+		}
+		if evt.Type == "done" {
+			gotDone = true
 		}
 		e.bus.Publish(core.Event{
 			Type:  core.EventAgentOutput,
@@ -621,49 +689,264 @@ func (e *Executor) executeStage(ctx context.Context, project *core.Project, p *c
 	}
 
 	if err := sess.Wait(); err != nil {
+		if gotDone {
+			return nil
+		}
 		return fmt.Errorf("wait session: %w", err)
 	}
 	return nil
 }
 
-func (e *Executor) resolveStageAgentName(stage *core.StageConfig) (string, error) {
+// acpPoolKey builds the session pool key for a given run and stage.
+func acpPoolKey(runID string, stage core.StageID) string {
+	return runID + ":" + string(stage)
+}
+
+// acpPoolGet retrieves a cached ACP session for the given run+stage.
+func (e *Executor) acpPoolGet(runID string, stage core.StageID) *acpSessionEntry {
+	e.acpPoolMu.Lock()
+	defer e.acpPoolMu.Unlock()
+	return e.acpPool[acpPoolKey(runID, stage)]
+}
+
+// acpPoolPut stores an ACP session in the pool for later reuse.
+func (e *Executor) acpPoolPut(runID string, stage core.StageID, entry *acpSessionEntry) {
+	e.acpPoolMu.Lock()
+	defer e.acpPoolMu.Unlock()
+	e.acpPool[acpPoolKey(runID, stage)] = entry
+}
+
+// acpPoolCleanup closes and removes all pooled sessions for a given run.
+func (e *Executor) acpPoolCleanup(runID string) {
+	e.acpPoolMu.Lock()
+	var toClose []string
+	var entries []*acpSessionEntry
+	for key, entry := range e.acpPool {
+		if strings.HasPrefix(key, runID+":") {
+			toClose = append(toClose, key)
+			entries = append(entries, entry)
+			delete(e.acpPool, key)
+		}
+	}
+	e.acpPoolMu.Unlock()
+
+	if len(entries) > 0 && e.logger != nil {
+		e.logger.Info("acp pool cleanup", "run_id", runID, "sessions", len(entries))
+	}
+	for i, entry := range entries {
+		if entry.client == nil {
+			continue
+		}
+		if e.logger != nil {
+			e.logger.Info("acp pool closing session", "key", toClose[i])
+		}
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = entry.client.Close(closeCtx)
+		cancel()
+	}
+}
+
+// runACPStage executes a pipeline stage via ACP protocol.
+// If stage.ReuseSessionFrom is set, it reuses the ACP client+session from that source stage.
+func (e *Executor) runACPStage(
+	ctx context.Context,
+	agentName string,
+	agentProfile acpclient.AgentProfile,
+	roleProfile acpclient.RoleProfile,
+	p *core.Run,
+	stage *core.StageConfig,
+	prompt string,
+) error {
+	stageCtx := ctx
+	if stage.Timeout > 0 {
+		var cancel context.CancelFunc
+		stageCtx, cancel = context.WithTimeout(ctx, stage.Timeout)
+		defer cancel()
+	}
+
+	bridge := &stageEventBridge{
+		executor:  e,
+		runID:     p.ID,
+		stage:     stage.Name,
+		agentName: agentName,
+	}
+
+	// Try to reuse a pooled session from a previous stage.
+	if source := stage.ReuseSessionFrom; source != "" {
+		entry := e.acpPoolGet(p.ID, source)
+		if entry != nil {
+			if e.logger != nil {
+				e.logger.Info("acp session reuse",
+					"run_id", p.ID, "stage", stage.Name, "source_stage", source,
+					"session_id", string(entry.sessionID))
+			}
+			return e.promptACPSession(stageCtx, entry, p, stage, agentName, prompt, bridge)
+		}
+		// Source session not found — fall through to create a new one.
+		if e.logger != nil {
+			e.logger.Warn("acp session pool miss, creating new session",
+				"run_id", p.ID, "stage", stage.Name, "source", source)
+		}
+	}
+
+	// Create a new ACP client + session.
+	if e.acpHandlerFactory == nil {
+		return fmt.Errorf("acp handler factory is not configured for stage %s", stage.Name)
+	}
+
+	launchCfg := acpclient.LaunchConfig{
+		Command: strings.TrimSpace(agentProfile.LaunchCommand),
+		Args:    append([]string(nil), agentProfile.LaunchArgs...),
+		WorkDir: p.WorktreePath,
+		Env:     cloneStringMapForEngine(agentProfile.Env),
+	}
+	handler := e.acpHandlerFactory.NewHandler(p.WorktreePath, e.bus)
+	e.acpHandlerFactory.SetPermissionPolicy(handler, roleProfile.PermissionPolicy)
+
+	acpOpts := []acpclient.Option{
+		acpclient.WithEventHandler(bridge),
+	}
+	client, err := acpclient.New(launchCfg, handler, acpOpts...)
+	if err != nil {
+		return fmt.Errorf("create acp client for stage %s: %w", stage.Name, err)
+	}
+
+	if err := client.Initialize(stageCtx, roleProfile.Capabilities); err != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.Close(closeCtx)
+		cancel()
+		return fmt.Errorf("acp initialize for stage %s: %w", stage.Name, err)
+	}
+
+	session, err := client.NewSession(stageCtx, acpproto.NewSessionRequest{
+		Cwd: p.WorktreePath,
+	})
+	if err != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.Close(closeCtx)
+		cancel()
+		return fmt.Errorf("acp new session for stage %s: %w", stage.Name, err)
+	}
+
+	entry := &acpSessionEntry{client: client, sessionID: session}
+
+	// Always pool the session — it will be cleaned up at run end or reused by a later stage.
+	e.acpPoolPut(p.ID, stage.Name, entry)
+	if e.logger != nil {
+		e.logger.Info("acp session created and pooled",
+			"run_id", p.ID, "stage", stage.Name, "session_id", string(session))
+	}
+
+	return e.promptACPSession(stageCtx, entry, p, stage, agentName, prompt, bridge)
+}
+
+// promptACPSession sends a prompt to an existing ACP session and publishes the result.
+func (e *Executor) promptACPSession(
+	ctx context.Context,
+	entry *acpSessionEntry,
+	p *core.Run,
+	stage *core.StageConfig,
+	agentName string,
+	prompt string,
+	bridge *stageEventBridge,
+) error {
+	// Update the event bridge for the current stage.
+	bridge.stage = stage.Name
+
+	result, err := entry.client.Prompt(ctx, acpproto.PromptRequest{
+		SessionId: entry.sessionID,
+		Prompt: []acpproto.ContentBlock{
+			{Text: &acpproto.ContentBlockText{Text: prompt}},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("acp prompt for stage %s: %w", stage.Name, err)
+	}
+
+	replyText := ""
+	if result != nil {
+		replyText = strings.TrimSpace(result.Text)
+	}
+	e.bus.Publish(core.Event{
+		Type:  core.EventAgentOutput,
+		RunID: p.ID,
+		Stage: stage.Name,
+		Agent: agentName,
+		Data: map[string]string{
+			"content": replyText,
+			"type":    "done",
+		},
+		Timestamp: time.Now(),
+	})
+	if err := e.appendEventLog(p.ID, stage.Name, core.EventAgentOutput, agentName, replyText, time.Now()); err != nil {
+		return fmt.Errorf("append agent_output log: %w", err)
+	}
+	return nil
+}
+
+// stageEventBridge converts ACP session updates to EventAgentOutput events.
+type stageEventBridge struct {
+	executor  *Executor
+	runID     string
+	stage     core.StageID
+	agentName string
+}
+
+func (b *stageEventBridge) HandleSessionUpdate(_ context.Context, update acpclient.SessionUpdate) error {
+	if update.Text == "" {
+		return nil
+	}
+	b.executor.bus.Publish(core.Event{
+		Type:  core.EventAgentOutput,
+		RunID: b.runID,
+		Stage: b.stage,
+		Agent: b.agentName,
+		Data: map[string]string{
+			"content": update.Text,
+			"type":    update.Type,
+		},
+		Timestamp: time.Now(),
+	})
+	_ = b.executor.appendEventLog(b.runID, b.stage, core.EventAgentOutput, b.agentName, update.Text, time.Now())
+	return nil
+}
+
+func cloneStringMapForEngine(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func (e *Executor) resolveStageAgentName(stage *core.StageConfig) (string, acpclient.ClientCapabilities, error) {
 	if stage == nil {
-		return "", errors.New("stage config is nil")
+		return "", acpclient.ClientCapabilities{}, errors.New("stage config is nil")
 	}
 	if !stageRequiresRole(stage.Name) {
-		return "", nil
+		return "", acpclient.ClientCapabilities{}, nil
 	}
 
 	roleName := strings.TrimSpace(stage.Role)
 	if roleName == "" {
-		return "", fmt.Errorf("stage role is required for stage %q", stage.Name)
+		return "", acpclient.ClientCapabilities{}, fmt.Errorf("stage role is required for stage %q", stage.Name)
 	}
 	if e.roleResolver == nil {
-		return "", fmt.Errorf("stage role resolver is not configured for stage %q (role=%q)", stage.Name, roleName)
+		return "", acpclient.ClientCapabilities{}, fmt.Errorf("stage role resolver is not configured for stage %q (role=%q)", stage.Name, roleName)
 	}
 
-	resolvedAgent, _, err := e.roleResolver.Resolve(roleName)
+	resolvedAgent, roleProfile, err := e.roleResolver.Resolve(roleName)
 	if err != nil {
-		return "", fmt.Errorf("stage role not resolved for stage %q (role=%q): %w", stage.Name, roleName, err)
+		return "", acpclient.ClientCapabilities{}, fmt.Errorf("stage role not resolved for stage %q (role=%q): %w", stage.Name, roleName, err)
 	}
 	agentName := strings.TrimSpace(resolvedAgent.ID)
 	if agentName == "" {
-		return "", fmt.Errorf("stage role not resolved for stage %q (role=%q): resolved empty agent id", stage.Name, roleName)
+		return "", acpclient.ClientCapabilities{}, fmt.Errorf("stage role not resolved for stage %q (role=%q): resolved empty agent id", stage.Name, roleName)
 	}
-	return agentName, nil
-}
-
-func (e *Executor) resolveStageAgent(stage *core.StageConfig) (string, core.AgentPlugin, error) {
-	agentName, err := e.resolveStageAgentName(stage)
-	if err != nil {
-		return "", nil, err
-	}
-
-	agent, ok := e.agents[agentName]
-	if !ok {
-		return "", nil, fmt.Errorf("stage role not resolved for stage %q (role=%q): agent plugin %q not found", stage.Name, strings.TrimSpace(stage.Role), agentName)
-	}
-	return agentName, agent, nil
+	return agentName, roleProfile.Capabilities, nil
 }
 
 func stageRequiresRole(stage core.StageID) bool {
@@ -764,8 +1047,11 @@ func defaultStageConfig(id core.StageID) core.StageConfig {
 	switch id {
 	case core.StageRequirements, core.StageCodeReview:
 		cfg.Agent = ""
-	case core.StageImplement, core.StageFixup:
+	case core.StageImplement:
 		cfg.Agent = ""
+	case core.StageFixup:
+		cfg.Agent = ""
+		cfg.ReuseSessionFrom = core.StageImplement
 	case core.StageE2ETest:
 		cfg.Agent = ""
 		cfg.Timeout = 15 * time.Minute

@@ -21,11 +21,10 @@ func New(path string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	if path == ":memory:" {
-		// SQLite in-memory DB is connection-scoped; keep a single connection for tests.
-		db.SetMaxOpenConns(1)
-		db.SetMaxIdleConns(1)
-	}
+	// SQLite does not support concurrent writers; limit to a single connection
+	// so that PRAGMA settings (WAL, busy_timeout) apply consistently.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := applyMigrations(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
@@ -664,6 +663,88 @@ func (s *SQLiteStore) ListChatRunEvents(sessionID string) ([]core.ChatRunEvent, 
 			return nil, err
 		}
 		if err := unmarshalJSONObject(payloadJSON, &event.Payload); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) SaveRunEvent(event core.RunEvent) error {
+	runID := strings.TrimSpace(event.RunID)
+	if runID == "" {
+		return errors.New("run event run_id is required")
+	}
+	eventType := strings.TrimSpace(event.EventType)
+	if eventType == "" {
+		return errors.New("run event event_type is required")
+	}
+
+	data := event.Data
+	if data == nil {
+		data = map[string]string{}
+	}
+	dataJSON, err := marshalJSON(data)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(
+		`INSERT INTO run_events (
+			run_id, project_id, issue_id, event_type, stage, agent, data_json, error, created_at
+		) VALUES (?,?,?,?,?,?,?,?,COALESCE(?, CURRENT_TIMESTAMP))`,
+		runID,
+		strings.TrimSpace(event.ProjectID),
+		strings.TrimSpace(event.IssueID),
+		eventType,
+		strings.TrimSpace(event.Stage),
+		strings.TrimSpace(event.Agent),
+		dataJSON,
+		strings.TrimSpace(event.Error),
+		nullableTime(event.CreatedAt),
+	)
+	return err
+}
+
+func (s *SQLiteStore) ListRunEvents(runID string) ([]core.RunEvent, error) {
+	trimmed := strings.TrimSpace(runID)
+	if trimmed == "" {
+		return nil, errors.New("run event run_id is required")
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, run_id, project_id, issue_id, event_type, stage, agent, data_json, error, created_at
+		 FROM run_events
+		 WHERE run_id=?
+		 ORDER BY id ASC`,
+		trimmed,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]core.RunEvent, 0)
+	for rows.Next() {
+		var (
+			event    core.RunEvent
+			dataJSON string
+		)
+		if err := rows.Scan(
+			&event.ID,
+			&event.RunID,
+			&event.ProjectID,
+			&event.IssueID,
+			&event.EventType,
+			&event.Stage,
+			&event.Agent,
+			&dataJSON,
+			&event.Error,
+			&event.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSONObject(dataJSON, &event.Data); err != nil {
 			return nil, err
 		}
 		out = append(out, event)

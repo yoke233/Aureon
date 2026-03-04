@@ -15,6 +15,8 @@ const (
 	SlashCommandReject  SlashCommandType = "reject"
 	SlashCommandStatus  SlashCommandType = "status"
 	SlashCommandAbort   SlashCommandType = "abort"
+	SlashCommandCancel  SlashCommandType = "cancel"
+	SlashCommandReview  SlashCommandType = "review"
 )
 
 type SlashCommand struct {
@@ -31,9 +33,9 @@ type SlashACLConfig struct {
 }
 
 var defaultAssociationPermissions = map[string][]SlashCommandType{
-	"OWNER":        {SlashCommandRun, SlashCommandApprove, SlashCommandReject, SlashCommandStatus, SlashCommandAbort},
-	"MEMBER":       {SlashCommandRun, SlashCommandApprove, SlashCommandReject, SlashCommandStatus, SlashCommandAbort},
-	"COLLABORATOR": {SlashCommandRun, SlashCommandApprove, SlashCommandReject, SlashCommandStatus, SlashCommandAbort},
+	"OWNER":        {SlashCommandRun, SlashCommandApprove, SlashCommandReview, SlashCommandReject, SlashCommandStatus, SlashCommandAbort, SlashCommandCancel},
+	"MEMBER":       {SlashCommandRun, SlashCommandApprove, SlashCommandReview, SlashCommandReject, SlashCommandStatus, SlashCommandAbort, SlashCommandCancel},
+	"COLLABORATOR": {SlashCommandRun, SlashCommandApprove, SlashCommandReview, SlashCommandReject, SlashCommandStatus, SlashCommandAbort, SlashCommandCancel},
 	"CONTRIBUTOR":  {SlashCommandRun, SlashCommandStatus},
 	"NONE":         {SlashCommandStatus},
 }
@@ -58,8 +60,11 @@ func ParseSlashCommand(message string) (SlashCommand, bool, error) {
 	case SlashCommandStatus:
 		command.Type = SlashCommandStatus
 		return command, true, nil
-	case SlashCommandAbort:
+	case SlashCommandAbort, SlashCommandCancel:
 		command.Type = SlashCommandAbort
+		return command, true, nil
+	case SlashCommandReview:
+		command.Type = SlashCommandApprove
 		return command, true, nil
 	case SlashCommandRun:
 		command.Type = SlashCommandRun

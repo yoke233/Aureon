@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -97,6 +98,7 @@ func (b *A2ABridge) SendMessage(ctx context.Context, input A2ASendMessageInput) 
 		return nil, fmt.Errorf("%w: conversation is required", ErrA2AInvalidInput)
 	}
 
+	autoMerge := true
 	issues, err := b.manager.CreateIssues(ctx, CreateIssuesInput{
 		ProjectID: project.ID,
 		SessionID: strings.TrimSpace(input.SessionID),
@@ -106,6 +108,7 @@ func (b *A2ABridge) SendMessage(ctx context.Context, input A2ASendMessageInput) 
 				Body:       conversation,
 				Template:   "standard",
 				Labels:     []string{"a2a"},
+				AutoMerge:  &autoMerge,
 				FailPolicy: core.FailBlock,
 			},
 		},
@@ -126,6 +129,21 @@ func (b *A2ABridge) SendMessage(ctx context.Context, input A2ASendMessageInput) 
 	if err := b.ensureProjectScope(issue, project.ID); err != nil {
 		return nil, err
 	}
+
+	// Auto-approve A2A issues so the run starts immediately.
+	slog.Info("A2A issue created", "id", issue.ID, "status", issue.Status, "auto_merge", issue.AutoMerge)
+	if issue.AutoMerge {
+		approved, approveErr := b.manager.ApplyIssueAction(ctx, issue.ID, IssueActionApprove, "a2a auto-approve")
+		if approveErr != nil {
+			slog.Error("A2A auto-approve failed", "id", issue.ID, "error", approveErr)
+		} else if approved != nil {
+			slog.Info("A2A auto-approved", "id", approved.ID, "status", approved.Status, "run_id", approved.RunID)
+			issue = approved
+		}
+	} else {
+		slog.Warn("A2A issue auto_merge is false, skipping auto-approve", "id", issue.ID)
+	}
+
 	return snapshotFromIssue(issue), nil
 }
 

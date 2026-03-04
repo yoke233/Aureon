@@ -175,6 +175,22 @@ CREATE TABLE IF NOT EXISTS review_records (
     score      INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS run_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    issue_id   TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL,
+    stage      TEXT NOT NULL DEFAULT '',
+    agent      TEXT NOT NULL DEFAULT '',
+    data_json  TEXT NOT NULL DEFAULT '{}',
+    error      TEXT NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_events_run_created
+ON run_events(run_id, created_at, id);
 `
 
 const schemaIndexes = `

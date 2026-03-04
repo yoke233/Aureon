@@ -1,6 +1,7 @@
 package web
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -97,6 +98,7 @@ func handleA2AMessageSend(w http.ResponseWriter, r *http.Request, cfg Config, re
 		Conversation: a2aMessageText(params.Message),
 	})
 	if err != nil {
+		slog.Error("A2A SendMessage failed", "error", err, "project_id", a2aProjectID(params.Metadata))
 		code, message := mapA2ABridgeError(err)
 		writeA2ARPCError(w, req.ID, code, message)
 		return

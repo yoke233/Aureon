@@ -35,7 +35,7 @@ func Defaults() Config {
 				{
 					Name:          "claude",
 					LaunchCommand: "npx",
-					LaunchArgs:    []string{"-y", "@zed-industries/claude-agent-acp@latest"},
+					LaunchArgs:    []string{"-y", "@zed-industries/claude-agent-acp"},
 					Env:           map[string]string{},
 					CapabilitiesMax: CapabilitiesConfig{
 						FSRead:   true,
@@ -46,7 +46,7 @@ func Defaults() Config {
 				{
 					Name:          "codex",
 					LaunchCommand: "npx",
-					LaunchArgs:    []string{"-y", "@zed-industries/codex-acp@latest"},
+					LaunchArgs:    []string{"-y", "@zed-industries/codex-acp"},
 					Env:           map[string]string{},
 					CapabilitiesMax: CapabilitiesConfig{
 						FSRead:   true,
@@ -171,8 +171,8 @@ func Defaults() Config {
 			},
 		},
 		A2A: A2AConfig{
-			Enabled: false,
-			Token:   "",
+			Enabled: true,
+			Token:   "default",
 			Version: "0.3",
 		},
 		Server: ServerConfig{

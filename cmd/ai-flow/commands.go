@@ -18,10 +18,13 @@ import (
 	"text/tabwriter"
 	"time"
 
+	acpproto "github.com/coder/acp-go-sdk"
+	"github.com/yoke233/ai-workflow/internal/acpclient"
 	"github.com/yoke233/ai-workflow/internal/config"
 	"github.com/yoke233/ai-workflow/internal/core"
 	"github.com/yoke233/ai-workflow/internal/engine"
 	"github.com/yoke233/ai-workflow/internal/eventbus"
+	ghwebhook "github.com/yoke233/ai-workflow/internal/github"
 	pluginfactory "github.com/yoke233/ai-workflow/internal/plugins/factory"
 	"github.com/yoke233/ai-workflow/internal/teamleader"
 	"github.com/yoke233/ai-workflow/internal/web"
@@ -303,6 +306,7 @@ var (
 			bootstrapSet.Tracker,
 			teamLeaderCfg.DAGScheduler.MaxConcurrentTasks,
 		)
+		depScheduler.SetStageRoles(roleBinds.Run.StageRoles)
 
 		opts := make([]teamleader.ManagerOption, 0, 1)
 		if bootstrapSet.ReviewGate != nil {
@@ -353,6 +357,7 @@ func bootstrapWithEventBus() (*engine.Executor, *pluginfactory.BootstrapSet, *ev
 	exec.SetRoleResolver(bootstrapSet.RoleResolver)
 	exec.SetWorkspace(bootstrapSet.Workspace)
 	exec.SetRunstageRoles(cfg.RoleBinds.Run.StageRoles)
+	exec.SetACPHandlerFactory(&acpHandlerFactoryAdapter{})
 
 	recoveryOnce.Do(func() {
 		go func() {
@@ -764,6 +769,19 @@ func runServer(ctx context.Context, args []string) error {
 		return errors.Join(err, managerStopErr, stopErr)
 	}
 
+	var a2aBridge web.A2ABridge
+	if adapter, ok := issueManager.(*teamLeaderIssueManagerAdapter); ok {
+		bridge, bridgeErr := teamleader.NewA2ABridge(store, adapter.manager)
+		if bridgeErr != nil {
+			slog.Warn("A2ABridge creation failed, A2A endpoint will be unavailable", "error", bridgeErr)
+		} else {
+			a2aBridge = bridge
+			slog.Info("A2ABridge created successfully")
+		}
+	} else {
+		slog.Warn("issueManager is not teamLeaderIssueManagerAdapter, A2A bridge unavailable", "type", fmt.Sprintf("%T", issueManager))
+	}
+
 	hub := web.NewHub()
 	if bootstrapSet.RoleResolver == nil {
 		return errors.New("chat assistant requires role resolver")
@@ -778,6 +796,9 @@ func runServer(ctx context.Context, args []string) error {
 		EventPublisher:   bus,
 		RunEventRecorder: runEventRecorder,
 	})
+	prLC := ghwebhook.NewPRLifecycle(store, bootstrapSet.SCM)
+	autoMerger := teamleader.NewAutoMergeHandler(store, bus, prLC)
+
 	sub := bus.Subscribe()
 	bridgeDone := make(chan struct{})
 	go func() {
@@ -791,6 +812,22 @@ func runServer(ctx context.Context, args []string) error {
 					return
 				}
 				hub.BroadcastCoreEvent(evt)
+				if evt.RunID != "" {
+					if err := store.SaveRunEvent(core.RunEvent{
+						RunID:     evt.RunID,
+						ProjectID: evt.ProjectID,
+						IssueID:   evt.IssueID,
+						EventType: string(evt.Type),
+						Stage:     string(evt.Stage),
+						Agent:     evt.Agent,
+						Data:      evt.Data,
+						Error:     evt.Error,
+						CreatedAt: evt.Timestamp,
+					}); err != nil {
+						slog.Warn("failed to persist run event", "run_id", evt.RunID, "type", evt.Type, "error", err)
+					}
+				}
+				autoMerger.OnEvent(ctx, evt)
 			}
 		}
 	}()
@@ -800,13 +837,18 @@ func runServer(ctx context.Context, args []string) error {
 		AuthEnabled:       cfg.Server.AuthEnabled,
 		BearerToken:       cfg.Server.AuthToken,
 		WebhookSecret:     cfg.GitHub.WebhookSecret,
+		A2AEnabled:        cfg.A2A.Enabled,
+		A2AToken:          cfg.A2A.Token,
+		A2AVersion:        cfg.A2A.Version,
 		Store:             store,
+		A2ABridge:         a2aBridge,
 		IssueManager:      issueManager,
 		ChatAssistant:     chatAssistant,
 		EventPublisher:    bus,
 		RunExec:           exec,
 		RunstageRoles:     cfg.RoleBinds.Run.StageRoles,
 		IssueParserRoleID: strings.TrimSpace(cfg.RoleBinds.PlanParser.Role),
+		SCM:               bootstrapSet.SCM,
 		Hub:               hub,
 	})
 
@@ -1015,4 +1057,17 @@ func formatTime(t time.Time) string {
 		return "-"
 	}
 	return t.Format(time.RFC3339)
+}
+
+// acpHandlerFactoryAdapter bridges engine.ACPHandlerFactory to teamleader.ACPHandler.
+type acpHandlerFactoryAdapter struct{}
+
+func (f *acpHandlerFactoryAdapter) NewHandler(cwd string, publisher engine.ACPEventPublisher) acpproto.Client {
+	return teamleader.NewACPHandler(cwd, "", publisher)
+}
+
+func (f *acpHandlerFactoryAdapter) SetPermissionPolicy(handler acpproto.Client, policy []acpclient.PermissionRule) {
+	if h, ok := handler.(*teamleader.ACPHandler); ok {
+		h.SetPermissionPolicy(policy)
+	}
 }

@@ -103,5 +103,11 @@ type Store interface {
 	SaveReviewRecord(r *ReviewRecord) error
 	GetReviewRecords(issueID string) ([]ReviewRecord, error)
 
+	AppendChatRunEvent(event ChatRunEvent) error
+	ListChatRunEvents(sessionID string) ([]ChatRunEvent, error)
+
+	SaveRunEvent(event RunEvent) error
+	ListRunEvents(runID string) ([]RunEvent, error)
+
 	Close() error
 }

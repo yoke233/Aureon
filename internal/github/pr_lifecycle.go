@@ -64,10 +64,15 @@ func (l *PRLifecycle) OnImplementComplete(ctx context.Context, RunID string) (st
 		head = "ai-flow/" + Run.ID
 	}
 
+	body := Run.Description
+	if issueNumber := issueNumberFromRun(Run); issueNumber > 0 {
+		body = fmt.Sprintf("%s\n\nCloses #%d", body, issueNumber)
+	}
+
 	draft := true
 	prURL, err := l.scm.CreatePR(ctx, core.PullRequest{
 		Title: Run.Name,
-		Body:  Run.Description,
+		Body:  body,
 		Head:  head,
 		Base:  base,
 		Draft: &draft,
@@ -165,6 +170,18 @@ func findRunByPRNumber(store core.Store, projectID string, prNumber int) (*core.
 		}
 	}
 	return nil, nil
+}
+
+func issueNumberFromRun(p *core.Run) int {
+	if p == nil || p.Config == nil {
+		return 0
+	}
+	for _, key := range []string{"issue_number", "github_issue_number"} {
+		if n := parsePRNumberValue(p.Config[key]); n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 func prNumberFromRun(p *core.Run) int {

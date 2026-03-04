@@ -20,6 +20,13 @@ import (
 	"github.com/yoke233/ai-workflow/internal/observability"
 )
 
+// webhookSCM abstracts SCM operations needed by webhook-triggered PR lifecycle.
+type webhookSCM interface {
+	CreatePR(ctx context.Context, req core.PullRequest) (prURL string, err error)
+	ConvertToReady(ctx context.Context, number int) error
+	MergePR(ctx context.Context, req core.PullRequestMerge) error
+}
+
 type webhookHandlers struct {
 	store       core.Store
 	secret      string
@@ -58,7 +65,7 @@ type githubWebhookEnvelope struct {
 	} `json:"sender"`
 }
 
-func registerWebhookRoutes(r chi.Router, store core.Store, executor RunExecutor, secret string, stageRoleBindings map[string]string) WebhookDeliveryReplayer {
+func registerWebhookRoutes(r chi.Router, store core.Store, executor RunExecutor, secret string, stageRoleBindings map[string]string, scm webhookSCM) WebhookDeliveryReplayer {
 	var publisher interface{ Publish(evt core.Event) }
 	if bus := eventbus.Default(); bus != nil {
 		publisher = bus
@@ -69,7 +76,7 @@ func registerWebhookRoutes(r chi.Router, store core.Store, executor RunExecutor,
 		secret:      strings.TrimSpace(secret),
 		executor:    executor,
 		stageRoles:  normalizeStageRoleBindings(stageRoleBindings),
-		prLifecycle: ghwebhook.NewPRLifecycle(store, nil),
+		prLifecycle: ghwebhook.NewPRLifecycle(store, scm),
 	}
 	h.dispatcher = ghwebhook.NewWebhookDispatcher(ghwebhook.WebhookDispatcherOptions{
 		Handler: ghwebhook.WebhookDispatchHandlerFunc(func(ctx context.Context, req ghwebhook.WebhookDispatchRequest) error {

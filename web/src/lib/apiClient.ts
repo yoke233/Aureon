@@ -25,6 +25,7 @@ import type {
   IssueDagResponse,
   IssueReviewRecord,
   ListChatRunEventsResponse,
+  ListRunEventsResponse,
   ListAdminAuditLogResponse,
   ListChatsResponse,
   IssueTimelineEntry,
@@ -431,6 +432,7 @@ export interface ApiClient {
     runId: string,
     body: RunActionRequest,
   ): Promise<RunActionResponse>;
+  listRunEvents(runId: string): Promise<ListRunEventsResponse>;
 }
 
 export const createApiClient = (options: ApiClientOptions): ApiClient => {
@@ -812,5 +814,14 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
         method: "POST",
         body,
       }),
+    listRunEvents: async (runId) => {
+      const response = await request<ListRunEventsResponse>({
+        path: `/api/v2/runs/${runId}/events`,
+      });
+      return {
+        items: Array.isArray(response.items) ? response.items : [],
+        total: typeof response.total === "number" ? response.total : 0,
+      };
+    },
   };
 };

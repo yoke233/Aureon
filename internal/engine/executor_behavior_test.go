@@ -723,7 +723,7 @@ func TestExecuteStageByRole_MissingRoleFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing role to fail Run run")
 	}
-	if !strings.Contains(err.Error(), "stage role not resolved") {
+	if !strings.Contains(err.Error(), "role not found") {
 		t.Fatalf("expected role resolution failure, got %v", err)
 	}
 	if runtime.calls != 0 {
@@ -933,5 +933,76 @@ func TestExecuteStageByRole_MissingResolverFails(t *testing.T) {
 	}
 	if runtime.calls != 0 {
 		t.Fatalf("expected runtime not to start session without resolver, got calls=%d", runtime.calls)
+	}
+}
+
+// --- ACP Session Pool Tests ---
+
+func TestACPPool_PutGetCleanup(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	e := newExecutor(store, map[string]core.AgentPlugin{"codex": &fakeAgent{name: "codex"}}, &fakeRuntime{})
+
+	entry := &acpSessionEntry{sessionID: "sid-1"}
+	e.acpPoolPut("run-1", core.StageImplement, entry)
+
+	// Get returns the stored entry.
+	got := e.acpPoolGet("run-1", core.StageImplement)
+	if got != entry {
+		t.Fatalf("acpPoolGet returned %v, want %v", got, entry)
+	}
+
+	// Get with wrong stage returns nil.
+	if e.acpPoolGet("run-1", core.StageCodeReview) != nil {
+		t.Fatal("expected nil for different stage")
+	}
+
+	// Get with wrong run returns nil.
+	if e.acpPoolGet("run-2", core.StageImplement) != nil {
+		t.Fatal("expected nil for different run")
+	}
+
+	// Cleanup removes entries for the run.
+	e.acpPoolCleanup("run-1")
+	if e.acpPoolGet("run-1", core.StageImplement) != nil {
+		t.Fatal("expected nil after cleanup")
+	}
+}
+
+func TestACPPool_CleanupDoesNotAffectOtherRuns(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+	e := newExecutor(store, map[string]core.AgentPlugin{"codex": &fakeAgent{name: "codex"}}, &fakeRuntime{})
+
+	entry1 := &acpSessionEntry{sessionID: "sid-1"}
+	entry2 := &acpSessionEntry{sessionID: "sid-2"}
+	e.acpPoolPut("run-1", core.StageImplement, entry1)
+	e.acpPoolPut("run-2", core.StageImplement, entry2)
+
+	e.acpPoolCleanup("run-1")
+
+	if e.acpPoolGet("run-2", core.StageImplement) != entry2 {
+		t.Fatal("cleanup of run-1 should not affect run-2")
+	}
+}
+
+func TestDefaultStageConfig_FixupReusesImplementSession(t *testing.T) {
+	cfg := defaultStageConfig(core.StageFixup)
+	if cfg.ReuseSessionFrom != core.StageImplement {
+		t.Fatalf("fixup ReuseSessionFrom = %q, want %q", cfg.ReuseSessionFrom, core.StageImplement)
+	}
+}
+
+func TestDefaultStageConfig_ImplementNoReuse(t *testing.T) {
+	cfg := defaultStageConfig(core.StageImplement)
+	if cfg.ReuseSessionFrom != "" {
+		t.Fatalf("implement ReuseSessionFrom = %q, want empty", cfg.ReuseSessionFrom)
+	}
+}
+
+func TestDefaultStageConfig_CodeReviewNoReuse(t *testing.T) {
+	cfg := defaultStageConfig(core.StageCodeReview)
+	if cfg.ReuseSessionFrom != "" {
+		t.Fatalf("code_review ReuseSessionFrom = %q, want empty", cfg.ReuseSessionFrom)
 	}
 }

@@ -101,6 +101,7 @@ type Config struct {
 	RunstageRoles          map[string]string
 	IssueParserRoleID      string
 	WebhookReplayer        WebhookDeliveryReplayer
+	SCM                    core.SCM
 	Hub                    *Hub
 	ProjectRepoProvisioner ProjectRepoProvisioner
 	ProjectReposRoot       string
@@ -150,7 +151,7 @@ func NewServer(cfg Config) *Server {
 	r.Get("/health", handleHealth)
 	r.Get("/api/v1/health", handleHealth)
 	registerA2ARoutes(r, cfg)
-	webhookReplayer := registerWebhookRoutes(r, cfg.Store, cfg.RunExec, strings.TrimSpace(cfg.WebhookSecret), cfg.RunstageRoles)
+	webhookReplayer := registerWebhookRoutes(r, cfg.Store, cfg.RunExec, strings.TrimSpace(cfg.WebhookSecret), cfg.RunstageRoles, cfg.SCM)
 	if cfg.WebhookReplayer != nil {
 		webhookReplayer = cfg.WebhookReplayer
 	}

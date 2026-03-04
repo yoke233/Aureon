@@ -36,6 +36,7 @@ const (
 	EventIssueDone              EventType = "issue_done"
 	EventIssueFailed            EventType = "issue_failed"
 	EventIssueDependencyChanged EventType = "issue_dependency_changed"
+	EventAutoMerged             EventType = "auto_merged"
 
 	// GitHub integration lifecycle events.
 	EventGitHubWebhookReceived            EventType = "github_webhook_received"
@@ -57,6 +58,20 @@ type Event struct {
 	Data      map[string]string `json:"data,omitempty"`
 	Error     string            `json:"error,omitempty"`
 	Timestamp time.Time         `json:"timestamp"`
+}
+
+// RunEvent stores one persisted EventBus event for a workflow run.
+type RunEvent struct {
+	ID        int64             `json:"id"`
+	RunID     string            `json:"run_id"`
+	ProjectID string            `json:"project_id"`
+	IssueID   string            `json:"issue_id,omitempty"`
+	EventType string            `json:"event_type"`
+	Stage     string            `json:"stage,omitempty"`
+	Agent     string            `json:"agent,omitempty"`
+	Data      map[string]string `json:"data,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 func IsIssueScopedEvent(eventType EventType) bool {

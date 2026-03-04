@@ -22,6 +22,7 @@ const ISSUE_RUN_EVENT_TYPES = new Set([
   "run_completed",
   "run_failed",
   "run_cancelled",
+  "auto_merged",
   "issue_created",
   "issue_reviewing",
   "review_done",

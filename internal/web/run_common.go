@@ -79,8 +79,11 @@ func defaultRunStageConfig(id core.StageID) core.StageConfig {
 	switch id {
 	case core.StageRequirements, core.StageCodeReview:
 		cfg.Agent = "claude"
-	case core.StageImplement, core.StageFixup:
+	case core.StageImplement:
 		cfg.Agent = "codex"
+	case core.StageFixup:
+		cfg.Agent = "codex"
+		cfg.ReuseSessionFrom = core.StageImplement
 	case core.StageE2ETest:
 		cfg.Agent = "codex"
 		cfg.Timeout = 15 * time.Minute

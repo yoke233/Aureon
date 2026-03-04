@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -65,8 +66,9 @@ type DepScheduler struct {
 	pub     eventPublisher
 	tracker core.Tracker
 
-	runRun func(context.Context, string) error
-	sem    chan struct{}
+	runRun     func(context.Context, string) error
+	sem        chan struct{}
+	stageRoles map[core.StageID]string
 
 	mu            sync.Mutex
 	sessions      map[string]*runningSession
@@ -79,6 +81,22 @@ type DepScheduler struct {
 
 	reconcileInterval time.Duration
 	reconcileRun      func(context.Context) error
+}
+
+// SetStageRoles configures the role mapping for run stages.
+func (s *DepScheduler) SetStageRoles(roles map[string]string) {
+	if s == nil || len(roles) == 0 {
+		return
+	}
+	m := make(map[core.StageID]string, len(roles))
+	for k, v := range roles {
+		stage := core.StageID(strings.TrimSpace(k))
+		role := strings.TrimSpace(v)
+		if stage != "" && role != "" {
+			m[stage] = role
+		}
+	}
+	s.stageRoles = m
 }
 
 func NewDepScheduler(
@@ -627,7 +645,7 @@ func (s *DepScheduler) dispatchIssue(ctx context.Context, sessionID, issueID str
 	}
 
 	profile := workflowProfileFromIssue(issue)
-	Run, err := buildRunFromIssue(issue, profile)
+	Run, err := buildRunFromIssue(issue, profile, s.stageRoles)
 	if err != nil {
 		s.releaseSlot()
 		s.mu.Unlock()
@@ -702,12 +720,16 @@ func (s *DepScheduler) dispatchReadyAcrossSessions(ctx context.Context) error {
 
 	for {
 		s.mu.Lock()
-		if cap(s.sem) > 0 && len(s.sem) >= cap(s.sem) {
+		semLen, semCap := len(s.sem), cap(s.sem)
+		if semCap > 0 && semLen >= semCap {
+			slog.Info("dispatchReady: sem full", "len", semLen, "cap", semCap)
 			s.mu.Unlock()
 			return nil
 		}
 		candidates := s.globalReadyCandidatesLocked()
+		sessCount := len(s.sessions)
 		s.mu.Unlock()
+		slog.Info("dispatchReady: candidates", "count", len(candidates), "sessions", sessCount, "sem", fmt.Sprintf("%d/%d", semLen, semCap))
 		if len(candidates) == 0 {
 			return nil
 		}
@@ -716,8 +738,10 @@ func (s *DepScheduler) dispatchReadyAcrossSessions(ctx context.Context) error {
 		for _, candidate := range candidates {
 			dispatched, err := s.dispatchIssue(ctx, candidate.sessionID, candidate.issueID)
 			if err != nil {
+				slog.Error("dispatchReady: dispatchIssue failed", "session", candidate.sessionID, "issue", candidate.issueID, "error", err)
 				return err
 			}
+			slog.Info("dispatchReady: dispatchIssue", "session", candidate.sessionID, "issue", candidate.issueID, "dispatched", dispatched)
 			if dispatched {
 				dispatchedAny = true
 			}
@@ -932,7 +956,7 @@ func (rs *runningSession) readyToDispatchIDs() []string {
 	return ordered
 }
 
-func buildRunFromIssue(issue *core.Issue, profile core.WorkflowProfileType) (*core.Run, error) {
+func buildRunFromIssue(issue *core.Issue, profile core.WorkflowProfileType, stageRoles map[core.StageID]string) (*core.Run, error) {
 	if issue == nil {
 		return nil, errors.New("issue cannot be nil")
 	}
@@ -941,7 +965,7 @@ func buildRunFromIssue(issue *core.Issue, profile core.WorkflowProfileType) (*co
 	if template == "" {
 		template = "standard"
 	}
-	stages, err := buildSchedulerStages(template)
+	stages, err := buildSchedulerStages(template, stageRoles)
 	if err != nil {
 		return nil, err
 	}
@@ -972,7 +996,7 @@ func buildRunFromIssue(issue *core.Issue, profile core.WorkflowProfileType) (*co
 	}, nil
 }
 
-func buildSchedulerStages(template string) ([]core.StageConfig, error) {
+func buildSchedulerStages(template string, stageRoles map[core.StageID]string) ([]core.StageConfig, error) {
 	stageIDs, ok := engine.Templates[template]
 	if !ok {
 		return nil, fmt.Errorf("unknown template: %s", template)
@@ -981,6 +1005,9 @@ func buildSchedulerStages(template string) ([]core.StageConfig, error) {
 	stages := make([]core.StageConfig, len(stageIDs))
 	for i, stageID := range stageIDs {
 		stages[i] = schedulerDefaultStageConfig(stageID)
+		if role, ok := stageRoles[stageID]; ok {
+			stages[i].Role = role
+		}
 	}
 	return stages, nil
 }
@@ -997,8 +1024,11 @@ func schedulerDefaultStageConfig(id core.StageID) core.StageConfig {
 	switch id {
 	case core.StageRequirements, core.StageCodeReview:
 		cfg.Agent = "codex"
-	case core.StageImplement, core.StageFixup:
+	case core.StageImplement:
 		cfg.Agent = "codex"
+	case core.StageFixup:
+		cfg.Agent = "codex"
+		cfg.ReuseSessionFrom = core.StageImplement
 	case core.StageE2ETest:
 		cfg.Agent = "codex"
 		cfg.Timeout = 15 * time.Minute

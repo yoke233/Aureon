@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "../lib/apiClient";
 import type { Run } from "../types/workflow";
-import type { RunActionRequest, RunCheckpoint } from "../types/api";
+import type { RunActionRequest, RunCheckpoint, RunEvent } from "../types/api";
 import GitHubStatusBadge from "../components/GitHubStatusBadge";
 
 interface RunViewProps {
@@ -77,12 +77,35 @@ const getRunProgress = (Run: Run) => {
   };
 };
 
+const EVENT_TONE_MAP: Record<string, "neutral" | "success" | "warning" | "danger"> = {
+  run_done: "success",
+  auto_merged: "success",
+  run_failed: "danger",
+  run_started: "neutral",
+  stage_started: "neutral",
+};
+
+const EVENT_TONE_CLASS: Record<string, string> = {
+  neutral: "border-[#d0d7de] bg-white",
+  success: "border-green-300 bg-green-50",
+  warning: "border-yellow-300 bg-yellow-50",
+  danger: "border-red-300 bg-red-50",
+};
+
+const formatEventType = (eventType: string): string =>
+  eventType
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
 const RunView = ({ apiClient, projectId, refreshToken }: RunViewProps) => {
   const [Runs, setRuns] = useState<Run[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [checkpoints, setCheckpoints] = useState<RunCheckpoint[]>([]);
+  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [checkpointsLoading, setCheckpointsLoading] = useState(false);
+  const [eventsLoading, setEventsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -181,6 +204,35 @@ const RunView = ({ apiClient, projectId, refreshToken }: RunViewProps) => {
     }
     void loadCheckpoints(selectedRunId);
   }, [selectedRunId, loadCheckpoints]);
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      setRunEvents([]);
+      return;
+    }
+    let cancelled = false;
+    const loadEvents = async () => {
+      setEventsLoading(true);
+      try {
+        const response = await apiClient.listRunEvents(selectedRunId);
+        if (!cancelled) {
+          setRunEvents(response.items);
+        }
+      } catch {
+        if (!cancelled) {
+          setRunEvents([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setEventsLoading(false);
+        }
+      }
+    };
+    void loadEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, selectedRunId]);
 
   const selectedRun = useMemo(
     () => Runs.find((Run) => Run.id === selectedRunId) ?? null,
@@ -410,6 +462,64 @@ const RunView = ({ apiClient, projectId, refreshToken }: RunViewProps) => {
             </ul>
           )}
         </article>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-semibold">Events</h3>
+        {eventsLoading ? (
+          <p className="mt-2 text-xs text-slate-500">事件加载中...</p>
+        ) : runEvents.length === 0 ? (
+          <p className="mt-2 text-xs text-slate-500">No events recorded</p>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {runEvents.map((event) => {
+              const tone = EVENT_TONE_MAP[event.event_type] ?? "neutral";
+              return (
+                <li
+                  key={event.id}
+                  className={`rounded-lg border px-4 py-3 ${EVENT_TONE_CLASS[tone]}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-block h-2 w-2 rounded-full ${
+                        tone === "success"
+                          ? "bg-green-500"
+                          : tone === "danger"
+                            ? "bg-red-500"
+                            : tone === "warning"
+                              ? "bg-yellow-500"
+                              : "bg-slate-400"
+                      }`}
+                    />
+                    <span className="text-sm font-semibold text-slate-800">
+                      {formatEventType(event.event_type)}
+                    </span>
+                    <span className="ml-auto text-xs text-slate-500">
+                      {new Date(event.created_at).toLocaleString("zh-CN")}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                    <span>executor: {event.agent ?? "system"}</span>
+                    {event.stage ? <span>stage: {event.stage}</span> : null}
+                  </div>
+                  {event.error ? (
+                    <p className="mt-1 text-xs text-red-600">{event.error}</p>
+                  ) : null}
+                  {event.data && Object.keys(event.data).length > 0 ? (
+                    <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+                      {Object.entries(event.data).map(([key, value]) => (
+                        <div key={key} className="contents">
+                          <dt className="font-medium text-slate-500">{key}</dt>
+                          <dd className="text-slate-700">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

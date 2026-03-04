@@ -355,6 +355,24 @@ export interface ApiStatsResponse {
   };
 }
 
+export interface RunEvent {
+  id: number;
+  run_id: string;
+  project_id: string;
+  issue_id?: string;
+  event_type: string;
+  stage?: string;
+  agent?: string;
+  data?: Record<string, string>;
+  error?: string;
+  created_at: string;
+}
+
+export interface ListRunEventsResponse {
+  items: RunEvent[];
+  total: number;
+}
+
 export type ListChatsResponse = ChatSession[];
 export type ListChatRunEventsResponse = ChatRunEvent[];
 export type GetChatResponse = ChatSession;

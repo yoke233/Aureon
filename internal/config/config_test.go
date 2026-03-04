@@ -81,7 +81,7 @@ func TestLoadDefaults_UsesACPAgentProfiles(t *testing.T) {
 	if claude.LaunchCommand != "npx" {
 		t.Fatalf("expected claude launch command npx, got %q", claude.LaunchCommand)
 	}
-	if !slices.Equal(claude.LaunchArgs, []string{"-y", "@zed-industries/claude-agent-acp@latest"}) {
+	if !slices.Equal(claude.LaunchArgs, []string{"-y", "@zed-industries/claude-agent-acp"}) {
 		t.Fatalf("unexpected claude launch args: %#v", claude.LaunchArgs)
 	}
 
@@ -92,7 +92,7 @@ func TestLoadDefaults_UsesACPAgentProfiles(t *testing.T) {
 	if codex.LaunchCommand != "npx" {
 		t.Fatalf("expected codex launch command npx, got %q", codex.LaunchCommand)
 	}
-	if !slices.Equal(codex.LaunchArgs, []string{"-y", "@zed-industries/codex-acp@latest"}) {
+	if !slices.Equal(codex.LaunchArgs, []string{"-y", "@zed-industries/codex-acp"}) {
 		t.Fatalf("unexpected codex launch args: %#v", codex.LaunchArgs)
 	}
 }
@@ -140,13 +140,13 @@ func TestConfig_Defaults_GitHub(t *testing.T) {
 	}
 }
 
-func TestA2ADefaults_DisabledByDefault(t *testing.T) {
+func TestA2ADefaults_EnabledByDefault(t *testing.T) {
 	cfg := Defaults()
-	if cfg.A2A.Enabled {
-		t.Fatal("expected a2a.enabled default false, got true")
+	if !cfg.A2A.Enabled {
+		t.Fatal("expected a2a.enabled default true, got false")
 	}
-	if cfg.A2A.Token != "" {
-		t.Fatalf("expected a2a.token default empty, got %q", cfg.A2A.Token)
+	if cfg.A2A.Token != "default" {
+		t.Fatalf("expected a2a.token default \"default\", got %q", cfg.A2A.Token)
 	}
 	if cfg.A2A.Version != "0.3" {
 		t.Fatalf("expected a2a.version default 0.3, got %q", cfg.A2A.Version)

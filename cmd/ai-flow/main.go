@@ -3,10 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-
-	agentclaude "github.com/yoke233/ai-workflow/internal/plugins/agent-claude"
-	runtimeprocess "github.com/yoke233/ai-workflow/internal/plugins/runtime-process"
-	"github.com/yoke233/ai-workflow/internal/tui"
 )
 
 func main() {
@@ -87,15 +83,6 @@ func runWithArgs(args []string) error {
 		}
 	case "server":
 		return cmdServer(args[1:])
-	case "tui":
-		exec, store, err := bootstrap()
-		if err != nil {
-			return err
-		}
-		defer store.Close()
-		claude := agentclaude.New("claude")
-		runtime := runtimeprocess.New()
-		return tui.Run(exec, store, claude, runtime)
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -119,6 +106,5 @@ Usage:
   ai-flow scheduler once
   ai-flow github replay --delivery-id <id>
   ai-flow github validate
-  ai-flow server [--port <port>]
-  ai-flow tui`)
+  ai-flow server [--port <port>]`)
 }

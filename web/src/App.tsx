@@ -35,7 +35,7 @@ const ISSUE_RUN_EVENT_TYPES = new Set([
   "issue_dependency_changed",
 ]);
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/v1";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/v3";
 const API_TOKEN = import.meta.env.VITE_API_TOKEN || "";
 
 const resolveA2AEnabledFromEnv = (): boolean => {
@@ -54,9 +54,6 @@ const parseViewFromLocation = (): AppView => {
   const view = params.get("view");
   if (view === "chat" || view === "board") {
     return view;
-  }
-  if (view === "plan") {
-    return "board";
   }
   if (params.get("issue")) {
     return "board";

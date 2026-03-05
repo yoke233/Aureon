@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS issues (
 	auto_merge        INTEGER NOT NULL DEFAULT 1,
 	merge_retries     INTEGER NOT NULL DEFAULT 0,
 	triage_instructions TEXT NOT NULL DEFAULT '',
+	submitted_by      TEXT NOT NULL DEFAULT '',
 	state             TEXT NOT NULL DEFAULT 'open',
     status            TEXT NOT NULL DEFAULT 'draft',
     run_id       TEXT,
@@ -179,6 +180,30 @@ CREATE TABLE IF NOT EXISTS run_events (
     error      TEXT NOT NULL DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope        TEXT NOT NULL DEFAULT 'run',
+    event_type   TEXT NOT NULL,
+    project_id   TEXT NOT NULL DEFAULT '',
+    run_id       TEXT NOT NULL DEFAULT '',
+    issue_id     TEXT NOT NULL DEFAULT '',
+    session_id   TEXT NOT NULL DEFAULT '',
+    stage        TEXT NOT NULL DEFAULT '',
+    agent        TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    error        TEXT NOT NULL DEFAULT '',
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS issue_edges (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_id   TEXT NOT NULL,
+    to_id     TEXT NOT NULL,
+    edge_type TEXT NOT NULL DEFAULT 'depends_on',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(from_id, to_id, edge_type)
+);
 `
 
 const schemaIndexes = `
@@ -194,11 +219,18 @@ CREATE INDEX IF NOT EXISTS idx_issue_attachments_issue ON issue_attachments(issu
 CREATE INDEX IF NOT EXISTS idx_issue_changes_issue ON issue_changes(issue_id);
 CREATE INDEX IF NOT EXISTS idx_review_records_issue ON review_records(issue_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_created ON run_events(run_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_events_scope_project ON events(scope, project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_events_issue ON events(issue_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_issue_edges_from ON issue_edges(from_id);
+CREATE INDEX IF NOT EXISTS idx_issue_edges_to ON issue_edges(to_id);
 `
 
 // schemaVersion tracks which migrations have been applied.
 // Bump this when adding new migrations.
-const schemaVersion = 5
+const schemaVersion = 6
 
 func applyMigrations(db *sql.DB) error {
 	if _, err := db.Exec(schemaTables); err != nil {
@@ -238,6 +270,14 @@ func applyMigrations(db *sql.DB) error {
 	if currentVersion < 5 {
 		if err := migrateAddIssueTriageInstructions(db); err != nil {
 			return fmt.Errorf("migrate triage_instructions: %w", err)
+		}
+	}
+	if currentVersion < 6 {
+		if err := migrateAddSubmittedBy(db); err != nil {
+			return fmt.Errorf("migrate submitted_by: %w", err)
+		}
+		if err := migrateEventsFromLegacy(db); err != nil {
+			return fmt.Errorf("migrate events from legacy: %w", err)
 		}
 	}
 	if err := migrateBackfillLegacyColumns(db); err != nil {
@@ -363,6 +403,7 @@ func migrateBackfillLegacyColumns(db *sql.DB) error {
 		{name: "chat_sessions.agent_session_id", run: migrateAddChatSessionAgentSessionID},
 		{name: "issues.merge_retries", run: migrateAddMergeRetries},
 		{name: "issues.triage_instructions", run: migrateAddIssueTriageInstructions},
+		{name: "issues.submitted_by", run: migrateAddSubmittedBy},
 	}
 
 	for _, backfill := range backfills {
@@ -413,6 +454,59 @@ func migrateAddChatSessionAgentSessionID(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`ALTER TABLE chat_sessions ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("add chat_sessions.agent_session_id column: %w", err)
+	}
+	return nil
+}
+
+func migrateAddSubmittedBy(db *sql.DB) error {
+	has, err := hasColumn(db, "issues", "submitted_by")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN submitted_by TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add submitted_by column: %w", err)
+	}
+	return nil
+}
+
+func migrateEventsFromLegacy(db *sql.DB) error {
+	// Copy run_events into unified events table (scope=run).
+	hasRunEvents, err := hasTable(db, "run_events")
+	if err != nil {
+		return err
+	}
+	if hasRunEvents {
+		// Ensure run_id column exists before copying (may be missing on pre-v5 DBs).
+		if err := migrateAddRunEventRunID(db); err != nil {
+			return fmt.Errorf("ensure run_events.run_id: %w", err)
+		}
+		_, err := db.Exec(`
+			INSERT OR IGNORE INTO events (scope, event_type, project_id, run_id, issue_id, stage, agent, payload_json, error, created_at)
+			SELECT 'run', event_type, project_id, run_id, issue_id, stage, agent, data_json, error, created_at
+			FROM run_events
+		`)
+		if err != nil {
+			return fmt.Errorf("copy run_events to events: %w", err)
+		}
+	}
+
+	// Copy chat_run_events into unified events table (scope=chat).
+	hasChatEvents, err := hasTable(db, "chat_run_events")
+	if err != nil {
+		return err
+	}
+	if hasChatEvents {
+		_, err := db.Exec(`
+			INSERT OR IGNORE INTO events (scope, event_type, project_id, session_id, payload_json, created_at)
+			SELECT 'chat', event_type, project_id, chat_session_id, payload_json, created_at
+			FROM chat_run_events
+		`)
+		if err != nil {
+			return fmt.Errorf("copy chat_run_events to events: %w", err)
+		}
 	}
 	return nil
 }

@@ -15,6 +15,8 @@ export type IssueStatus =
   | "merging"
   | "done"
   | "failed"
+  | "decomposing"
+  | "decomposed"
   | "superseded"
   | "abandoned";
 
@@ -46,13 +48,17 @@ export interface Project {
   updated_at: string;
 }
 
+export type RunConclusion = "success" | "failure" | "timed_out" | "cancelled";
+
 export interface Run {
   id: string;
   project_id: string;
+  issue_id?: string;
   name: string;
   description: string;
   template: string;
   status: RunStatus;
+  conclusion?: RunConclusion;
   current_stage: string;
   artifacts: Record<string, string>;
   config: Record<string, unknown>;
@@ -105,7 +111,11 @@ export interface Issue {
   run_id: string;
   version: number;
   superseded_by: string;
+  parent_id: string;
   external_id: string;
+  submitted_by: string;
+  merge_retries: number;
+  triage_instructions: string;
   fail_policy: FailurePolicy;
   created_at: string;
   updated_at: string;

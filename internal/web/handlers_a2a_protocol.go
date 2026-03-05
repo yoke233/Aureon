@@ -24,6 +24,7 @@ const (
 	a2aMethodMessageStream = "message/stream"
 	a2aMethodTasksGet      = "tasks/get"
 	a2aMethodTasksCancel   = "tasks/cancel"
+	a2aMethodTasksList     = "tasks/list"
 )
 
 type a2aRPCRequest struct {
@@ -111,6 +112,33 @@ func decodeA2ATaskIDParams(raw json.RawMessage) (a2a.TaskIDParams, error) {
 	return params, nil
 }
 
+func decodeA2AListTasksParams(raw json.RawMessage) (a2a.ListTasksRequest, error) {
+	var params a2a.ListTasksRequest
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return params, nil
+	}
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return a2a.ListTasksRequest{}, fmt.Errorf("decode params: %w", err)
+	}
+	return params, nil
+}
+
+func a2aListTasksResponse(list *teamleader.A2ATaskList) *a2a.ListTasksResponse {
+	resp := &a2a.ListTasksResponse{}
+	if list == nil {
+		return resp
+	}
+	tasks := make([]*a2a.Task, 0, len(list.Tasks))
+	for _, snapshot := range list.Tasks {
+		tasks = append(tasks, a2aTaskFromSnapshot(snapshot))
+	}
+	resp.Tasks = tasks
+	resp.TotalSize = list.TotalSize
+	resp.PageSize = list.PageSize
+	resp.NextPageToken = list.NextPageToken
+	return resp
+}
+
 func decodeA2ARPCParams(raw json.RawMessage, out any) error {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return errors.New("params are required")
@@ -147,7 +175,40 @@ func a2aTaskFromSnapshot(snapshot *teamleader.A2ATaskSnapshot) *a2a.Task {
 			"project_id": projectID,
 		}
 	}
+	task.Artifacts = a2aArtifactsFromSnapshot(snapshot)
 	return task
+}
+
+func a2aArtifactsFromSnapshot(snapshot *teamleader.A2ATaskSnapshot) []*a2a.Artifact {
+	if snapshot == nil {
+		return nil
+	}
+	var artifacts []*a2a.Artifact
+	if branch := strings.TrimSpace(snapshot.BranchName); branch != "" {
+		artifacts = append(artifacts, &a2a.Artifact{
+			ID:   "branch",
+			Name: "branch",
+			Parts: a2a.ContentParts{
+				a2a.TextPart{Text: branch},
+			},
+		})
+	}
+	for k, v := range snapshot.Artifacts {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		artifacts = append(artifacts, &a2a.Artifact{
+			ID:   a2a.ArtifactID(k),
+			Name: k,
+			Parts: a2a.ContentParts{
+				a2a.TextPart{Text: v},
+			},
+		})
+	}
+	if len(artifacts) == 0 {
+		return nil
+	}
+	return artifacts
 }
 
 func a2aTaskStateFromSnapshot(state teamleader.A2ATaskState) a2a.TaskState {

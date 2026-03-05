@@ -194,6 +194,295 @@ func TestA2ABridge_CancelTaskDelegatesToApplyIssueAction(t *testing.T) {
 	}
 }
 
+func TestA2ABridge_SendMessageFollowUpApprovesReviewingIssue(t *testing.T) {
+	store := newA2ABridgeTestStore(t)
+	project := mustCreateA2ABridgeProject(t, store, "proj-a2a-followup")
+	mustCreateA2ABridgeIssue(t, store, &core.Issue{
+		ID:        "issue-followup",
+		ProjectID: project.ID,
+		Title:     "needs input",
+		Template:  "standard",
+		Status:    core.IssueStatusReviewing,
+	})
+
+	manager := &fakeA2AIssueManager{
+		applyActionFn: func(_ context.Context, issueID, action, feedback string) (*core.Issue, error) {
+			if issueID != "issue-followup" {
+				t.Fatalf("apply action issue id = %q, want %q", issueID, "issue-followup")
+			}
+			if action != IssueActionApprove {
+				t.Fatalf("action = %q, want %q", action, IssueActionApprove)
+			}
+			if feedback != "looks good, proceed" {
+				t.Fatalf("feedback = %q, want %q", feedback, "looks good, proceed")
+			}
+			return &core.Issue{
+				ID:        issueID,
+				ProjectID: project.ID,
+				Status:    core.IssueStatusQueued,
+			}, nil
+		},
+	}
+
+	bridge, err := NewA2ABridge(store, manager)
+	if err != nil {
+		t.Fatalf("NewA2ABridge() error = %v", err)
+	}
+
+	task, err := bridge.SendMessage(context.Background(), A2ASendMessageInput{
+		ProjectID:    project.ID,
+		TaskID:       "issue-followup",
+		Conversation: "looks good, proceed",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage follow-up error = %v", err)
+	}
+	if task.State != A2ATaskStateWorking {
+		t.Fatalf("state = %q, want %q", task.State, A2ATaskStateWorking)
+	}
+	if manager.applyActionCalls != 1 {
+		t.Fatalf("apply action calls = %d, want 1", manager.applyActionCalls)
+	}
+}
+
+func TestA2ABridge_SendMessageFollowUpRejectsNonReviewingIssue(t *testing.T) {
+	store := newA2ABridgeTestStore(t)
+	project := mustCreateA2ABridgeProject(t, store, "proj-a2a-followup-bad")
+	mustCreateA2ABridgeIssue(t, store, &core.Issue{
+		ID:        "issue-executing",
+		ProjectID: project.ID,
+		Title:     "running",
+		Template:  "standard",
+		Status:    core.IssueStatusExecuting,
+	})
+
+	bridge, err := NewA2ABridge(store, &fakeA2AIssueManager{})
+	if err != nil {
+		t.Fatalf("NewA2ABridge() error = %v", err)
+	}
+
+	_, err = bridge.SendMessage(context.Background(), A2ASendMessageInput{
+		ProjectID:    project.ID,
+		TaskID:       "issue-executing",
+		Conversation: "some reply",
+	})
+	if !errors.Is(err, ErrA2AInvalidInput) {
+		t.Fatalf("expected ErrA2AInvalidInput, got %v", err)
+	}
+}
+
+func TestA2ABridge_SendMessageFollowUpTaskNotFound(t *testing.T) {
+	store := newA2ABridgeTestStore(t)
+
+	bridge, err := NewA2ABridge(store, &fakeA2AIssueManager{})
+	if err != nil {
+		t.Fatalf("NewA2ABridge() error = %v", err)
+	}
+
+	_, err = bridge.SendMessage(context.Background(), A2ASendMessageInput{
+		TaskID:       "nonexistent-task",
+		Conversation: "reply",
+	})
+	if !errors.Is(err, ErrA2ATaskNotFound) {
+		t.Fatalf("expected ErrA2ATaskNotFound, got %v", err)
+	}
+}
+
+func TestA2ABridge_ListTasksReturnsMatchingIssues(t *testing.T) {
+	store := newA2ABridgeTestStore(t)
+	project := mustCreateA2ABridgeProject(t, store, "proj-a2a-list")
+	mustCreateA2ABridgeIssue(t, store, &core.Issue{
+		ID:        "issue-list-1",
+		ProjectID: project.ID,
+		Title:     "list 1",
+		Template:  "standard",
+		Status:    core.IssueStatusExecuting,
+	})
+	mustCreateA2ABridgeIssue(t, store, &core.Issue{
+		ID:        "issue-list-2",
+		ProjectID: project.ID,
+		Title:     "list 2",
+		Template:  "standard",
+		Status:    core.IssueStatusDone,
+	})
+	mustCreateA2ABridgeIssue(t, store, &core.Issue{
+		ID:        "issue-list-3",
+		ProjectID: project.ID,
+		Title:     "list 3",
+		Template:  "standard",
+		Status:    core.IssueStatusFailed,
+	})
+
+	bridge, err := NewA2ABridge(store, &fakeA2AIssueManager{})
+	if err != nil {
+		t.Fatalf("NewA2ABridge() error = %v", err)
+	}
+
+	t.Run("all tasks", func(t *testing.T) {
+		result, err := bridge.ListTasks(context.Background(), A2AListTasksInput{
+			ProjectID: project.ID,
+		})
+		if err != nil {
+			t.Fatalf("ListTasks() error = %v", err)
+		}
+		if result.TotalSize != 3 {
+			t.Fatalf("total = %d, want 3", result.TotalSize)
+		}
+		if len(result.Tasks) != 3 {
+			t.Fatalf("tasks count = %d, want 3", len(result.Tasks))
+		}
+	})
+
+	t.Run("filter by state", func(t *testing.T) {
+		result, err := bridge.ListTasks(context.Background(), A2AListTasksInput{
+			ProjectID: project.ID,
+			State:     A2ATaskStateWorking,
+		})
+		if err != nil {
+			t.Fatalf("ListTasks() error = %v", err)
+		}
+		if result.TotalSize != 1 {
+			t.Fatalf("total = %d, want 1", result.TotalSize)
+		}
+		if result.Tasks[0].TaskID != "issue-list-1" {
+			t.Fatalf("task id = %q, want %q", result.Tasks[0].TaskID, "issue-list-1")
+		}
+	})
+
+	t.Run("pagination", func(t *testing.T) {
+		result, err := bridge.ListTasks(context.Background(), A2AListTasksInput{
+			ProjectID: project.ID,
+			PageSize:  2,
+		})
+		if err != nil {
+			t.Fatalf("ListTasks() error = %v", err)
+		}
+		if len(result.Tasks) != 2 {
+			t.Fatalf("tasks count = %d, want 2", len(result.Tasks))
+		}
+		if result.TotalSize != 3 {
+			t.Fatalf("total = %d, want 3", result.TotalSize)
+		}
+		if result.NextPageToken == "" {
+			t.Fatal("expected next page token")
+		}
+
+		page2, err := bridge.ListTasks(context.Background(), A2AListTasksInput{
+			ProjectID: project.ID,
+			PageSize:  2,
+			PageToken: result.NextPageToken,
+		})
+		if err != nil {
+			t.Fatalf("ListTasks page 2 error = %v", err)
+		}
+		if len(page2.Tasks) != 1 {
+			t.Fatalf("page 2 tasks count = %d, want 1", len(page2.Tasks))
+		}
+		if page2.NextPageToken != "" {
+			t.Fatalf("expected empty next page token, got %q", page2.NextPageToken)
+		}
+	})
+
+	t.Run("empty result", func(t *testing.T) {
+		result, err := bridge.ListTasks(context.Background(), A2AListTasksInput{
+			ProjectID: project.ID,
+			State:     A2ATaskStateCanceled,
+		})
+		if err != nil {
+			t.Fatalf("ListTasks() error = %v", err)
+		}
+		if result.TotalSize != 0 {
+			t.Fatalf("total = %d, want 0", result.TotalSize)
+		}
+	})
+}
+
+func TestA2ABridge_GetTaskEnrichesSnapshotWithRunArtifacts(t *testing.T) {
+	store := newA2ABridgeTestStore(t)
+	project := mustCreateA2ABridgeProject(t, store, "proj-a2a-artifacts")
+
+	run := &core.Run{
+		ID:         "run-artifacts",
+		ProjectID:  project.ID,
+		Name:       "artifact run",
+		Template:   "standard",
+		Status:     core.StatusInProgress,
+		BranchName: "feat/a2a-artifact-test",
+		Artifacts: map[string]string{
+			"pr_number": "42",
+			"pr_url":    "https://github.com/example/repo/pull/42",
+		},
+	}
+	if err := store.SaveRun(run); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+
+	mustCreateA2ABridgeIssue(t, store, &core.Issue{
+		ID:        "issue-artifacts",
+		ProjectID: project.ID,
+		Title:     "artifact issue",
+		Template:  "standard",
+		Status:    core.IssueStatusExecuting,
+		RunID:     "run-artifacts",
+	})
+
+	bridge, err := NewA2ABridge(store, &fakeA2AIssueManager{})
+	if err != nil {
+		t.Fatalf("NewA2ABridge() error = %v", err)
+	}
+
+	task, err := bridge.GetTask(context.Background(), A2AGetTaskInput{
+		ProjectID: project.ID,
+		TaskID:    "issue-artifacts",
+	})
+	if err != nil {
+		t.Fatalf("GetTask() error = %v", err)
+	}
+	if task.BranchName != "feat/a2a-artifact-test" {
+		t.Fatalf("branch = %q, want %q", task.BranchName, "feat/a2a-artifact-test")
+	}
+	if task.Artifacts == nil {
+		t.Fatal("expected artifacts to be populated")
+	}
+	if task.Artifacts["pr_number"] != "42" {
+		t.Fatalf("pr_number = %q, want %q", task.Artifacts["pr_number"], "42")
+	}
+	if task.Artifacts["pr_url"] != "https://github.com/example/repo/pull/42" {
+		t.Fatalf("pr_url = %q, want %q", task.Artifacts["pr_url"], "https://github.com/example/repo/pull/42")
+	}
+}
+
+func TestA2ABridge_GetTaskNoRunIDSkipsEnrichment(t *testing.T) {
+	store := newA2ABridgeTestStore(t)
+	project := mustCreateA2ABridgeProject(t, store, "proj-a2a-norun")
+	mustCreateA2ABridgeIssue(t, store, &core.Issue{
+		ID:        "issue-norun",
+		ProjectID: project.ID,
+		Title:     "no run",
+		Template:  "standard",
+		Status:    core.IssueStatusDraft,
+	})
+
+	bridge, err := NewA2ABridge(store, &fakeA2AIssueManager{})
+	if err != nil {
+		t.Fatalf("NewA2ABridge() error = %v", err)
+	}
+
+	task, err := bridge.GetTask(context.Background(), A2AGetTaskInput{
+		ProjectID: project.ID,
+		TaskID:    "issue-norun",
+	})
+	if err != nil {
+		t.Fatalf("GetTask() error = %v", err)
+	}
+	if task.BranchName != "" {
+		t.Fatalf("branch = %q, want empty", task.BranchName)
+	}
+	if task.Artifacts != nil {
+		t.Fatalf("artifacts = %v, want nil", task.Artifacts)
+	}
+}
+
 func TestA2ABridge_ProjectScopeMismatchFails(t *testing.T) {
 	store := newA2ABridgeTestStore(t)
 	mustCreateA2ABridgeProject(t, store, "proj-a2a-scope-a")

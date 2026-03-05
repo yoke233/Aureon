@@ -764,11 +764,11 @@ func (s *SQLiteStore) CreateIssue(issue *core.Issue) error {
 	_, err = s.db.Exec(
 		`INSERT INTO issues (
 			id, project_id, session_id, title, body, labels, milestone_id, attachments, depends_on, blocks,
-			priority, template, auto_merge, merge_retries, triage_instructions, state, status, run_id, version, superseded_by, external_id, fail_policy, parent_id, closed_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			priority, template, auto_merge, merge_retries, triage_instructions, submitted_by, state, status, run_id, version, superseded_by, external_id, fail_policy, parent_id, closed_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		normalized.ID, normalized.ProjectID, nullableString(normalized.SessionID), normalized.Title, normalized.Body, labelsJSON,
 		normalized.MilestoneID, attachmentsJSON, dependsOnJSON, blocksJSON, normalized.Priority, normalized.Template,
-		normalized.AutoMerge, normalized.MergeRetries, normalized.TriageInstructions, string(normalized.State), string(normalized.Status), nullableString(normalized.RunID), normalized.Version,
+		normalized.AutoMerge, normalized.MergeRetries, normalized.TriageInstructions, normalized.SubmittedBy, string(normalized.State), string(normalized.Status), nullableString(normalized.RunID), normalized.Version,
 		normalized.SupersededBy, normalized.ExternalID, string(normalized.FailPolicy), normalized.ParentID, nullableTimePointer(normalized.ClosedAt),
 	)
 	if err != nil {
@@ -793,14 +793,14 @@ func (s *SQLiteStore) GetIssue(id string) (*core.Issue, error) {
 	err := s.db.QueryRow(
 		`SELECT id, project_id, COALESCE(session_id, ''), title, COALESCE(body, ''), COALESCE(labels, '[]'),
 		        COALESCE(milestone_id, ''), COALESCE(attachments, '[]'), COALESCE(depends_on, '[]'), COALESCE(blocks, '[]'),
-		        priority, template, COALESCE(auto_merge, 1), COALESCE(merge_retries, 0), COALESCE(triage_instructions, ''), state, status, COALESCE(run_id, ''), version, COALESCE(superseded_by, ''),
+		        priority, template, COALESCE(auto_merge, 1), COALESCE(merge_retries, 0), COALESCE(triage_instructions, ''), COALESCE(submitted_by, ''), state, status, COALESCE(run_id, ''), version, COALESCE(superseded_by, ''),
 		        COALESCE(external_id, ''), COALESCE(fail_policy, ''), COALESCE(parent_id, ''), closed_at, created_at, updated_at
 		 FROM issues WHERE id=?`,
 		id,
 	).Scan(
 		&issue.ID, &issue.ProjectID, &issue.SessionID, &issue.Title, &issue.Body, &labelsJSON,
 		&issue.MilestoneID, &attachmentsJSON, &dependsOnJSON, &blocksJSON, &issue.Priority,
-		&issue.Template, &issue.AutoMerge, &issue.MergeRetries, &issue.TriageInstructions, &issue.State, &issue.Status, &issue.RunID, &issue.Version, &issue.SupersededBy,
+		&issue.Template, &issue.AutoMerge, &issue.MergeRetries, &issue.TriageInstructions, &issue.SubmittedBy, &issue.State, &issue.Status, &issue.RunID, &issue.Version, &issue.SupersededBy,
 		&issue.ExternalID, &issue.FailPolicy, &issue.ParentID, &closedAt, &issue.CreatedAt, &issue.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -859,8 +859,8 @@ func (s *SQLiteStore) SaveIssue(issue *core.Issue) error {
 	_, err = s.db.Exec(`
 INSERT INTO issues (
 	id, project_id, session_id, title, body, labels, milestone_id, attachments, depends_on, blocks,
-	priority, template, auto_merge, merge_retries, triage_instructions, state, status, run_id, version, superseded_by, external_id, fail_policy, parent_id, closed_at
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	priority, template, auto_merge, merge_retries, triage_instructions, submitted_by, state, status, run_id, version, superseded_by, external_id, fail_policy, parent_id, closed_at
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id,
 	session_id=excluded.session_id,
@@ -876,6 +876,7 @@ ON CONFLICT(id) DO UPDATE SET
 	auto_merge=excluded.auto_merge,
 	merge_retries=excluded.merge_retries,
 	triage_instructions=excluded.triage_instructions,
+	submitted_by=excluded.submitted_by,
 	state=excluded.state,
 	status=excluded.status,
 	run_id=excluded.run_id,
@@ -888,7 +889,7 @@ ON CONFLICT(id) DO UPDATE SET
 	updated_at=CURRENT_TIMESTAMP`,
 		normalized.ID, normalized.ProjectID, nullableString(normalized.SessionID), normalized.Title, normalized.Body, labelsJSON,
 		normalized.MilestoneID, attachmentsJSON, dependsOnJSON, blocksJSON, normalized.Priority, normalized.Template,
-		normalized.AutoMerge, normalized.MergeRetries, normalized.TriageInstructions, string(normalized.State), string(normalized.Status), nullableString(normalized.RunID), normalized.Version,
+		normalized.AutoMerge, normalized.MergeRetries, normalized.TriageInstructions, normalized.SubmittedBy, string(normalized.State), string(normalized.Status), nullableString(normalized.RunID), normalized.Version,
 		normalized.SupersededBy, normalized.ExternalID, string(normalized.FailPolicy), normalized.ParentID, nullableTimePointer(normalized.ClosedAt),
 	)
 	if err != nil {
@@ -931,7 +932,7 @@ func (s *SQLiteStore) ListIssues(projectID string, filter core.IssueFilter) ([]c
 	query := fmt.Sprintf(`
 SELECT id, project_id, COALESCE(session_id, ''), title, COALESCE(body, ''), COALESCE(labels, '[]'),
        COALESCE(milestone_id, ''), COALESCE(attachments, '[]'), COALESCE(depends_on, '[]'), COALESCE(blocks, '[]'),
-       priority, template, COALESCE(auto_merge, 1), COALESCE(merge_retries, 0), COALESCE(triage_instructions, ''), state, status, COALESCE(run_id, ''), version, COALESCE(superseded_by, ''),
+       priority, template, COALESCE(auto_merge, 1), COALESCE(merge_retries, 0), COALESCE(triage_instructions, ''), COALESCE(submitted_by, ''), state, status, COALESCE(run_id, ''), version, COALESCE(superseded_by, ''),
        COALESCE(external_id, ''), COALESCE(fail_policy, ''), COALESCE(parent_id, ''), closed_at, created_at, updated_at
 FROM issues
 WHERE %s
@@ -964,7 +965,7 @@ ORDER BY created_at DESC`, whereClause)
 		if err := rows.Scan(
 			&issue.ID, &issue.ProjectID, &issue.SessionID, &issue.Title, &issue.Body, &labelsJSON,
 			&issue.MilestoneID, &attachmentsJSON, &dependsOnJSON, &blocksJSON, &issue.Priority,
-			&issue.Template, &issue.AutoMerge, &issue.MergeRetries, &issue.TriageInstructions, &issue.State, &issue.Status, &issue.RunID, &issue.Version, &issue.SupersededBy,
+			&issue.Template, &issue.AutoMerge, &issue.MergeRetries, &issue.TriageInstructions, &issue.SubmittedBy, &issue.State, &issue.Status, &issue.RunID, &issue.Version, &issue.SupersededBy,
 			&issue.ExternalID, &issue.FailPolicy, &issue.ParentID, &closedAt, &issue.CreatedAt, &issue.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
@@ -1105,7 +1106,7 @@ func (s *SQLiteStore) GetIssueByRun(RunID string) (*core.Issue, error) {
 	).Scan(
 		&issue.ID, &issue.ProjectID, &issue.SessionID, &issue.Title, &issue.Body, &labelsJSON,
 		&issue.MilestoneID, &attachmentsJSON, &dependsOnJSON, &blocksJSON, &issue.Priority,
-		&issue.Template, &issue.AutoMerge, &issue.MergeRetries, &issue.TriageInstructions, &issue.State, &issue.Status, &issue.RunID, &issue.Version, &issue.SupersededBy,
+		&issue.Template, &issue.AutoMerge, &issue.MergeRetries, &issue.TriageInstructions, &issue.SubmittedBy, &issue.State, &issue.Status, &issue.RunID, &issue.Version, &issue.SupersededBy,
 		&issue.ExternalID, &issue.FailPolicy, &issue.ParentID, &closedAt, &issue.CreatedAt, &issue.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1305,6 +1306,78 @@ func (s *SQLiteStore) GetReviewRecords(issueID string) ([]core.ReviewRecord, err
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) SaveEvent(event core.UnifiedEvent) error {
+	_, err := s.db.Exec(
+		`INSERT INTO events (scope, event_type, project_id, run_id, issue_id, session_id, stage, agent, payload_json, error)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		event.Scope, event.EventType, event.ProjectID, event.RunID, event.IssueID,
+		event.SessionID, event.Stage, event.Agent, event.PayloadJSON, event.Error,
+	)
+	return err
+}
+
+func (s *SQLiteStore) ListEvents(filter core.EventFilter) ([]core.UnifiedEvent, error) {
+	where := []string{"1=1"}
+	args := []any{}
+	if strings.TrimSpace(filter.Scope) != "" {
+		where = append(where, "scope=?")
+		args = append(args, filter.Scope)
+	}
+	if strings.TrimSpace(filter.ProjectID) != "" {
+		where = append(where, "project_id=?")
+		args = append(args, filter.ProjectID)
+	}
+	if strings.TrimSpace(filter.RunID) != "" {
+		where = append(where, "run_id=?")
+		args = append(args, filter.RunID)
+	}
+	if strings.TrimSpace(filter.IssueID) != "" {
+		where = append(where, "issue_id=?")
+		args = append(args, filter.IssueID)
+	}
+	if strings.TrimSpace(filter.SessionID) != "" {
+		where = append(where, "session_id=?")
+		args = append(args, filter.SessionID)
+	}
+	if strings.TrimSpace(filter.EventType) != "" {
+		where = append(where, "event_type=?")
+		args = append(args, filter.EventType)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, scope, event_type, project_id, run_id, issue_id, session_id, stage, agent, payload_json, error, created_at
+		 FROM events WHERE %s ORDER BY id ASC`, strings.Join(where, " AND "))
+
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]core.UnifiedEvent, 0)
+	for rows.Next() {
+		var e core.UnifiedEvent
+		if err := rows.Scan(
+			&e.ID, &e.Scope, &e.EventType, &e.ProjectID, &e.RunID,
+			&e.IssueID, &e.SessionID, &e.Stage, &e.Agent, &e.PayloadJSON,
+			&e.Error, &e.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) bindRunIssueLink(RunID, issueID string) error {
 	RunID = strings.TrimSpace(RunID)
 	issueID = strings.TrimSpace(issueID)
@@ -1340,6 +1413,7 @@ CREATE TABLE IF NOT EXISTS issues (
 	auto_merge    INTEGER NOT NULL DEFAULT 1,
 	merge_retries INTEGER NOT NULL DEFAULT 0,
 	triage_instructions TEXT NOT NULL DEFAULT '',
+	submitted_by  TEXT NOT NULL DEFAULT '',
 	state         TEXT NOT NULL DEFAULT 'open',
 	status        TEXT NOT NULL DEFAULT 'draft',
 	run_id   TEXT REFERENCES runs(id) ON DELETE SET NULL,

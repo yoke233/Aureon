@@ -221,6 +221,31 @@ a2a:
   enabled: false
   token: ""
   version: "0.3"
+  # auth:                            # Token 三元模型（Wave 3）
+  #   tokens:
+  #     "your-token-here":
+  #       submitter: "alice"
+  #       role: "operator"
+  #       projects: []               # 空 = 所有项目
+  #   policies:
+  #     operator:
+  #       operations: ["send", "get", "cancel", "list"]
+  #       data_scope: "full"
+  #     viewer:
+  #       operations: ["get", "list"]
+  #       data_scope: "summary"
+
+# Escalation 处理链（Wave 4 预埋，默认关闭）
+# escalation:
+#   enabled: false
+#   chain:
+#     steps:
+#       - name: auto-retry
+#         action: retry
+#         timeout: 5m
+#       - name: escalate-to-human
+#         action: escalate
+#         condition: "retry_count > 2"
 
 server:
   host: "127.0.0.1"               # 监听地址，默认只监听本地

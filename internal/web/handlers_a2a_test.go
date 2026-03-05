@@ -287,6 +287,342 @@ func TestA2ATasksCancel_SuccessStatusTransition(t *testing.T) {
 	}
 }
 
+func TestA2AMessageSend_FollowUpPassesTaskID(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		sendFn: func(input teamleader.A2ASendMessageInput) (*teamleader.A2ATaskSnapshot, error) {
+			if input.TaskID != "task-input-required" {
+				t.Fatalf("task id = %q, want %q", input.TaskID, "task-input-required")
+			}
+			if input.Conversation != "looks good proceed" {
+				t.Fatalf("conversation = %q, want %q", input.Conversation, "looks good proceed")
+			}
+			return &teamleader.A2ATaskSnapshot{
+				TaskID:    "task-input-required",
+				ProjectID: "proj-followup",
+				State:     teamleader.A2ATaskStateWorking,
+			}, nil
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{
+		"jsonrpc":"2.0",
+		"id":"followup-1",
+		"method":"message/send",
+		"params":{
+			"message":{
+				"messageId":"m-followup",
+				"role":"user",
+				"taskId":"task-input-required",
+				"parts":[{"kind":"text","text":"looks good proceed"}]
+			},
+			"metadata":{"project_id":"proj-followup"}
+		}
+	}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %#v", payload["result"])
+	}
+	status, ok := result["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result.status object, got %#v", result["status"])
+	}
+	if status["state"] != string(teamleader.A2ATaskStateWorking) {
+		t.Fatalf("result.status.state = %v, want %q", status["state"], teamleader.A2ATaskStateWorking)
+	}
+}
+
+func TestA2ATasksList_ReturnsTaskList(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		listFn: func(input teamleader.A2AListTasksInput) (*teamleader.A2ATaskList, error) {
+			return &teamleader.A2ATaskList{
+				Tasks: []*teamleader.A2ATaskSnapshot{
+					{
+						TaskID:    "task-1",
+						ProjectID: "proj-list",
+						SessionID: "ctx-list",
+						State:     teamleader.A2ATaskStateWorking,
+					},
+					{
+						TaskID:    "task-2",
+						ProjectID: "proj-list",
+						SessionID: "ctx-list",
+						State:     teamleader.A2ATaskStateCompleted,
+					},
+				},
+				TotalSize: 2,
+				PageSize:  50,
+			}, nil
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{
+		"jsonrpc":"2.0",
+		"id":"list-1",
+		"method":"tasks/list",
+		"params":{"context_id":"ctx-list"}
+	}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %#v", payload["result"])
+	}
+	tasks, ok := result["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", result["tasks"])
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("tasks count = %d, want 2", len(tasks))
+	}
+	totalSize, ok := result["total_size"].(float64)
+	if !ok || int(totalSize) != 2 {
+		t.Fatalf("total_size = %v, want 2", result["total_size"])
+	}
+}
+
+func TestA2ATasksList_EmptyParamsSucceeds(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		listFn: func(input teamleader.A2AListTasksInput) (*teamleader.A2ATaskList, error) {
+			return &teamleader.A2ATaskList{
+				Tasks:     []*teamleader.A2ATaskSnapshot{},
+				TotalSize: 0,
+				PageSize:  50,
+			}, nil
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{"jsonrpc":"2.0","id":"list-empty-1","method":"tasks/list","params":{}}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("expected success, got error: %v", payload["error"])
+	}
+}
+
+func TestA2ATasksList_NilParamsSucceeds(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		listFn: func(input teamleader.A2AListTasksInput) (*teamleader.A2ATaskList, error) {
+			return &teamleader.A2ATaskList{Tasks: []*teamleader.A2ATaskSnapshot{}, TotalSize: 0, PageSize: 50}, nil
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{"jsonrpc":"2.0","id":"list-nil-1","method":"tasks/list"}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("expected success, got error: %v", payload["error"])
+	}
+}
+
+func TestA2ATasksList_BridgeErrorReturnsRPCError(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		listFn: func(input teamleader.A2AListTasksInput) (*teamleader.A2ATaskList, error) {
+			return nil, teamleader.ErrA2AInvalidInput
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{"jsonrpc":"2.0","id":"list-err-1","method":"tasks/list","params":{}}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	errObj, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error object, got %#v", payload["error"])
+	}
+	if code, ok := errObj["code"].(float64); !ok || int(code) != -32602 {
+		t.Fatalf("expected error.code=-32602, got %#v", errObj["code"])
+	}
+}
+
+func TestA2ATasksList_Pagination(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		listFn: func(input teamleader.A2AListTasksInput) (*teamleader.A2ATaskList, error) {
+			if input.PageSize != 1 {
+				t.Fatalf("page size = %d, want 1", input.PageSize)
+			}
+			return &teamleader.A2ATaskList{
+				Tasks:         []*teamleader.A2ATaskSnapshot{{TaskID: "task-page", ProjectID: "proj-page", State: teamleader.A2ATaskStateWorking}},
+				TotalSize:     3,
+				PageSize:      1,
+				NextPageToken: "1",
+			}, nil
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{"jsonrpc":"2.0","id":"list-page-1","method":"tasks/list","params":{"page_size":1}}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %#v", payload["result"])
+	}
+	nextToken, _ := result["next_page_token"].(string)
+	if nextToken != "1" {
+		t.Fatalf("next_page_token = %q, want %q", nextToken, "1")
+	}
+}
+
+func TestA2ATasksGet_ReturnsArtifactsInResponse(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		getFn: func(input teamleader.A2AGetTaskInput) (*teamleader.A2ATaskSnapshot, error) {
+			return &teamleader.A2ATaskSnapshot{
+				TaskID:     "task-art",
+				ProjectID:  "proj-art",
+				State:      teamleader.A2ATaskStateCompleted,
+				BranchName: "feat/artifact-branch",
+				Artifacts: map[string]string{
+					"pr_number": "99",
+				},
+			}, nil
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{
+		"jsonrpc":"2.0",
+		"id":"get-art-1",
+		"method":"tasks/get",
+		"params":{"id":"task-art","metadata":{"project_id":"proj-art"}}
+	}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %#v", payload["result"])
+	}
+
+	artifacts, ok := result["artifacts"].([]any)
+	if !ok {
+		t.Fatalf("expected artifacts array, got %#v", result["artifacts"])
+	}
+	if len(artifacts) < 2 {
+		t.Fatalf("expected at least 2 artifacts (branch + pr_number), got %d", len(artifacts))
+	}
+
+	foundBranch := false
+	foundPR := false
+	for _, raw := range artifacts {
+		art, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := art["name"].(string)
+		parts, _ := art["parts"].([]any)
+		if len(parts) == 0 {
+			continue
+		}
+		part, _ := parts[0].(map[string]any)
+		text, _ := part["text"].(string)
+
+		switch name {
+		case "branch":
+			foundBranch = true
+			if text != "feat/artifact-branch" {
+				t.Fatalf("branch artifact text = %q, want %q", text, "feat/artifact-branch")
+			}
+		case "pr_number":
+			foundPR = true
+			if text != "99" {
+				t.Fatalf("pr_number artifact text = %q, want %q", text, "99")
+			}
+		}
+	}
+	if !foundBranch {
+		t.Fatal("expected branch artifact not found")
+	}
+	if !foundPR {
+		t.Fatal("expected pr_number artifact not found")
+	}
+}
+
+func TestA2ATasksGet_NoArtifactsWhenEmpty(t *testing.T) {
+	bridge := &fakeA2ABridge{
+		getFn: func(input teamleader.A2AGetTaskInput) (*teamleader.A2ATaskSnapshot, error) {
+			return &teamleader.A2ATaskSnapshot{
+				TaskID:    "task-noart",
+				ProjectID: "proj-noart",
+				State:     teamleader.A2ATaskStateWorking,
+			}, nil
+		},
+	}
+	srv := NewServer(Config{
+		A2AEnabled: true,
+		A2AToken:   "a2a-token",
+		A2AVersion: "0.3",
+		A2ABridge:  bridge,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	reqBody := `{
+		"jsonrpc":"2.0",
+		"id":"get-noart-1",
+		"method":"tasks/get",
+		"params":{"id":"task-noart","metadata":{"project_id":"proj-noart"}}
+	}`
+	payload := mustDoA2ARPCRequest(t, ts.URL, reqBody, "a2a-token")
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %#v", payload["result"])
+	}
+
+	if artifacts, exists := result["artifacts"]; exists && artifacts != nil {
+		arr, ok := artifacts.([]any)
+		if ok && len(arr) > 0 {
+			t.Fatalf("expected no artifacts, got %v", artifacts)
+		}
+	}
+}
+
 func TestA2AInvalidParams_Returns32602(t *testing.T) {
 	srv := NewServer(Config{
 		A2AEnabled: true,
@@ -569,6 +905,7 @@ type fakeA2ABridge struct {
 	sendFn   func(input teamleader.A2ASendMessageInput) (*teamleader.A2ATaskSnapshot, error)
 	getFn    func(input teamleader.A2AGetTaskInput) (*teamleader.A2ATaskSnapshot, error)
 	cancelFn func(input teamleader.A2ACancelTaskInput) (*teamleader.A2ATaskSnapshot, error)
+	listFn   func(input teamleader.A2AListTasksInput) (*teamleader.A2ATaskList, error)
 }
 
 func (f *fakeA2ABridge) SendMessage(ctx context.Context, input teamleader.A2ASendMessageInput) (*teamleader.A2ATaskSnapshot, error) {
@@ -590,4 +927,11 @@ func (f *fakeA2ABridge) CancelTask(ctx context.Context, input teamleader.A2ACanc
 		return nil, errors.New("cancel not implemented")
 	}
 	return f.cancelFn(input)
+}
+
+func (f *fakeA2ABridge) ListTasks(ctx context.Context, input teamleader.A2AListTasksInput) (*teamleader.A2ATaskList, error) {
+	if f.listFn == nil {
+		return nil, errors.New("list not implemented")
+	}
+	return f.listFn(input)
 }

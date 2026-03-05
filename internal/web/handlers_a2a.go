@@ -18,7 +18,7 @@ func registerA2ARoutes(r chi.Router, cfg Config) {
 	}
 
 	r.Get("/.well-known/agent-card.json", handleA2AAgentCard(cfg))
-	r.With(BearerAuthMiddleware(cfg.A2AToken)).Post("/api/v1/a2a", handleA2AJSONRPC(cfg))
+	r.With(A2AAuthMiddleware(cfg.A2AToken, cfg.A2AAuth)).Post("/api/v1/a2a", handleA2AJSONRPC(cfg))
 }
 
 func handleA2ADisabled(w http.ResponseWriter, r *http.Request) {
@@ -41,11 +41,51 @@ func handleA2AAgentCard(cfg Config) http.HandlerFunc {
 			Capabilities:       a2a.AgentCapabilities{Streaming: true},
 			DefaultInputModes:  []string{"text/plain"},
 			DefaultOutputModes: []string{"text/plain"},
-			Skills:             []a2a.AgentSkill{},
+			Skills:             a2aSkillsForRequest(r, cfg),
 			Version:            "0.1.0",
 		}
 		writeJSON(w, http.StatusOK, card)
 	}
+}
+
+// a2aSkillsForRequest returns role-appropriate skills for the agent card.
+// If an authenticated identity is present (via query token), skills are filtered by role operations.
+func a2aSkillsForRequest(r *http.Request, cfg Config) []a2a.AgentSkill {
+	identity, hasIdentity := resolveOptionalA2AIdentity(r, cfg)
+
+	allSkills := []a2a.AgentSkill{
+		{ID: "send", Name: "Send Message", Description: "Send a task message to the workflow agent"},
+		{ID: "get", Name: "Get Task", Description: "Query task status and artifacts"},
+		{ID: "cancel", Name: "Cancel Task", Description: "Cancel a running task"},
+		{ID: "list", Name: "List Tasks", Description: "List tasks with filtering and pagination"},
+	}
+
+	if !hasIdentity {
+		return allSkills
+	}
+
+	var filtered []a2a.AgentSkill
+	for _, skill := range allSkills {
+		if identity.CanA2AOperation(skill.ID) {
+			filtered = append(filtered, skill)
+		}
+	}
+	return filtered
+}
+
+// resolveOptionalA2AIdentity tries to extract identity from context or resolve via query token.
+func resolveOptionalA2AIdentity(r *http.Request, cfg Config) (A2AIdentity, bool) {
+	if id, ok := A2AIdentityFromContext(r.Context()); ok {
+		return id, true
+	}
+	if cfg.A2AAuth == nil || len(cfg.A2AAuth.Tokens) == 0 {
+		return A2AIdentity{}, false
+	}
+	token := extractBearerToken(r)
+	if token == "" {
+		return A2AIdentity{}, false
+	}
+	return resolveA2AIdentity(token, cfg.A2AAuth)
 }
 
 func handleA2AJSONRPC(cfg Config) http.HandlerFunc {
@@ -65,6 +105,12 @@ func handleA2AJSONRPC(cfg Config) http.HandlerFunc {
 			writeA2ARPCError(w, req.ID, a2aRPCInvalidRequest, "invalid request")
 			return
 		}
+
+		if !a2aCheckOperationAllowed(r, method) {
+			writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
+			return
+		}
+
 		switch method {
 		case a2aMethodMessageSend:
 			handleA2AMessageSend(w, r, cfg, req)
@@ -74,6 +120,8 @@ func handleA2AJSONRPC(cfg Config) http.HandlerFunc {
 			handleA2ATasksCancel(w, r, cfg, req)
 		case a2aMethodMessageStream:
 			handleA2AMessageStream(w, r, cfg, req)
+		case a2aMethodTasksList:
+			handleA2ATasksList(w, r, cfg, req)
 		default:
 			writeA2ARPCError(w, req.ID, a2aRPCMethodNotFound, "method not found")
 		}
@@ -92,9 +140,16 @@ func handleA2AMessageSend(w http.ResponseWriter, r *http.Request, cfg Config, re
 		return
 	}
 
+	projectID := a2aProjectID(params.Metadata)
+	if !a2aCheckProjectAccess(r, projectID) {
+		writeA2ARPCError(w, req.ID, a2aRPCProjectScopeCode, "project scope mismatch")
+		return
+	}
+
 	snapshot, err := cfg.A2ABridge.SendMessage(r.Context(), teamleader.A2ASendMessageInput{
-		ProjectID:    a2aProjectID(params.Metadata),
+		ProjectID:    projectID,
 		SessionID:    strings.TrimSpace(params.Message.ContextID),
+		TaskID:       strings.TrimSpace(string(params.Message.TaskID)),
 		Conversation: a2aMessageText(params.Message),
 	})
 	if err != nil {
@@ -118,8 +173,14 @@ func handleA2ATasksGet(w http.ResponseWriter, r *http.Request, cfg Config, req a
 		return
 	}
 
+	projectID := a2aProjectID(params.Metadata)
+	if !a2aCheckProjectAccess(r, projectID) {
+		writeA2ARPCError(w, req.ID, a2aRPCProjectScopeCode, "project scope mismatch")
+		return
+	}
+
 	snapshot, err := cfg.A2ABridge.GetTask(r.Context(), teamleader.A2AGetTaskInput{
-		ProjectID: a2aProjectID(params.Metadata),
+		ProjectID: projectID,
 		TaskID:    strings.TrimSpace(string(params.ID)),
 	})
 	if err != nil {
@@ -142,8 +203,14 @@ func handleA2ATasksCancel(w http.ResponseWriter, r *http.Request, cfg Config, re
 		return
 	}
 
+	projectID := a2aProjectID(params.Metadata)
+	if !a2aCheckProjectAccess(r, projectID) {
+		writeA2ARPCError(w, req.ID, a2aRPCProjectScopeCode, "project scope mismatch")
+		return
+	}
+
 	snapshot, err := cfg.A2ABridge.CancelTask(r.Context(), teamleader.A2ACancelTaskInput{
-		ProjectID: a2aProjectID(params.Metadata),
+		ProjectID: projectID,
 		TaskID:    strings.TrimSpace(string(params.ID)),
 	})
 	if err != nil {
@@ -152,6 +219,74 @@ func handleA2ATasksCancel(w http.ResponseWriter, r *http.Request, cfg Config, re
 		return
 	}
 	writeA2ARPCResult(w, req.ID, a2aTaskFromSnapshot(snapshot))
+}
+
+func handleA2ATasksList(w http.ResponseWriter, r *http.Request, cfg Config, req a2aRPCRequest) {
+	if cfg.A2ABridge == nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInternalError, "internal error")
+		return
+	}
+
+	params, err := decodeA2AListTasksParams(req.Params)
+	if err != nil {
+		writeA2ARPCError(w, req.ID, a2aRPCInvalidParams, "invalid params")
+		return
+	}
+
+	list, err := cfg.A2ABridge.ListTasks(r.Context(), teamleader.A2AListTasksInput{
+		SessionID: strings.TrimSpace(params.ContextID),
+		State:     teamleader.A2ATaskState(params.Status),
+		PageSize:  params.PageSize,
+		PageToken: strings.TrimSpace(params.PageToken),
+	})
+	if err != nil {
+		code, message := mapA2ABridgeError(err)
+		writeA2ARPCError(w, req.ID, code, message)
+		return
+	}
+	writeA2ARPCResult(w, req.ID, a2aListTasksResponse(list))
+}
+
+// a2aMethodToOperation maps JSON-RPC method to the operation name used in role policies.
+func a2aMethodToOperation(method string) string {
+	switch method {
+	case a2aMethodMessageSend:
+		return "send"
+	case a2aMethodMessageStream:
+		return "send"
+	case a2aMethodTasksGet:
+		return "get"
+	case a2aMethodTasksCancel:
+		return "cancel"
+	case a2aMethodTasksList:
+		return "list"
+	default:
+		return ""
+	}
+}
+
+// a2aCheckOperationAllowed returns true if the request identity allows the given method.
+// If no identity is in context (legacy mode), all operations are allowed.
+func a2aCheckOperationAllowed(r *http.Request, method string) bool {
+	identity, ok := A2AIdentityFromContext(r.Context())
+	if !ok {
+		return true
+	}
+	op := a2aMethodToOperation(method)
+	if op == "" {
+		return true // unknown methods fall through to "method not found"
+	}
+	return identity.CanA2AOperation(op)
+}
+
+// a2aCheckProjectAccess returns true if the request identity has access to the given project.
+// If no identity is in context (legacy mode), all projects are accessible.
+func a2aCheckProjectAccess(r *http.Request, projectID string) bool {
+	identity, ok := A2AIdentityFromContext(r.Context())
+	if !ok {
+		return true
+	}
+	return identity.HasProjectAccess(projectID)
 }
 
 func requestAbsoluteURL(r *http.Request, path string) string {

@@ -142,6 +142,7 @@ type Issue struct {
 	Status             IssueStatus   `json:"status"`
 	MergeRetries       int           `json:"merge_retries"`
 	TriageInstructions string        `json:"triage_instructions"`
+	SubmittedBy        string        `json:"submitted_by"`
 	RunID              string        `json:"run_id"`
 	Version            int           `json:"version"`
 	SupersededBy       string        `json:"superseded_by"`

@@ -79,6 +79,34 @@ type RunEvent struct {
 	CreatedAt time.Time         `json:"created_at"`
 }
 
+// UnifiedEvent represents a row in the unified events table.
+type UnifiedEvent struct {
+	ID          int64     `json:"id"`
+	Scope       string    `json:"scope"`
+	EventType   string    `json:"event_type"`
+	ProjectID   string    `json:"project_id,omitempty"`
+	RunID       string    `json:"run_id,omitempty"`
+	IssueID     string    `json:"issue_id,omitempty"`
+	SessionID   string    `json:"session_id,omitempty"`
+	Stage       string    `json:"stage,omitempty"`
+	Agent       string    `json:"agent,omitempty"`
+	PayloadJSON string    `json:"payload_json,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// EventFilter controls ListEvents queries on the unified events table.
+type EventFilter struct {
+	Scope     string // "run", "chat", or "" for all
+	ProjectID string
+	RunID     string
+	IssueID   string
+	SessionID string
+	EventType string
+	Limit     int
+	Offset    int
+}
+
 func IsIssueScopedEvent(eventType EventType) bool {
 	switch eventType {
 	case EventTeamLeaderThinking,

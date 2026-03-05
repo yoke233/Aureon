@@ -95,6 +95,8 @@ func runWithArgs(args []string) error {
 		}
 	case "mcp-serve":
 		return cmdMCPServe()
+	case "reset-db":
+		return cmdResetDB(args[1:])
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -120,5 +122,6 @@ Usage:
   ai-flow github validate
   ai-flow config init [--force]
   ai-flow server [--port <port>]
-  ai-flow mcp-serve                  (MCP server over stdio, requires AI_WORKFLOW_DB_PATH)`)
+  ai-flow mcp-serve                  (MCP server over stdio, requires AI_WORKFLOW_DB_PATH)
+  ai-flow reset-db --yes              (drop all tables and recreate schema)`)
 }

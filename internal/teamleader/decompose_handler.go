@@ -11,12 +11,15 @@ import (
 )
 
 // DecomposeSpec describes a single child issue produced by the decomposer.
+// ProjectID optionally targets a different project; when empty the child
+// inherits the parent issue's project.
 type DecomposeSpec struct {
-	Title    string   `json:"title"`
-	Body     string   `json:"body"`
-	Template string   `json:"template"`
-	Labels   []string `json:"labels"`
-	Priority int      `json:"priority"`
+	Title     string   `json:"title"`
+	Body      string   `json:"body"`
+	Template  string   `json:"template"`
+	Labels    []string `json:"labels"`
+	Priority  int      `json:"priority"`
+	ProjectID string   `json:"project_id,omitempty"`
 }
 
 // DecomposeFunc analyzes a parent issue and returns child issue specs.
@@ -108,9 +111,13 @@ func (h *DecomposeHandler) OnEvent(ctx context.Context, evt core.Event) {
 	}
 
 	for _, spec := range specs {
+		targetProjectID := parent.ProjectID
+		if spec.ProjectID != "" {
+			targetProjectID = spec.ProjectID
+		}
 		child := &core.Issue{
 			ID:         core.NewIssueID(),
-			ProjectID:  parent.ProjectID,
+			ProjectID:  targetProjectID,
 			SessionID:  parent.SessionID,
 			ParentID:   parent.ID,
 			Title:      spec.Title,

@@ -100,5 +100,10 @@ type Store interface {
 	SaveRunEvent(event RunEvent) error
 	ListRunEvents(runID string) ([]RunEvent, error)
 
+	// ListEvents queries the unified events table with scope/entity filtering.
+	ListEvents(filter EventFilter) ([]UnifiedEvent, error)
+	// SaveEvent persists an event to the unified events table.
+	SaveEvent(event UnifiedEvent) error
+
 	Close() error
 }

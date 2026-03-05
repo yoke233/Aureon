@@ -43,7 +43,7 @@ func cmdConfigInit(args []string) error {
 		}
 	}
 
-	content, err := loadDefaultConfigTemplate(cwd)
+	content, err := loadDefaultConfigTemplate()
 	if err != nil {
 		return err
 	}
@@ -54,16 +54,7 @@ func cmdConfigInit(args []string) error {
 	return nil
 }
 
-func loadDefaultConfigTemplate(cwd string) ([]byte, error) {
-	templatePath := filepath.Join(cwd, "configs", "defaults.yaml")
-	data, err := os.ReadFile(templatePath)
-	if err == nil {
-		return data, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read default config template: %w", err)
-	}
-
+func loadDefaultConfigTemplate() ([]byte, error) {
 	cfg := config.Defaults()
 	encoded, err := yaml.Marshal(&cfg)
 	if err != nil {

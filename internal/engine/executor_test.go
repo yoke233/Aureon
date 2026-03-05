@@ -147,9 +147,12 @@ func TestCreateRun_FillsStageRolesFromBindings(t *testing.T) {
 		"review":       "reviewer",
 	})
 
-	p, err := execEngine.CreateRun(project.ID, "pipe-role", "desc", "quick")
+	p, err := execEngine.CreateRun(project.ID, "pipe-role", "desc", "quick", 7)
 	if err != nil {
 		t.Fatalf("create Run: %v", err)
+	}
+	if p.MaxTotalRetries != 7 {
+		t.Fatalf("expected max_total_retries=7, got %d", p.MaxTotalRetries)
 	}
 
 	roleByStage := make(map[core.StageID]string, len(p.Stages))

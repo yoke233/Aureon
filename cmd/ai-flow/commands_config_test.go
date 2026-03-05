@@ -5,31 +5,33 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/yoke233/ai-workflow/internal/config"
 )
 
-func TestCmdConfigInitCreatesConfigFromTemplateFile(t *testing.T) {
+func TestCmdConfigInitCreatesLoadableConfig(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
-
-	template := "server:\n  port: 18080\n"
-	if err := os.MkdirAll(filepath.Join(wd, "configs"), 0o755); err != nil {
-		t.Fatalf("mkdir configs: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(wd, "configs", "defaults.yaml"), []byte(template), 0o644); err != nil {
-		t.Fatalf("write template: %v", err)
-	}
 
 	if err := cmdConfigInit(nil); err != nil {
 		t.Fatalf("cmdConfigInit() error = %v", err)
 	}
 
-	gotPath := filepath.Join(wd, ".ai-workflow", "config.yaml")
-	got, err := os.ReadFile(gotPath)
+	cfgPath := filepath.Join(wd, ".ai-workflow", "config.yaml")
+	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatalf("read generated config: %v", err)
 	}
-	if string(got) != template {
-		t.Fatalf("generated config mismatch\ngot:\n%s\nwant:\n%s", string(got), template)
+	if len(raw) == 0 {
+		t.Fatal("generated config should not be empty")
+	}
+
+	loaded, err := config.LoadGlobal(cfgPath)
+	if err != nil {
+		t.Fatalf("generated config must be loadable by strict loader: %v", err)
+	}
+	if loaded.Run.DefaultTemplate == "" {
+		t.Fatal("loaded config should preserve run.default_template")
 	}
 }
 
@@ -58,50 +60,41 @@ func TestCmdConfigInitForceOverwritesConfig(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
 
-	if err := os.MkdirAll(filepath.Join(wd, "configs"), 0o755); err != nil {
-		t.Fatalf("mkdir configs: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(wd, "configs", "defaults.yaml"), []byte("server:\n  port: 28080\n"), 0o644); err != nil {
-		t.Fatalf("write template: %v", err)
-	}
-
 	cfgPath := filepath.Join(wd, ".ai-workflow", "config.yaml")
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
-	if err := os.WriteFile(cfgPath, []byte("server:\n  port: 8080\n"), 0o644); err != nil {
-		t.Fatalf("write existing config: %v", err)
+	if err := os.WriteFile(cfgPath, []byte("invalid: [\n"), 0o644); err != nil {
+		t.Fatalf("write existing invalid config: %v", err)
 	}
 
 	if err := cmdConfigInit([]string{"--force"}); err != nil {
 		t.Fatalf("cmdConfigInit(--force) error = %v", err)
 	}
 
-	got, err := os.ReadFile(cfgPath)
+	loaded, err := config.LoadGlobal(cfgPath)
 	if err != nil {
-		t.Fatalf("read overwritten config: %v", err)
+		t.Fatalf("forced overwritten config should be loadable: %v", err)
 	}
-	if string(got) != "server:\n  port: 28080\n" {
-		t.Fatalf("expected overwritten template, got:\n%s", string(got))
+	if loaded.Server.Port == 0 {
+		t.Fatalf("expected non-zero server port from defaults, got %d", loaded.Server.Port)
 	}
 }
 
-func TestCmdConfigInitFallbackWhenTemplateMissing(t *testing.T) {
+func TestCmdConfigInitThenLoadBootstrapConfig(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
 
 	if err := cmdConfigInit(nil); err != nil {
-		t.Fatalf("cmdConfigInit() fallback error = %v", err)
+		t.Fatalf("cmdConfigInit() error = %v", err)
 	}
 
-	cfgPath := filepath.Join(wd, ".ai-workflow", "config.yaml")
-	got, err := os.ReadFile(cfgPath)
+	cfg, err := loadBootstrapConfig()
 	if err != nil {
-		t.Fatalf("read generated fallback config: %v", err)
+		t.Fatalf("loadBootstrapConfig() should load initialized config: %v", err)
 	}
-	text := string(got)
-	if !strings.Contains(text, "store:") {
-		t.Fatalf("fallback config should contain store section, got:\n%s", text)
+	if cfg == nil {
+		t.Fatal("loadBootstrapConfig() returned nil config")
 	}
 }
 
@@ -119,24 +112,12 @@ func TestCLIConfigInitCommandRoute(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
 
-	if err := os.MkdirAll(filepath.Join(wd, "configs"), 0o755); err != nil {
-		t.Fatalf("mkdir configs: %v", err)
-	}
-	template := "server:\n  port: 39090\n"
-	if err := os.WriteFile(filepath.Join(wd, "configs", "defaults.yaml"), []byte(template), 0o644); err != nil {
-		t.Fatalf("write template: %v", err)
-	}
-
 	if err := runWithArgs([]string{"config", "init"}); err != nil {
 		t.Fatalf("runWithArgs(config init) error = %v", err)
 	}
 
 	cfgPath := filepath.Join(wd, ".ai-workflow", "config.yaml")
-	got, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
-	if string(got) != template {
-		t.Fatalf("generated config mismatch\ngot:\n%s\nwant:\n%s", string(got), template)
+	if _, err := config.LoadGlobal(cfgPath); err != nil {
+		t.Fatalf("generated config from CLI route should be loadable: %v", err)
 	}
 }

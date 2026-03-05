@@ -20,6 +20,7 @@ func TestMigration_V2Baseline_CreatesIssueRunSchema(t *testing.T) {
 		"human_actions",
 		"chat_sessions",
 		"chat_run_events",
+		"run_events",
 		"issues",
 		"issue_attachments",
 		"issue_changes",
@@ -41,6 +42,9 @@ func TestMigration_V2Baseline_CreatesIssueRunSchema(t *testing.T) {
 
 	assertColumnExists(t, db, "issues", "auto_merge")
 	assertColumnExists(t, db, "issues", "merge_retries")
+	assertColumnExists(t, db, "issues", "triage_instructions")
+	assertColumnExists(t, db, "chat_sessions", "agent_session_id")
+	assertColumnExists(t, db, "run_events", "run_id")
 	assertColumnExists(t, db, "review_records", "issue_id")
 	assertColumnExists(t, db, "review_records", "summary")
 	assertColumnExists(t, db, "review_records", "raw_output")
@@ -156,6 +160,7 @@ CREATE TABLE IF NOT EXISTS issues (
 	}
 
 	assertColumnExists(t, db, "issues", "merge_retries")
+	assertColumnExists(t, db, "issues", "triage_instructions")
 
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
@@ -164,6 +169,78 @@ CREATE TABLE IF NOT EXISTS issues (
 	if version != schemaVersion {
 		t.Fatalf("user_version=%d, want %d", version, schemaVersion)
 	}
+}
+
+func TestMigration_BackfillsLegacyColumnsEvenWhenVersionAlreadyCurrent(t *testing.T) {
+	db := openSQLite(t)
+	defer db.Close()
+
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS chat_sessions (
+	id          TEXT PRIMARY KEY,
+	project_id  TEXT NOT NULL,
+	messages    TEXT NOT NULL DEFAULT '[]',
+	created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+)`); err != nil {
+		t.Fatalf("create legacy chat_sessions table: %v", err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS run_events (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id TEXT NOT NULL DEFAULT '',
+	issue_id   TEXT NOT NULL DEFAULT '',
+	event_type TEXT NOT NULL,
+	stage      TEXT NOT NULL DEFAULT '',
+	agent      TEXT NOT NULL DEFAULT '',
+	data_json  TEXT NOT NULL DEFAULT '{}',
+	error      TEXT NOT NULL DEFAULT '',
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`); err != nil {
+		t.Fatalf("create legacy run_events table: %v", err)
+	}
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS issues (
+	id                TEXT PRIMARY KEY,
+	project_id        TEXT NOT NULL,
+	session_id        TEXT,
+	title             TEXT NOT NULL,
+	body              TEXT NOT NULL DEFAULT '',
+	labels            TEXT NOT NULL DEFAULT '[]',
+	milestone_id      TEXT NOT NULL DEFAULT '',
+	attachments       TEXT NOT NULL DEFAULT '[]',
+	depends_on        TEXT NOT NULL DEFAULT '[]',
+	blocks            TEXT NOT NULL DEFAULT '[]',
+	priority          INTEGER NOT NULL DEFAULT 0,
+	template          TEXT NOT NULL DEFAULT 'standard',
+	auto_merge        INTEGER NOT NULL DEFAULT 1,
+	state             TEXT NOT NULL DEFAULT 'open',
+	status            TEXT NOT NULL DEFAULT 'draft',
+	run_id            TEXT,
+	version           INTEGER NOT NULL DEFAULT 1,
+	superseded_by     TEXT NOT NULL DEFAULT '',
+	external_id       TEXT,
+	fail_policy       TEXT NOT NULL DEFAULT 'block',
+	parent_id         TEXT NOT NULL DEFAULT '',
+	created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+	closed_at         DATETIME
+)`); err != nil {
+		t.Fatalf("create legacy issues table: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 5`); err != nil {
+		t.Fatalf("set user_version=5: %v", err)
+	}
+
+	if err := applyMigrations(db); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+
+	assertColumnExists(t, db, "chat_sessions", "agent_session_id")
+	assertColumnExists(t, db, "run_events", "run_id")
+	assertColumnExists(t, db, "issues", "merge_retries")
+	assertColumnExists(t, db, "issues", "triage_instructions")
+	assertIndexExists(t, db, "idx_run_events_run_created")
 }
 
 func assertColumnExists(t *testing.T, db *sql.DB, table, column string) {

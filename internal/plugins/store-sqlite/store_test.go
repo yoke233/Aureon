@@ -117,25 +117,26 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 	}
 
 	issue := &core.Issue{
-		ID:           "issue-20260302-11223344",
-		ProjectID:    project.ID,
-		SessionID:    session.ID,
-		Title:        "OAuth 登录",
-		Body:         "实现 OAuth 登录接口并补齐回归测试",
-		Labels:       []string{"backend", "auth"},
-		MilestoneID:  "ms-auth",
-		Attachments:  []string{"docs/auth-spec.md"},
-		DependsOn:    []string{"issue-20260302-deadbeef"},
-		Blocks:       []string{"issue-20260302-feedface"},
-		Priority:     3,
-		Template:     "standard",
-		State:        core.IssueStateOpen,
-		Status:       core.IssueStatusDraft,
-		RunID:        Run.ID,
-		Version:      1,
-		ExternalID:   "ISSUE-101",
-		FailPolicy:   core.FailBlock,
-		MergeRetries: 1,
+		ID:                 "issue-20260302-11223344",
+		ProjectID:          project.ID,
+		SessionID:          session.ID,
+		Title:              "OAuth 登录",
+		Body:               "实现 OAuth 登录接口并补齐回归测试",
+		Labels:             []string{"backend", "auth"},
+		MilestoneID:        "ms-auth",
+		Attachments:        []string{"docs/auth-spec.md"},
+		DependsOn:          []string{"issue-20260302-deadbeef"},
+		Blocks:             []string{"issue-20260302-feedface"},
+		Priority:           3,
+		Template:           "standard",
+		State:              core.IssueStateOpen,
+		Status:             core.IssueStatusDraft,
+		RunID:              Run.ID,
+		Version:            1,
+		ExternalID:         "ISSUE-101",
+		FailPolicy:         core.FailBlock,
+		MergeRetries:       1,
+		TriageInstructions: "collect conflict files and retry merge",
 	}
 	if err := s.CreateIssue(issue); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -151,6 +152,9 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 	if got.MergeRetries != 1 {
 		t.Fatalf("issue MergeRetries mismatch: got=%d want=1", got.MergeRetries)
 	}
+	if got.TriageInstructions != "collect conflict files and retry merge" {
+		t.Fatalf("issue TriageInstructions mismatch: got=%q want=%q", got.TriageInstructions, "collect conflict files and retry merge")
+	}
 	if !reflect.DeepEqual(got.Labels, issue.Labels) ||
 		!reflect.DeepEqual(got.Attachments, issue.Attachments) ||
 		!reflect.DeepEqual(got.DependsOn, issue.DependsOn) ||
@@ -161,6 +165,7 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 	issue.Status = core.IssueStatusExecuting
 	issue.Version = 2
 	issue.MergeRetries = 2
+	issue.TriageInstructions = "rerun tests on default branch before merge"
 	issue.Labels = append(issue.Labels, "critical")
 	if err := s.SaveIssue(issue); err != nil {
 		t.Fatalf("save issue: %v", err)
@@ -175,6 +180,9 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 	}
 	if got2.MergeRetries != 2 {
 		t.Fatalf("issue MergeRetries after save mismatch: got=%d want=2", got2.MergeRetries)
+	}
+	if got2.TriageInstructions != "rerun tests on default branch before merge" {
+		t.Fatalf("issue TriageInstructions after save mismatch: got=%q want=%q", got2.TriageInstructions, "rerun tests on default branch before merge")
 	}
 	if !reflect.DeepEqual(got2.Labels, issue.Labels) {
 		t.Fatalf("issue labels mismatch after save: got=%#v want=%#v", got2.Labels, issue.Labels)

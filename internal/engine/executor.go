@@ -103,10 +103,13 @@ func (e *Executor) SetRunstageRoles(stageRoles map[string]string) {
 	e.stageRoles = normalized
 }
 
-func (e *Executor) CreateRun(projectID, name, description, template string) (*core.Run, error) {
+func (e *Executor) CreateRun(projectID, name, description, template string, maxTotalRetries int) (*core.Run, error) {
 	stageIDs, ok := Templates[template]
 	if !ok {
 		return nil, fmt.Errorf("unknown template: %s", template)
+	}
+	if maxTotalRetries <= 0 {
+		maxTotalRetries = 5
 	}
 
 	stages := make([]core.StageConfig, len(stageIDs))
@@ -127,7 +130,7 @@ func (e *Executor) CreateRun(projectID, name, description, template string) (*co
 		Stages:          stages,
 		Artifacts:       map[string]string{},
 		Config:          map[string]any{},
-		MaxTotalRetries: 5,
+		MaxTotalRetries: maxTotalRetries,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}

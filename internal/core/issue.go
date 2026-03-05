@@ -66,31 +66,32 @@ const (
 // NOTE: DependsOn/Blocks/RunID are retained as cutover fields during
 // transition away from task-plan runtime semantics.
 type Issue struct {
-	ID           string        `json:"id"`
-	ProjectID    string        `json:"project_id"`
-	SessionID    string        `json:"session_id"`
-	Title        string        `json:"title"`
-	Body         string        `json:"body"`
-	Labels       []string      `json:"labels"`
-	MilestoneID  string        `json:"milestone_id"`
-	Attachments  []string      `json:"attachments"`
-	DependsOn    []string      `json:"depends_on"`
-	Blocks       []string      `json:"blocks"`
-	Priority     int           `json:"priority"`
-	Template     string        `json:"template"`
-	AutoMerge    bool          `json:"auto_merge"`
-	State        IssueState    `json:"state"`
-	Status       IssueStatus   `json:"status"`
-	MergeRetries int           `json:"merge_retries"`
-	RunID        string        `json:"run_id"`
-	Version      int           `json:"version"`
-	SupersededBy string        `json:"superseded_by"`
-	ParentID     string        `json:"parent_id"`
-	ExternalID   string        `json:"external_id"`
-	FailPolicy   FailurePolicy `json:"fail_policy"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
-	ClosedAt     *time.Time    `json:"closed_at,omitempty"`
+	ID                 string        `json:"id"`
+	ProjectID          string        `json:"project_id"`
+	SessionID          string        `json:"session_id"`
+	Title              string        `json:"title"`
+	Body               string        `json:"body"`
+	Labels             []string      `json:"labels"`
+	MilestoneID        string        `json:"milestone_id"`
+	Attachments        []string      `json:"attachments"`
+	DependsOn          []string      `json:"depends_on"`
+	Blocks             []string      `json:"blocks"`
+	Priority           int           `json:"priority"`
+	Template           string        `json:"template"`
+	AutoMerge          bool          `json:"auto_merge"`
+	State              IssueState    `json:"state"`
+	Status             IssueStatus   `json:"status"`
+	MergeRetries       int           `json:"merge_retries"`
+	TriageInstructions string        `json:"triage_instructions"`
+	RunID              string        `json:"run_id"`
+	Version            int           `json:"version"`
+	SupersededBy       string        `json:"superseded_by"`
+	ParentID           string        `json:"parent_id"`
+	ExternalID         string        `json:"external_id"`
+	FailPolicy         FailurePolicy `json:"fail_policy"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+	ClosedAt           *time.Time    `json:"closed_at,omitempty"`
 }
 
 // Validate checks whether the issue state is supported.

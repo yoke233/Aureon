@@ -80,10 +80,11 @@ func TestIssueValidate_AllowsMergingStatus(t *testing.T) {
 
 func TestIssueJSON_MergeRetriesRoundTrip(t *testing.T) {
 	issue := Issue{
-		ID:           "issue-20260305-a1b2c3d4",
-		Title:        "merge conflict retry",
-		Template:     "standard",
-		MergeRetries: 2,
+		ID:                 "issue-20260305-a1b2c3d4",
+		Title:              "merge conflict retry",
+		Template:           "standard",
+		MergeRetries:       2,
+		TriageInstructions: "check git conflict markers before retry",
 	}
 
 	raw, err := json.Marshal(issue)
@@ -93,6 +94,9 @@ func TestIssueJSON_MergeRetriesRoundTrip(t *testing.T) {
 	if !strings.Contains(string(raw), `"merge_retries":2`) {
 		t.Fatalf("expected merge_retries in JSON, got %s", string(raw))
 	}
+	if !strings.Contains(string(raw), `"triage_instructions":"check git conflict markers before retry"`) {
+		t.Fatalf("expected triage_instructions in JSON, got %s", string(raw))
+	}
 
 	var decoded Issue
 	if err := json.Unmarshal(raw, &decoded); err != nil {
@@ -100,5 +104,8 @@ func TestIssueJSON_MergeRetriesRoundTrip(t *testing.T) {
 	}
 	if decoded.MergeRetries != 2 {
 		t.Fatalf("decoded MergeRetries=%d, want 2", decoded.MergeRetries)
+	}
+	if decoded.TriageInstructions != "check git conflict markers before retry" {
+		t.Fatalf("decoded TriageInstructions=%q, want %q", decoded.TriageInstructions, "check git conflict markers before retry")
 	}
 }

@@ -445,17 +445,49 @@ func cmdRunCreate(args []string) error {
 	}
 	defer store.Close()
 
-	template := "standard"
+	bootstrapCfg, err := loadBootstrapConfig()
+	if err != nil {
+		return err
+	}
+
+	project, err := store.GetProject(args[0])
+	if err != nil {
+		return err
+	}
+	effectiveCfg, err := mergeBootstrapProjectConfig(bootstrapCfg, project.RepoPath)
+	if err != nil {
+		return err
+	}
+
+	template := strings.TrimSpace(effectiveCfg.Run.DefaultTemplate)
+	if template == "" {
+		template = "standard"
+	}
 	if len(args) > 3 {
 		template = args[3]
 	}
 
-	p, err := exec.CreateRun(args[0], args[1], args[2], template)
+	p, err := exec.CreateRun(args[0], args[1], args[2], template, effectiveCfg.Run.MaxTotalRetries)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Run created: %s (template: %s, stages: %d)\n", p.ID, p.Template, len(p.Stages))
 	return nil
+}
+
+func mergeBootstrapProjectConfig(base *config.Config, repoPath string) (*config.Config, error) {
+	if base == nil {
+		return nil, errors.New("base config is required")
+	}
+	trimmedRepoPath := strings.TrimSpace(repoPath)
+	if trimmedRepoPath == "" {
+		return config.MergeForRun(base, nil, nil)
+	}
+	projectLayer, err := config.LoadProject(trimmedRepoPath)
+	if err != nil {
+		return nil, err
+	}
+	return config.MergeForRun(base, projectLayer, nil)
 }
 
 func cmdRunstart(args []string) error {

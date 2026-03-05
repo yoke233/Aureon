@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS issues (
 	template          TEXT NOT NULL DEFAULT 'standard',
 	auto_merge        INTEGER NOT NULL DEFAULT 1,
 	merge_retries     INTEGER NOT NULL DEFAULT 0,
+	triage_instructions TEXT NOT NULL DEFAULT '',
 	state             TEXT NOT NULL DEFAULT 'open',
     status            TEXT NOT NULL DEFAULT 'draft',
     run_id       TEXT,
@@ -178,9 +179,6 @@ CREATE TABLE IF NOT EXISTS run_events (
     error      TEXT NOT NULL DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE INDEX IF NOT EXISTS idx_run_events_run_created
-ON run_events(run_id, created_at, id);
 `
 
 const schemaIndexes = `
@@ -195,18 +193,16 @@ CREATE INDEX IF NOT EXISTS idx_issues_run ON issues(run_id);
 CREATE INDEX IF NOT EXISTS idx_issue_attachments_issue ON issue_attachments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_issue_changes_issue ON issue_changes(issue_id);
 CREATE INDEX IF NOT EXISTS idx_review_records_issue ON review_records(issue_id);
+CREATE INDEX IF NOT EXISTS idx_run_events_run_created ON run_events(run_id, created_at, id);
 `
 
 // schemaVersion tracks which migrations have been applied.
 // Bump this when adding new migrations.
-const schemaVersion = 4
+const schemaVersion = 5
 
 func applyMigrations(db *sql.DB) error {
 	if _, err := db.Exec(schemaTables); err != nil {
 		return fmt.Errorf("exec schema tables: %w", err)
-	}
-	if _, err := db.Exec(schemaIndexes); err != nil {
-		return fmt.Errorf("exec schema indexes: %w", err)
 	}
 
 	currentVersion, err := getUserVersion(db)
@@ -238,6 +234,17 @@ func applyMigrations(db *sql.DB) error {
 		if err := migrateAddMergeRetries(db); err != nil {
 			return fmt.Errorf("migrate merge_retries: %w", err)
 		}
+	}
+	if currentVersion < 5 {
+		if err := migrateAddIssueTriageInstructions(db); err != nil {
+			return fmt.Errorf("migrate triage_instructions: %w", err)
+		}
+	}
+	if err := migrateBackfillLegacyColumns(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(schemaIndexes); err != nil {
+		return fmt.Errorf("exec schema indexes: %w", err)
 	}
 
 	if currentVersion < schemaVersion {
@@ -329,6 +336,83 @@ func migrateAddMergeRetries(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN merge_retries INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return fmt.Errorf("add merge_retries column: %w", err)
+	}
+	return nil
+}
+
+func migrateAddIssueTriageInstructions(db *sql.DB) error {
+	has, err := hasColumn(db, "issues", "triage_instructions")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN triage_instructions TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add triage_instructions column: %w", err)
+	}
+	return nil
+}
+
+func migrateBackfillLegacyColumns(db *sql.DB) error {
+	backfills := []struct {
+		name string
+		run  func(*sql.DB) error
+	}{
+		{name: "run_events.run_id", run: migrateAddRunEventRunID},
+		{name: "chat_sessions.agent_session_id", run: migrateAddChatSessionAgentSessionID},
+		{name: "issues.merge_retries", run: migrateAddMergeRetries},
+		{name: "issues.triage_instructions", run: migrateAddIssueTriageInstructions},
+	}
+
+	for _, backfill := range backfills {
+		if err := backfill.run(db); err != nil {
+			return fmt.Errorf("backfill %s: %w", backfill.name, err)
+		}
+	}
+	return nil
+}
+
+func migrateAddRunEventRunID(db *sql.DB) error {
+	exists, err := hasTable(db, "run_events")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	has, err := hasColumn(db, "run_events", "run_id")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE run_events ADD COLUMN run_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add run_events.run_id column: %w", err)
+	}
+	return nil
+}
+
+func migrateAddChatSessionAgentSessionID(db *sql.DB) error {
+	exists, err := hasTable(db, "chat_sessions")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	has, err := hasColumn(db, "chat_sessions", "agent_session_id")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE chat_sessions ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add chat_sessions.agent_session_id column: %w", err)
 	}
 	return nil
 }

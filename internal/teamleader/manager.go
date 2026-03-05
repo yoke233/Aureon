@@ -250,7 +250,9 @@ func (m *Manager) SubmitForReview(ctx context.Context, issueIDs []string) error 
 	for _, issue := range issues {
 		before := issue.Status
 		updated := cloneManagerIssue(issue)
-		updated.Status = core.IssueStatusReviewing
+		if err := transitionIssueStatus(updated, core.IssueStatusReviewing); err != nil {
+			return fmt.Errorf("transition issue %s to reviewing: %w", updated.ID, err)
+		}
 		if updated.State == "" {
 			updated.State = core.IssueStateOpen
 		}
@@ -338,7 +340,9 @@ func (m *Manager) applyIssueApprove(ctx context.Context, issue *core.Issue, feed
 
 	// Epic/decomposable issues go to decomposing instead of scheduling.
 	if updated.NeedsDecomposition() && updated.ParentID == "" {
-		updated.Status = core.IssueStatusDecomposing
+		if err := transitionIssueStatus(updated, core.IssueStatusDecomposing); err != nil {
+			return nil, fmt.Errorf("transition issue %s to decomposing: %w", updated.ID, err)
+		}
 		if err := m.store.SaveIssue(updated); err != nil {
 			return nil, fmt.Errorf("save decomposing issue %s: %w", updated.ID, err)
 		}
@@ -361,7 +365,9 @@ func (m *Manager) applyIssueApprove(ctx context.Context, issue *core.Issue, feed
 	if err != nil {
 		return nil, err
 	}
-	updated.Status = core.IssueStatusQueued
+	if err := transitionIssueStatus(updated, core.IssueStatusQueued); err != nil {
+		return nil, fmt.Errorf("transition issue %s to queued: %w", updated.ID, err)
+	}
 	if err := m.store.SaveIssue(updated); err != nil {
 		return nil, fmt.Errorf("save approved issue %s: %w", updated.ID, err)
 	}
@@ -384,7 +390,9 @@ func (m *Manager) markApproveDispatchFailure(issue *core.Issue, dispatchErr erro
 
 	failed := cloneManagerIssue(issue)
 	before := failed.Status
-	failed.Status = core.IssueStatusFailed
+	if err := transitionIssueStatus(failed, core.IssueStatusFailed); err != nil {
+		return fmt.Errorf("transition issue %s to failed: %w", failed.ID, err)
+	}
 	failed.State = core.IssueStateOpen
 	failed.RunID = ""
 	failed.ClosedAt = nil
@@ -414,7 +422,9 @@ func (m *Manager) applyIssueReject(_ context.Context, issue *core.Issue, feedbac
 
 	updated := cloneManagerIssue(issue)
 	before := updated.Status
-	updated.Status = core.IssueStatusDraft
+	if err := transitionIssueStatus(updated, core.IssueStatusDraft); err != nil {
+		return nil, fmt.Errorf("transition issue %s to draft: %w", updated.ID, err)
+	}
 	updated.State = core.IssueStateOpen
 	updated.ClosedAt = nil
 
@@ -430,7 +440,9 @@ func (m *Manager) applyIssueReject(_ context.Context, issue *core.Issue, feedbac
 func (m *Manager) applyIssueAbandon(_ context.Context, issue *core.Issue, feedback string) (*core.Issue, error) {
 	updated := cloneManagerIssue(issue)
 	before := updated.Status
-	updated.Status = core.IssueStatusAbandoned
+	if err := transitionIssueStatus(updated, core.IssueStatusAbandoned); err != nil {
+		return nil, fmt.Errorf("transition issue %s to abandoned: %w", updated.ID, err)
+	}
 	updated.State = core.IssueStateClosed
 	now := time.Now()
 	updated.ClosedAt = &now

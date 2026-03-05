@@ -109,19 +109,19 @@ func (h *DecomposeHandler) OnEvent(ctx context.Context, evt core.Event) {
 
 	for _, spec := range specs {
 		child := &core.Issue{
-			ID:        core.NewIssueID(),
-			ProjectID: parent.ProjectID,
-			SessionID: parent.SessionID,
-			ParentID:  parent.ID,
-			Title:     spec.Title,
-			Body:      spec.Body,
-			Template:  spec.Template,
-			Labels:    spec.Labels,
-			Priority:  spec.Priority,
-			AutoMerge: parent.AutoMerge,
+			ID:         core.NewIssueID(),
+			ProjectID:  parent.ProjectID,
+			SessionID:  parent.SessionID,
+			ParentID:   parent.ID,
+			Title:      spec.Title,
+			Body:       spec.Body,
+			Template:   spec.Template,
+			Labels:     spec.Labels,
+			Priority:   spec.Priority,
+			AutoMerge:  parent.AutoMerge,
 			FailPolicy: parent.FailPolicy,
-			State:     core.IssueStateOpen,
-			Status:    core.IssueStatusDraft,
+			State:      core.IssueStateOpen,
+			Status:     core.IssueStatusDraft,
 		}
 		if child.Template == "" {
 			child.Template = "standard"
@@ -135,7 +135,10 @@ func (h *DecomposeHandler) OnEvent(ctx context.Context, evt core.Event) {
 	}
 
 	// Mark parent as decomposed.
-	parent.Status = core.IssueStatusDecomposed
+	if err := transitionIssueStatus(parent, core.IssueStatusDecomposed); err != nil {
+		h.log.Error("decompose: invalid parent transition", "issue_id", issueID, "error", err)
+		return
+	}
 	if err := h.fullStore.SaveIssue(parent); err != nil {
 		h.log.Error("decompose: save parent failed", "issue_id", issueID, "error", err)
 		return
@@ -166,7 +169,10 @@ func (h *DecomposeHandler) OnEvent(ctx context.Context, evt core.Event) {
 }
 
 func (h *DecomposeHandler) markParentFailed(parent *core.Issue, errMsg string) {
-	parent.Status = core.IssueStatusFailed
+	if err := transitionIssueStatus(parent, core.IssueStatusFailed); err != nil {
+		h.log.Error("decompose: invalid parent transition to failed", "issue_id", parent.ID, "error", err)
+		return
+	}
 	if err := h.fullStore.SaveIssue(parent); err != nil {
 		h.log.Error("decompose: mark parent failed", "issue_id", parent.ID, "error", err)
 	}

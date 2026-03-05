@@ -53,6 +53,65 @@ var validIssueStatuses = map[IssueStatus]struct{}{
 	IssueStatusAbandoned:   {},
 }
 
+// validIssueTransitions encodes the orchestrator lifecycle state machine.
+// NOTE: idempotent transitions (from == to) are always treated as valid.
+var validIssueTransitions = map[IssueStatus]map[IssueStatus]struct{}{
+	IssueStatusDraft: {
+		IssueStatusReviewing: {},
+		IssueStatusAbandoned: {},
+	},
+	IssueStatusReviewing: {
+		IssueStatusDraft:       {},
+		IssueStatusQueued:      {},
+		IssueStatusDecomposing: {},
+		IssueStatusAbandoned:   {},
+	},
+	IssueStatusQueued: {
+		IssueStatusReady:     {},
+		IssueStatusExecuting: {},
+		IssueStatusFailed:    {},
+		IssueStatusAbandoned: {},
+	},
+	IssueStatusReady: {
+		IssueStatusQueued:    {},
+		IssueStatusExecuting: {},
+		IssueStatusFailed:    {},
+		IssueStatusAbandoned: {},
+	},
+	IssueStatusExecuting: {
+		IssueStatusQueued:    {},
+		IssueStatusMerging:   {},
+		IssueStatusDone:      {},
+		IssueStatusFailed:    {},
+		IssueStatusAbandoned: {},
+	},
+	IssueStatusMerging: {
+		IssueStatusQueued:    {},
+		IssueStatusDone:      {},
+		IssueStatusFailed:    {},
+		IssueStatusAbandoned: {},
+	},
+	IssueStatusDecomposing: {
+		IssueStatusDecomposed: {},
+		IssueStatusFailed:     {},
+		IssueStatusAbandoned:  {},
+	},
+	IssueStatusDecomposed: {
+		IssueStatusDone:      {},
+		IssueStatusFailed:    {},
+		IssueStatusAbandoned: {},
+	},
+	IssueStatusFailed: {
+		IssueStatusQueued:    {},
+		IssueStatusAbandoned: {},
+	},
+	IssueStatusDone: {
+		IssueStatusSuperseded: {},
+	},
+	IssueStatusSuperseded: {},
+	IssueStatusAbandoned:  {},
+}
+
 type FailurePolicy string
 
 const (
@@ -106,6 +165,27 @@ func (s IssueState) Validate() error {
 func (s IssueStatus) Validate() error {
 	if _, ok := validIssueStatuses[s]; !ok {
 		return fmt.Errorf("invalid issue status %q", s)
+	}
+	return nil
+}
+
+// ValidateIssueTransition checks whether a status transition is legal.
+func ValidateIssueTransition(from, to IssueStatus) error {
+	if err := from.Validate(); err != nil {
+		return fmt.Errorf("invalid source status: %w", err)
+	}
+	if err := to.Validate(); err != nil {
+		return fmt.Errorf("invalid target status: %w", err)
+	}
+	if from == to {
+		return nil
+	}
+	targets, ok := validIssueTransitions[from]
+	if !ok {
+		return fmt.Errorf("no transitions allowed from %q", from)
+	}
+	if _, ok := targets[to]; !ok {
+		return fmt.Errorf("invalid issue transition: %q -> %q", from, to)
 	}
 	return nil
 }

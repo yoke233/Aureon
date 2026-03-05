@@ -275,13 +275,17 @@ func (s *DepScheduler) scheduleSession(ctx context.Context, sessionID string, is
 		switch issue.Status {
 		case core.IssueStatusExecuting, core.IssueStatusMerging:
 			if strings.TrimSpace(issue.RunID) == "" {
-				issue.Status = core.IssueStatusQueued
+				if err := transitionIssueStatus(issue, core.IssueStatusQueued); err != nil {
+					return err
+				}
 			} else {
 				rs.Running[issueID] = issue.RunID
 			}
 		case core.IssueStatusReady, core.IssueStatusQueued:
 		default:
-			issue.Status = core.IssueStatusQueued
+			if err := transitionIssueStatus(issue, core.IssueStatusQueued); err != nil {
+				return err
+			}
 			issue.RunID = ""
 		}
 
@@ -357,7 +361,9 @@ func (s *DepScheduler) recoverSession(ctx context.Context, sessionID string, iss
 		case core.IssueStatusDone:
 		case core.IssueStatusExecuting, core.IssueStatusMerging:
 			if strings.TrimSpace(issue.RunID) == "" {
-				issue.Status = core.IssueStatusQueued
+				if err := transitionIssueStatus(issue, core.IssueStatusQueued); err != nil {
+					return err
+				}
 				if err := s.saveIssue(issue); err != nil {
 					return err
 				}
@@ -381,7 +387,9 @@ func (s *DepScheduler) recoverSession(ctx context.Context, sessionID string, iss
 			if isIssueTerminal(issue.Status) {
 				continue
 			}
-			issue.Status = core.IssueStatusQueued
+			if err := transitionIssueStatus(issue, core.IssueStatusQueued); err != nil {
+				return err
+			}
 			issue.RunID = ""
 			if err := s.saveIssue(issue); err != nil {
 				return err
@@ -506,20 +514,26 @@ func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
 	switch evt.Type {
 	case core.EventRunDone:
 		if issue.AutoMerge {
-			issue.Status = core.IssueStatusMerging
+			if err := transitionIssueStatus(issue, core.IssueStatusMerging); err != nil {
+				return err
+			}
 			if err := s.saveIssue(issue); err != nil {
 				return err
 			}
 			s.publishIssueEvent(core.EventIssueMerging, issue, nil, "")
 			return nil
 		}
-		issue.Status = core.IssueStatusDone
+		if err := transitionIssueStatus(issue, core.IssueStatusDone); err != nil {
+			return err
+		}
 		if err := s.saveIssue(issue); err != nil {
 			return err
 		}
 		s.publishIssueEvent(core.EventIssueDone, issue, nil, "")
 	case core.EventRunFailed:
-		issue.Status = core.IssueStatusFailed
+		if err := transitionIssueStatus(issue, core.IssueStatusFailed); err != nil {
+			return err
+		}
 		if err := s.saveIssue(issue); err != nil {
 			return err
 		}
@@ -534,13 +548,17 @@ func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
 			}
 		}
 	case core.EventIssueMerged:
-		issue.Status = core.IssueStatusDone
+		if err := transitionIssueStatus(issue, core.IssueStatusDone); err != nil {
+			return err
+		}
 		if err := s.saveIssue(issue); err != nil {
 			return err
 		}
 		s.publishIssueEvent(core.EventIssueDone, issue, nil, "")
 	case core.EventMergeFailed:
-		issue.Status = core.IssueStatusFailed
+		if err := transitionIssueStatus(issue, core.IssueStatusFailed); err != nil {
+			return err
+		}
 		if err := s.saveIssue(issue); err != nil {
 			return err
 		}
@@ -559,7 +577,9 @@ func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
 			return err
 		}
 		if issue.Status != core.IssueStatusQueued {
-			issue.Status = core.IssueStatusQueued
+			if err := transitionIssueStatus(issue, core.IssueStatusQueued); err != nil {
+				return err
+			}
 			issue.RunID = ""
 			if err := s.saveIssue(issue); err != nil {
 				return err
@@ -571,7 +591,9 @@ func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
 		}
 		_, running := rs.Running[ref.issueID]
 		if issue.Status != core.IssueStatusFailed {
-			issue.Status = core.IssueStatusFailed
+			if err := transitionIssueStatus(issue, core.IssueStatusFailed); err != nil {
+				return err
+			}
 			if err := s.saveIssue(issue); err != nil {
 				return err
 			}
@@ -711,7 +733,9 @@ func (s *DepScheduler) applyBlockPolicyLocked(rs *runningSession, failedIssueID 
 			issue.Status == core.IssueStatusExecuting || issue.Status == core.IssueStatusMerging {
 			continue
 		}
-		issue.Status = core.IssueStatusFailed
+		if err := transitionIssueStatus(issue, core.IssueStatusFailed); err != nil {
+			return err
+		}
 		issue.RunID = ""
 		if err := s.saveIssue(issue); err != nil {
 			return err
@@ -755,7 +779,9 @@ func (s *DepScheduler) markReadyByProfileQueueLocked(rs *runningSession) error {
 			if issue == nil || issue.Status != core.IssueStatusQueued {
 				continue
 			}
-			issue.Status = core.IssueStatusReady
+			if err := transitionIssueStatus(issue, core.IssueStatusReady); err != nil {
+				return err
+			}
 			if err := s.saveIssue(issue); err != nil {
 				return err
 			}
@@ -811,7 +837,11 @@ func (s *DepScheduler) dispatchIssue(ctx context.Context, sessionID, issueID str
 		return false, err
 	}
 
-	issue.Status = core.IssueStatusExecuting
+	if err := transitionIssueStatus(issue, core.IssueStatusExecuting); err != nil {
+		s.releaseSlot()
+		s.mu.Unlock()
+		return false, err
+	}
 	issue.RunID = Run.ID
 	rs.Running[issueID] = Run.ID
 	s.RunIndex[Run.ID] = RunRef{sessionID: sessionID, issueID: issueID}
@@ -857,9 +887,10 @@ func (s *DepScheduler) rollbackDispatch(sessionID, issueID, RunID string) {
 		if candidate := rs.IssueByID[issueID]; candidate != nil &&
 			candidate.Status == core.IssueStatusExecuting &&
 			candidate.RunID == RunID {
-			candidate.Status = core.IssueStatusReady
-			candidate.RunID = ""
-			issue = candidate
+			if err := transitionIssueStatus(candidate, core.IssueStatusReady); err == nil {
+				candidate.RunID = ""
+				issue = candidate
+			}
 		}
 		delete(rs.Running, issueID)
 	}

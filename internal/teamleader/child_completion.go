@@ -100,7 +100,10 @@ func (h *ChildCompletionHandler) OnEvent(ctx context.Context, evt core.Event) {
 
 func (h *ChildCompletionHandler) resolveParentSuccess(parent *core.Issue) {
 	now := time.Now()
-	parent.Status = core.IssueStatusDone
+	if err := transitionIssueStatus(parent, core.IssueStatusDone); err != nil {
+		h.log.Error("child_completion: invalid parent transition to done", "parent_id", parent.ID, "error", err)
+		return
+	}
 	parent.State = core.IssueStateClosed
 	parent.ClosedAt = &now
 	if err := h.store.SaveIssue(parent); err != nil {
@@ -130,7 +133,10 @@ func (h *ChildCompletionHandler) resolveParentWithFailures(parent *core.Issue) {
 			Timestamp: time.Now(),
 		})
 	default: // FailBlock
-		parent.Status = core.IssueStatusFailed
+		if err := transitionIssueStatus(parent, core.IssueStatusFailed); err != nil {
+			h.log.Error("child_completion: invalid parent transition to failed", "parent_id", parent.ID, "error", err)
+			return
+		}
 		if err := h.store.SaveIssue(parent); err != nil {
 			h.log.Error("child_completion: save parent failed", "parent_id", parent.ID, "error", err)
 			return

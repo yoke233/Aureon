@@ -57,7 +57,10 @@ func (h *TLTriageHandler) OnEvent(_ context.Context, evt core.Event) {
 	oldRunID := strings.TrimSpace(issue.RunID)
 	if nextRetries >= h.maxRetries {
 		issue.MergeRetries = nextRetries
-		issue.Status = core.IssueStatusFailed
+		if err := transitionIssueStatus(issue, core.IssueStatusFailed); err != nil {
+			h.log.Error("tl_triage: invalid transition to failed", "issue_id", issue.ID, "error", err)
+			return
+		}
 		if err := h.store.SaveIssue(issue); err != nil {
 			h.log.Error("tl_triage: save failed issue", "issue_id", issue.ID, "error", err)
 			return
@@ -78,7 +81,10 @@ func (h *TLTriageHandler) OnEvent(_ context.Context, evt core.Event) {
 	}
 
 	issue.MergeRetries = nextRetries
-	issue.Status = core.IssueStatusQueued
+	if err := transitionIssueStatus(issue, core.IssueStatusQueued); err != nil {
+		h.log.Error("tl_triage: invalid transition to queued", "issue_id", issue.ID, "error", err)
+		return
+	}
 	issue.RunID = ""
 	if err := h.store.SaveIssue(issue); err != nil {
 		h.log.Error("tl_triage: save retry issue", "issue_id", issue.ID, "error", err)

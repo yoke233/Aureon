@@ -109,3 +109,79 @@ func TestIssueJSON_MergeRetriesRoundTrip(t *testing.T) {
 		t.Fatalf("decoded TriageInstructions=%q, want %q", decoded.TriageInstructions, "check git conflict markers before retry")
 	}
 }
+
+func TestValidateIssueTransition_AllowsExpectedPaths(t *testing.T) {
+	cases := []struct {
+		name string
+		from IssueStatus
+		to   IssueStatus
+	}{
+		{
+			name: "review approve to queued",
+			from: IssueStatusReviewing,
+			to:   IssueStatusQueued,
+		},
+		{
+			name: "execution to merging",
+			from: IssueStatusExecuting,
+			to:   IssueStatusMerging,
+		},
+		{
+			name: "merge conflict retry requeue",
+			from: IssueStatusMerging,
+			to:   IssueStatusQueued,
+		},
+		{
+			name: "decomposed parent to done",
+			from: IssueStatusDecomposed,
+			to:   IssueStatusDone,
+		},
+		{
+			name: "idempotent",
+			from: IssueStatusQueued,
+			to:   IssueStatusQueued,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateIssueTransition(tc.from, tc.to); err != nil {
+				t.Fatalf("ValidateIssueTransition(%q -> %q) returned error: %v", tc.from, tc.to, err)
+			}
+		})
+	}
+}
+
+func TestValidateIssueTransition_RejectsInvalidPaths(t *testing.T) {
+	cases := []struct {
+		name string
+		from IssueStatus
+		to   IssueStatus
+	}{
+		{
+			name: "draft cannot jump to done",
+			from: IssueStatusDraft,
+			to:   IssueStatusDone,
+		},
+		{
+			name: "terminal done cannot go back to queued",
+			from: IssueStatusDone,
+			to:   IssueStatusQueued,
+		},
+		{
+			name: "abandoned terminal cannot resume",
+			from: IssueStatusAbandoned,
+			to:   IssueStatusQueued,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateIssueTransition(tc.from, tc.to); err == nil {
+				t.Fatalf("ValidateIssueTransition(%q -> %q) expected error, got nil", tc.from, tc.to)
+			}
+		})
+	}
+}

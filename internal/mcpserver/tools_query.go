@@ -66,6 +66,7 @@ type QueryIssuesInput struct {
 	Status    string `json:"status,omitempty" jsonschema:"Filter by issue status"`
 	State     string `json:"state,omitempty" jsonschema:"Filter by issue state (open/closed)"`
 	SessionID string `json:"session_id,omitempty" jsonschema:"Filter by chat session ID"`
+	ParentID  string `json:"parent_id,omitempty" jsonschema:"Filter by parent issue ID (for child issues)"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Max results to return"`
 	Offset    int    `json:"offset,omitempty" jsonschema:"Number of results to skip"`
 }
@@ -162,6 +163,7 @@ func queryIssuesHandler(store core.Store) func(context.Context, *mcp.CallToolReq
 			Status:    in.Status,
 			State:     in.State,
 			SessionID: in.SessionID,
+			ParentID:  in.ParentID,
 			Limit:     in.Limit,
 			Offset:    in.Offset,
 		})

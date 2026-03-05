@@ -26,8 +26,10 @@ const (
 	IssueStatusExecuting  IssueStatus = "executing"
 	IssueStatusDone       IssueStatus = "done"
 	IssueStatusFailed     IssueStatus = "failed"
-	IssueStatusSuperseded IssueStatus = "superseded"
-	IssueStatusAbandoned  IssueStatus = "abandoned"
+	IssueStatusDecomposing IssueStatus = "decomposing"
+	IssueStatusDecomposed  IssueStatus = "decomposed"
+	IssueStatusSuperseded  IssueStatus = "superseded"
+	IssueStatusAbandoned   IssueStatus = "abandoned"
 )
 
 var validIssueStates = map[IssueState]struct{}{
@@ -43,8 +45,10 @@ var validIssueStatuses = map[IssueStatus]struct{}{
 	IssueStatusExecuting:  {},
 	IssueStatusDone:       {},
 	IssueStatusFailed:     {},
-	IssueStatusSuperseded: {},
-	IssueStatusAbandoned:  {},
+	IssueStatusDecomposing: {},
+	IssueStatusDecomposed:  {},
+	IssueStatusSuperseded:  {},
+	IssueStatusAbandoned:   {},
 }
 
 type FailurePolicy string
@@ -78,6 +82,7 @@ type Issue struct {
 	RunID        string        `json:"run_id"`
 	Version      int           `json:"version"`
 	SupersededBy string        `json:"superseded_by"`
+	ParentID     string        `json:"parent_id"`
 	ExternalID   string        `json:"external_id"`
 	FailPolicy   FailurePolicy `json:"fail_policy"`
 	CreatedAt    time.Time     `json:"created_at"`
@@ -104,6 +109,20 @@ func (s IssueStatus) Validate() error {
 // NewIssueID generates an ID in format: issue-YYYYMMDD-xxxxxxxx.
 func NewIssueID() string {
 	return fmt.Sprintf("issue-%s-%s", time.Now().Format("20060102"), randomHex(4))
+}
+
+// NeedsDecomposition returns true if the issue should be decomposed into
+// child issues after review approval (e.g. template="epic" or label "decompose").
+func (i Issue) NeedsDecomposition() bool {
+	if i.Template == "epic" {
+		return true
+	}
+	for _, l := range i.Labels {
+		if strings.TrimSpace(strings.ToLower(l)) == "decompose" {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks required Issue fields at the domain-model layer.

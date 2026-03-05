@@ -16,6 +16,7 @@ type IssueFilter struct {
 	Status    string
 	SessionID string
 	State     string
+	ParentID  string
 	Limit     int
 	Offset    int
 }
@@ -84,6 +85,7 @@ type Store interface {
 	ListIssues(projectID string, filter IssueFilter) ([]Issue, int, error)
 	GetActiveIssues(projectID string) ([]Issue, error)
 	GetIssueByRun(RunID string) (*Issue, error)
+	GetChildIssues(parentID string) ([]Issue, error)
 	SaveIssueAttachment(issueID, path, content string) error
 	GetIssueAttachments(issueID string) ([]IssueAttachment, error)
 	SaveIssueChange(change *IssueChange) error

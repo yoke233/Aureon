@@ -57,6 +57,15 @@ type managerIssueReviewSubmitter interface {
 
 type ManagerOption func(*Manager)
 
+func WithEventPublisher(pub eventPublisher) ManagerOption {
+	return func(m *Manager) {
+		if m == nil {
+			return
+		}
+		m.pub = pub
+	}
+}
+
 func WithReviewGate(gate core.ReviewGate) ManagerOption {
 	return func(m *Manager) {
 		if m == nil {
@@ -70,6 +79,7 @@ type Manager struct {
 	store      core.Store
 	scheduler  managerScheduler
 	reviewGate core.ReviewGate
+	pub        eventPublisher
 
 	twoPhaseReview  managerTwoPhaseReview
 	reviewSubmitter managerIssueReviewSubmitter
@@ -316,29 +326,48 @@ func (m *Manager) submitIssues(ctx context.Context, issues []*core.Issue) error 
 }
 
 func (m *Manager) applyIssueApprove(ctx context.Context, issue *core.Issue, feedback string) (*core.Issue, error) {
-	issueScheduler, err := m.issueScheduler()
-	if err != nil {
-		return nil, err
-	}
-
 	updated := cloneManagerIssue(issue)
 	before := updated.Status
-	updated.Status = core.IssueStatusQueued
 	updated.State = core.IssueStateOpen
 	updated.ClosedAt = nil
-
-	if err := m.store.SaveIssue(updated); err != nil {
-		return nil, fmt.Errorf("save approved issue %s: %w", updated.ID, err)
-	}
 
 	reason := strings.TrimSpace(feedback)
 	if reason == "" {
 		reason = "human approve"
 	}
+
+	// Epic/decomposable issues go to decomposing instead of scheduling.
+	if updated.NeedsDecomposition() && updated.ParentID == "" {
+		updated.Status = core.IssueStatusDecomposing
+		if err := m.store.SaveIssue(updated); err != nil {
+			return nil, fmt.Errorf("save decomposing issue %s: %w", updated.ID, err)
+		}
+		if err := m.saveIssueChange(updated.ID, "status", string(before), string(updated.Status), reason); err != nil {
+			return nil, err
+		}
+		if m.pub != nil {
+			m.pub.Publish(core.Event{
+				Type:      core.EventIssueDecomposing,
+				IssueID:   updated.ID,
+				ProjectID: updated.ProjectID,
+				Timestamp: time.Now(),
+			})
+		}
+		return m.loadIssue(updated.ID)
+	}
+
+	// Normal path: queue for execution.
+	issueScheduler, err := m.issueScheduler()
+	if err != nil {
+		return nil, err
+	}
+	updated.Status = core.IssueStatusQueued
+	if err := m.store.SaveIssue(updated); err != nil {
+		return nil, fmt.Errorf("save approved issue %s: %w", updated.ID, err)
+	}
 	if err := m.saveIssueChange(updated.ID, "status", string(before), string(updated.Status), reason); err != nil {
 		return nil, err
 	}
-
 	if err := issueScheduler.StartIssue(ctx, cloneManagerIssue(updated)); err != nil {
 		if markErr := m.markApproveDispatchFailure(updated, err); markErr != nil {
 			return nil, fmt.Errorf("start issue scheduler for %s: %w (mark issue failed: %v)", updated.ID, err, markErr)

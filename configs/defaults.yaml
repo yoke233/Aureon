@@ -83,6 +83,20 @@ roles:
       max_turns: 6
       reset_prompt: true
 
+  - name: decomposer
+    agent: claude
+    prompt_template: decompose
+    capabilities:
+      fs_read: true
+      fs_write: false
+      terminal: false
+    mcp:
+      enabled: true
+      tools: [query_projects, query_project_detail, query_issues, query_issue_detail]
+    session:
+      reuse: true
+      max_turns: 8
+
   - name: plan_parser
     agent: claude
     prompt_template: plan_parser

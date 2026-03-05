@@ -33,6 +33,8 @@ const (
 	EventIssueExecuting         EventType = "issue_executing"
 	EventIssueDone              EventType = "issue_done"
 	EventIssueFailed            EventType = "issue_failed"
+	EventIssueDecomposing       EventType = "issue_decomposing"
+	EventIssueDecomposed        EventType = "issue_decomposed"
 	EventIssueDependencyChanged EventType = "issue_dependency_changed"
 	EventAutoMerged             EventType = "auto_merged"
 
@@ -84,6 +86,8 @@ func IsIssueScopedEvent(eventType EventType) bool {
 		EventIssueExecuting,
 		EventIssueDone,
 		EventIssueFailed,
+		EventIssueDecomposing,
+		EventIssueDecomposed,
 		EventIssueDependencyChanged:
 		return true
 	default:
@@ -95,7 +99,8 @@ func IsAlwaysBroadcastIssueEvent(eventType EventType) bool {
 	switch eventType {
 	case EventIssueCreated,
 		EventIssueDone,
-		EventIssueFailed:
+		EventIssueFailed,
+		EventIssueDecomposed:
 		return true
 	default:
 		return false

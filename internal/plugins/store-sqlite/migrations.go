@@ -198,7 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_review_records_issue ON review_records(issue_id);
 
 // schemaVersion tracks which migrations have been applied.
 // Bump this when adding new migrations.
-const schemaVersion = 2
+const schemaVersion = 3
 
 func applyMigrations(db *sql.DB) error {
 	if _, err := db.Exec(schemaTables); err != nil {
@@ -225,6 +225,12 @@ func applyMigrations(db *sql.DB) error {
 	if currentVersion < 2 {
 		if err := migrateAddDefaultBranch(db); err != nil {
 			return fmt.Errorf("migrate default_branch: %w", err)
+		}
+	}
+
+	if currentVersion < 3 {
+		if err := migrateAddParentID(db); err != nil {
+			return fmt.Errorf("migrate parent_id: %w", err)
 		}
 	}
 
@@ -286,6 +292,22 @@ func migrateAddDefaultBranch(db *sql.DB) error {
 	if !has {
 		if _, err := db.Exec(`ALTER TABLE projects ADD COLUMN default_branch TEXT DEFAULT ''`); err != nil {
 			return fmt.Errorf("add default_branch column: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateAddParentID(db *sql.DB) error {
+	has, err := hasColumn(db, "issues", "parent_id")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add parent_id column: %w", err)
+		}
+		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_parent ON issues(parent_id)`); err != nil {
+			return fmt.Errorf("create idx_issues_parent: %w", err)
 		}
 	}
 	return nil

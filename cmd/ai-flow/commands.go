@@ -299,7 +299,8 @@ var (
 		)
 		depScheduler.SetStageRoles(roleBinds.Run.StageRoles)
 
-		opts := make([]teamleader.ManagerOption, 0, 1)
+		opts := make([]teamleader.ManagerOption, 0, 2)
+		opts = append(opts, teamleader.WithEventPublisher(bus))
 		if bootstrapSet.ReviewGate != nil {
 			opts = append(opts, teamleader.WithReviewGate(bootstrapSet.ReviewGate))
 		}
@@ -806,6 +807,18 @@ func runServer(ctx context.Context, args []string) error {
 	}
 	autoMerger := teamleader.NewAutoMergeHandler(store, bus, merger)
 
+	// Decompose handler: listens for EventIssueDecomposing and creates child issues.
+	// DecomposeFunc is a placeholder; production implementation uses an ACP agent.
+	decomposeHandler := teamleader.NewDecomposeHandler(store, bus, func(ctx context.Context, parent *core.Issue) ([]teamleader.DecomposeSpec, error) {
+		return nil, fmt.Errorf("decomposer agent not configured for issue %s", parent.ID)
+	})
+	if adapter, ok := issueManager.(*teamLeaderIssueManagerAdapter); ok {
+		decomposeHandler.SetReviewSubmitter(adapter.manager)
+	}
+
+	// Child completion handler: tracks child issue done/failed and closes parent.
+	childCompletionHandler := teamleader.NewChildCompletionHandler(store, bus)
+
 	sub := bus.Subscribe()
 	bridgeDone := make(chan struct{})
 	go func() {
@@ -835,6 +848,8 @@ func runServer(ctx context.Context, args []string) error {
 					}
 				}
 				autoMerger.OnEvent(ctx, evt)
+				decomposeHandler.OnEvent(ctx, evt)
+				childCompletionHandler.OnEvent(ctx, evt)
 			}
 		}
 	}()

@@ -40,6 +40,7 @@ func TestMigration_V2Baseline_CreatesIssueRunSchema(t *testing.T) {
 	assertColumnNotExists(t, db, "runs", "task_item_id")
 
 	assertColumnExists(t, db, "issues", "auto_merge")
+	assertColumnExists(t, db, "issues", "merge_retries")
 	assertColumnExists(t, db, "review_records", "issue_id")
 	assertColumnExists(t, db, "review_records", "summary")
 	assertColumnExists(t, db, "review_records", "raw_output")
@@ -110,6 +111,58 @@ func TestMigration_V2Baseline_CreatesIndexes(t *testing.T) {
 	}
 	for _, index := range indexes {
 		assertIndexExists(t, db, index)
+	}
+}
+
+func TestMigration_AddsIssueMergeRetriesFromV3(t *testing.T) {
+	db := openSQLite(t)
+	defer db.Close()
+
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS issues (
+	id                TEXT PRIMARY KEY,
+	project_id        TEXT NOT NULL,
+	session_id        TEXT,
+	title             TEXT NOT NULL,
+	body              TEXT NOT NULL DEFAULT '',
+	labels            TEXT NOT NULL DEFAULT '[]',
+	milestone_id      TEXT NOT NULL DEFAULT '',
+	attachments       TEXT NOT NULL DEFAULT '[]',
+	depends_on        TEXT NOT NULL DEFAULT '[]',
+	blocks            TEXT NOT NULL DEFAULT '[]',
+	priority          INTEGER NOT NULL DEFAULT 0,
+	template          TEXT NOT NULL DEFAULT 'standard',
+	auto_merge        INTEGER NOT NULL DEFAULT 1,
+	state             TEXT NOT NULL DEFAULT 'open',
+	status            TEXT NOT NULL DEFAULT 'draft',
+	run_id            TEXT,
+	version           INTEGER NOT NULL DEFAULT 1,
+	superseded_by     TEXT NOT NULL DEFAULT '',
+	external_id       TEXT,
+	fail_policy       TEXT NOT NULL DEFAULT 'block',
+	parent_id         TEXT NOT NULL DEFAULT '',
+	created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+	closed_at         DATETIME
+)`); err != nil {
+		t.Fatalf("create legacy issues table: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 3`); err != nil {
+		t.Fatalf("set user_version=3: %v", err)
+	}
+
+	if err := applyMigrations(db); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+
+	assertColumnExists(t, db, "issues", "merge_retries")
+
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("user_version=%d, want %d", version, schemaVersion)
 	}
 }
 

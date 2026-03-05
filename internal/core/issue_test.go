@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -57,5 +58,47 @@ func TestIssueValidate_TemplateValidation(t *testing.T) {
 				t.Fatalf("expected validation success for template %q, got: %v", tc.template, err)
 			}
 		})
+	}
+}
+
+func TestIssueStatusValidate_Merging(t *testing.T) {
+	if err := IssueStatusMerging.Validate(); err != nil {
+		t.Fatalf("IssueStatusMerging should be valid: %v", err)
+	}
+}
+
+func TestIssueValidate_AllowsMergingStatus(t *testing.T) {
+	issue := Issue{
+		Title:    "merge branch",
+		Template: "standard",
+		Status:   IssueStatusMerging,
+	}
+	if err := issue.Validate(); err != nil {
+		t.Fatalf("Issue.Validate() with merging status should pass: %v", err)
+	}
+}
+
+func TestIssueJSON_MergeRetriesRoundTrip(t *testing.T) {
+	issue := Issue{
+		ID:           "issue-20260305-a1b2c3d4",
+		Title:        "merge conflict retry",
+		Template:     "standard",
+		MergeRetries: 2,
+	}
+
+	raw, err := json.Marshal(issue)
+	if err != nil {
+		t.Fatalf("marshal issue: %v", err)
+	}
+	if !strings.Contains(string(raw), `"merge_retries":2`) {
+		t.Fatalf("expected merge_retries in JSON, got %s", string(raw))
+	}
+
+	var decoded Issue
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal issue: %v", err)
+	}
+	if decoded.MergeRetries != 2 {
+		t.Fatalf("decoded MergeRetries=%d, want 2", decoded.MergeRetries)
 	}
 }

@@ -118,9 +118,10 @@ CREATE TABLE IF NOT EXISTS issues (
     depends_on        TEXT NOT NULL DEFAULT '[]',
     blocks            TEXT NOT NULL DEFAULT '[]',
     priority          INTEGER NOT NULL DEFAULT 0,
-    template          TEXT NOT NULL DEFAULT 'standard',
-    auto_merge        INTEGER NOT NULL DEFAULT 1,
-    state             TEXT NOT NULL DEFAULT 'open',
+	template          TEXT NOT NULL DEFAULT 'standard',
+	auto_merge        INTEGER NOT NULL DEFAULT 1,
+	merge_retries     INTEGER NOT NULL DEFAULT 0,
+	state             TEXT NOT NULL DEFAULT 'open',
     status            TEXT NOT NULL DEFAULT 'draft',
     run_id       TEXT,
     version           INTEGER NOT NULL DEFAULT 1,
@@ -198,7 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_review_records_issue ON review_records(issue_id);
 
 // schemaVersion tracks which migrations have been applied.
 // Bump this when adding new migrations.
-const schemaVersion = 3
+const schemaVersion = 4
 
 func applyMigrations(db *sql.DB) error {
 	if _, err := db.Exec(schemaTables); err != nil {
@@ -231,6 +232,11 @@ func applyMigrations(db *sql.DB) error {
 	if currentVersion < 3 {
 		if err := migrateAddParentID(db); err != nil {
 			return fmt.Errorf("migrate parent_id: %w", err)
+		}
+	}
+	if currentVersion < 4 {
+		if err := migrateAddMergeRetries(db); err != nil {
+			return fmt.Errorf("migrate merge_retries: %w", err)
 		}
 	}
 
@@ -309,6 +315,20 @@ func migrateAddParentID(db *sql.DB) error {
 		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_parent ON issues(parent_id)`); err != nil {
 			return fmt.Errorf("create idx_issues_parent: %w", err)
 		}
+	}
+	return nil
+}
+
+func migrateAddMergeRetries(db *sql.DB) error {
+	has, err := hasColumn(db, "issues", "merge_retries")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN merge_retries INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("add merge_retries column: %w", err)
 	}
 	return nil
 }

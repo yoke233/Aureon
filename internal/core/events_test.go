@@ -11,6 +11,11 @@ func TestEventTypes_TeamLeaderAndRunConstants_Defined(t *testing.T) {
 		EventRunCompleted:           "run_completed",
 		EventRunFailed:              "run_failed",
 		EventRunCancelled:           "run_cancelled",
+		EventIssueMerging:           "issue_merging",
+		EventIssueMerged:            "issue_merged",
+		EventIssueMergeConflict:     "issue_merge_conflict",
+		EventIssueMergeRetry:        "issue_merge_retry",
+		EventMergeFailed:            "merge_failed",
 	}
 
 	for eventType, want := range cases {
@@ -35,6 +40,7 @@ func TestIsIssueScopedEvent_TeamLeaderAndIssueLifecycle(t *testing.T) {
 		EventIssueExecuting,
 		EventIssueDone,
 		EventIssueFailed,
+		EventIssueMerging,
 		EventIssueDependencyChanged,
 	}
 
@@ -64,6 +70,7 @@ func TestIsAlwaysBroadcastIssueEvent_IssueLifecycle(t *testing.T) {
 		EventIssueCreated,
 		EventIssueDone,
 		EventIssueFailed,
+		EventIssueMergeConflict,
 	}
 
 	for _, eventType := range alwaysBroadcast {

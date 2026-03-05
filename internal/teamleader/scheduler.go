@@ -273,7 +273,7 @@ func (s *DepScheduler) scheduleSession(ctx context.Context, sessionID string, is
 		}
 
 		switch issue.Status {
-		case core.IssueStatusExecuting:
+		case core.IssueStatusExecuting, core.IssueStatusMerging:
 			if strings.TrimSpace(issue.RunID) == "" {
 				issue.Status = core.IssueStatusQueued
 			} else {
@@ -355,7 +355,7 @@ func (s *DepScheduler) recoverSession(ctx context.Context, sessionID string, iss
 
 		switch issue.Status {
 		case core.IssueStatusDone:
-		case core.IssueStatusExecuting:
+		case core.IssueStatusExecuting, core.IssueStatusMerging:
 			if strings.TrimSpace(issue.RunID) == "" {
 				issue.Status = core.IssueStatusQueued
 				if err := s.saveIssue(issue); err != nil {
@@ -450,15 +450,15 @@ func (s *DepScheduler) registerSessionRuntime(sessionID string, rs *runningSessi
 	return nil
 }
 
-// OnEvent handles run_done/run_failed events and advances Issue state.
+// OnEvent handles run and merge lifecycle events and advances Issue state.
 func (s *DepScheduler) OnEvent(ctx context.Context, evt core.Event) error {
 	if s == nil {
 		return nil
 	}
-	if evt.Type != core.EventRunDone && evt.Type != core.EventRunFailed {
+	if !isSchedulerHandledEvent(evt.Type) {
 		return nil
 	}
-	if strings.TrimSpace(evt.RunID) == "" {
+	if strings.TrimSpace(evt.RunID) == "" && strings.TrimSpace(evt.IssueID) == "" {
 		return nil
 	}
 
@@ -472,40 +472,47 @@ func (s *DepScheduler) OnEvent(ctx context.Context, evt core.Event) error {
 }
 
 func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
-	ref, ok := s.RunIndex[evt.RunID]
-	if !ok {
-		issue, err := s.store.GetIssueByRun(evt.RunID)
-		if err != nil || issue == nil {
-			return err
-		}
-		sessionID := makeSessionID(issue.ProjectID, issue.SessionID)
-		rs := s.sessions[sessionID]
-		if rs == nil {
-			return nil
-		}
-		if _, exists := rs.IssueByID[issue.ID]; !exists {
-			return nil
-		}
-		ref = RunRef{sessionID: sessionID, issueID: issue.ID}
-		s.RunIndex[evt.RunID] = ref
+	ref, trackedRunID, err := s.resolveRunRefLocked(evt)
+	if err != nil {
+		return err
+	}
+	if ref.sessionID == "" || ref.issueID == "" {
+		return nil
 	}
 
 	rs := s.sessions[ref.sessionID]
 	if rs == nil {
-		delete(s.RunIndex, evt.RunID)
+		if trackedRunID != "" {
+			delete(s.RunIndex, trackedRunID)
+		}
 		return nil
 	}
 
 	issue := rs.IssueByID[ref.issueID]
 	if issue == nil {
-		delete(s.RunIndex, evt.RunID)
+		if trackedRunID != "" {
+			delete(s.RunIndex, trackedRunID)
+		}
 		delete(rs.Running, ref.issueID)
 		s.releaseSlot()
 		return nil
 	}
 
+	cleanupRunID := trackedRunID
+	if cleanupRunID == "" {
+		cleanupRunID = strings.TrimSpace(issue.RunID)
+	}
+
 	switch evt.Type {
 	case core.EventRunDone:
+		if issue.AutoMerge {
+			issue.Status = core.IssueStatusMerging
+			if err := s.saveIssue(issue); err != nil {
+				return err
+			}
+			s.publishIssueEvent(core.EventIssueMerging, issue, nil, "")
+			return nil
+		}
 		issue.Status = core.IssueStatusDone
 		if err := s.saveIssue(issue); err != nil {
 			return err
@@ -526,6 +533,40 @@ func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
 				return err
 			}
 		}
+	case core.EventIssueMerged:
+		issue.Status = core.IssueStatusDone
+		if err := s.saveIssue(issue); err != nil {
+			return err
+		}
+		s.publishIssueEvent(core.EventIssueDone, issue, nil, "")
+	case core.EventMergeFailed:
+		issue.Status = core.IssueStatusFailed
+		if err := s.saveIssue(issue); err != nil {
+			return err
+		}
+		s.publishIssueEvent(core.EventIssueFailed, issue, nil, evt.Error)
+		switch issue.FailPolicy {
+		case core.FailSkip:
+		case core.FailHuman:
+			rs.HaltNew = true
+		default:
+			if err := s.applyBlockPolicyLocked(rs, issue.ID); err != nil {
+				return err
+			}
+		}
+	case core.EventIssueMergeRetry:
+		if err := s.syncIssueStateFromStoreLocked(issue); err != nil {
+			return err
+		}
+		if issue.Status != core.IssueStatusQueued {
+			issue.Status = core.IssueStatusQueued
+			issue.RunID = ""
+			if err := s.saveIssue(issue); err != nil {
+				return err
+			}
+		}
+	case core.EventIssueMergeConflict:
+		return nil
 	default:
 		return nil
 	}
@@ -538,7 +579,97 @@ func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
 		delete(rs.Running, ref.issueID)
 		s.releaseSlot()
 	}
-	delete(s.RunIndex, evt.RunID)
+	if cleanupRunID != "" {
+		delete(s.RunIndex, cleanupRunID)
+	}
+	return nil
+}
+
+func isSchedulerHandledEvent(eventType core.EventType) bool {
+	switch eventType {
+	case core.EventRunDone,
+		core.EventRunFailed,
+		core.EventIssueMerged,
+		core.EventMergeFailed,
+		core.EventIssueMergeRetry,
+		core.EventIssueMergeConflict:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *DepScheduler) resolveRunRefLocked(evt core.Event) (RunRef, string, error) {
+	runID := strings.TrimSpace(evt.RunID)
+	if runID != "" {
+		if ref, ok := s.RunIndex[runID]; ok {
+			return ref, runID, nil
+		}
+		issue, err := s.store.GetIssueByRun(runID)
+		if err != nil || issue == nil {
+			return RunRef{}, "", err
+		}
+		sessionID := makeSessionID(issue.ProjectID, issue.SessionID)
+		rs := s.sessions[sessionID]
+		if rs == nil {
+			return RunRef{}, runID, nil
+		}
+		if _, exists := rs.IssueByID[issue.ID]; !exists {
+			return RunRef{}, runID, nil
+		}
+		ref := RunRef{sessionID: sessionID, issueID: issue.ID}
+		s.RunIndex[runID] = ref
+		return ref, runID, nil
+	}
+	return s.resolveRunRefByIssueLocked(strings.TrimSpace(evt.IssueID))
+}
+
+func (s *DepScheduler) resolveRunRefByIssueLocked(issueID string) (RunRef, string, error) {
+	if issueID == "" {
+		return RunRef{}, "", nil
+	}
+	for sessionID, rs := range s.sessions {
+		if rs == nil {
+			continue
+		}
+		issue := rs.IssueByID[issueID]
+		if issue == nil {
+			continue
+		}
+		runID := strings.TrimSpace(issue.RunID)
+		if runID != "" {
+			s.RunIndex[runID] = RunRef{sessionID: sessionID, issueID: issueID}
+		}
+		return RunRef{sessionID: sessionID, issueID: issueID}, runID, nil
+	}
+	storedIssue, err := s.store.GetIssue(issueID)
+	if err != nil || storedIssue == nil {
+		return RunRef{}, "", err
+	}
+	sessionID := makeSessionID(storedIssue.ProjectID, storedIssue.SessionID)
+	rs := s.sessions[sessionID]
+	if rs == nil || rs.IssueByID[issueID] == nil {
+		return RunRef{}, "", nil
+	}
+	runID := strings.TrimSpace(rs.IssueByID[issueID].RunID)
+	if runID != "" {
+		s.RunIndex[runID] = RunRef{sessionID: sessionID, issueID: issueID}
+	}
+	return RunRef{sessionID: sessionID, issueID: issueID}, runID, nil
+}
+
+func (s *DepScheduler) syncIssueStateFromStoreLocked(issue *core.Issue) error {
+	if s == nil || s.store == nil || issue == nil {
+		return nil
+	}
+	storedIssue, err := s.store.GetIssue(issue.ID)
+	if err != nil || storedIssue == nil {
+		return err
+	}
+	issue.Status = storedIssue.Status
+	issue.RunID = storedIssue.RunID
+	issue.FailPolicy = storedIssue.FailPolicy
+	issue.MergeRetries = storedIssue.MergeRetries
 	return nil
 }
 

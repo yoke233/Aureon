@@ -103,6 +103,250 @@ func TestScheduler_ProfileQueueDispatchesNextAfterRunDone(t *testing.T) {
 	}
 }
 
+func TestScheduler_AutoMergeRunDoneTransitionsToMergingAndHoldsSlot(t *testing.T) {
+	store := newSchedulerTestStore(t)
+	defer store.Close()
+
+	project := mustCreateSchedulerProject(t, store, "proj-scheduler-automerge-merging")
+	autoMerge := newIssueWithProfile("issue-merge", "merge", core.WorkflowProfileStrict, nil)
+	autoMerge.AutoMerge = true
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-automerge-merging", core.FailBlock, []core.Issue{
+		autoMerge,
+		newIssueWithProfile("issue-next", "next", core.WorkflowProfileNormal, nil),
+	})
+
+	bus := &recordingSchedulerBus{}
+	s := NewDepScheduler(store, bus, (&schedulerRunner{}).Run, nil, 1)
+	if err := s.ScheduleIssues(context.Background(), issues); err != nil {
+		t.Fatalf("ScheduleIssues() error = %v", err)
+	}
+
+	issueMerge := waitIssueStatus(t, store, "issue-merge", core.IssueStatusExecuting, 2*time.Second)
+	if err := s.OnEvent(context.Background(), core.Event{
+		Type:      core.EventRunDone,
+		RunID:     issueMerge.RunID,
+		Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatalf("OnEvent(run_done merge) error = %v", err)
+	}
+
+	mergedState := waitIssueStatus(t, store, "issue-merge", core.IssueStatusMerging, 2*time.Second)
+	if mergedState.RunID == "" {
+		t.Fatalf("merging issue should retain RunID")
+	}
+	if len(s.sem) != 1 {
+		t.Fatalf("expected slot to stay occupied while merging, got %d", len(s.sem))
+	}
+	if _, ok := s.RunIndex[issueMerge.RunID]; !ok {
+		t.Fatalf("expected RunIndex to retain running merge Run")
+	}
+	nextIssue := waitIssueStatus(t, store, "issue-next", core.IssueStatusReady, 2*time.Second)
+	if nextIssue.RunID != "" {
+		t.Fatalf("next issue should not dispatch while merge slot occupied, got Run=%q", nextIssue.RunID)
+	}
+	if _, ok := bus.FirstEvent(core.EventIssueMerging, "issue-merge"); !ok {
+		t.Fatalf("expected EventIssueMerging to be published")
+	}
+}
+
+func TestScheduler_IssueMergedReleasesSlotAndDispatchesNext(t *testing.T) {
+	store := newSchedulerTestStore(t)
+	defer store.Close()
+
+	project := mustCreateSchedulerProject(t, store, "proj-scheduler-issue-merged")
+	autoMerge := newIssueWithProfile("issue-merge", "merge", core.WorkflowProfileStrict, nil)
+	autoMerge.AutoMerge = true
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-issue-merged", core.FailBlock, []core.Issue{
+		autoMerge,
+		newIssueWithProfile("issue-next", "next", core.WorkflowProfileNormal, nil),
+	})
+
+	bus := &recordingSchedulerBus{}
+	s := NewDepScheduler(store, bus, (&schedulerRunner{}).Run, nil, 1)
+	if err := s.ScheduleIssues(context.Background(), issues); err != nil {
+		t.Fatalf("ScheduleIssues() error = %v", err)
+	}
+
+	issueMerge := waitIssueStatus(t, store, "issue-merge", core.IssueStatusExecuting, 2*time.Second)
+	if err := s.OnEvent(context.Background(), core.Event{
+		Type:      core.EventRunDone,
+		RunID:     issueMerge.RunID,
+		Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatalf("OnEvent(run_done merge) error = %v", err)
+	}
+	waitIssueStatus(t, store, "issue-merge", core.IssueStatusMerging, 2*time.Second)
+
+	if err := s.OnEvent(context.Background(), core.Event{
+		Type:      core.EventIssueMerged,
+		IssueID:   "issue-merge",
+		Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatalf("OnEvent(issue_merged) error = %v", err)
+	}
+
+	waitIssueStatus(t, store, "issue-merge", core.IssueStatusDone, 2*time.Second)
+	nextIssue := waitIssueStatus(t, store, "issue-next", core.IssueStatusExecuting, 2*time.Second)
+	if nextIssue.RunID == "" {
+		t.Fatalf("next issue should dispatch after merge success")
+	}
+	if len(s.sem) != 1 {
+		t.Fatalf("expected one running issue after dispatching next, got %d", len(s.sem))
+	}
+	if _, ok := s.RunIndex[issueMerge.RunID]; ok {
+		t.Fatalf("expected old merge RunIndex entry to be removed")
+	}
+	if _, ok := bus.FirstEvent(core.EventIssueDone, "issue-merge"); !ok {
+		t.Fatalf("expected EventIssueDone for merged issue")
+	}
+}
+
+func TestScheduler_IssueMergeConflictKeepsMergingAndSlot(t *testing.T) {
+	store := newSchedulerTestStore(t)
+	defer store.Close()
+
+	project := mustCreateSchedulerProject(t, store, "proj-scheduler-merge-conflict")
+	autoMerge := newIssueWithProfile("issue-merge", "merge", core.WorkflowProfileStrict, nil)
+	autoMerge.AutoMerge = true
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-merge-conflict", core.FailBlock, []core.Issue{
+		autoMerge,
+		newIssueWithProfile("issue-next", "next", core.WorkflowProfileNormal, nil),
+	})
+
+	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 1)
+	if err := s.ScheduleIssues(context.Background(), issues); err != nil {
+		t.Fatalf("ScheduleIssues() error = %v", err)
+	}
+
+	issueMerge := waitIssueStatus(t, store, "issue-merge", core.IssueStatusExecuting, 2*time.Second)
+	if err := s.OnEvent(context.Background(), core.Event{
+		Type:      core.EventRunDone,
+		RunID:     issueMerge.RunID,
+		Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatalf("OnEvent(run_done merge) error = %v", err)
+	}
+	waitIssueStatus(t, store, "issue-merge", core.IssueStatusMerging, 2*time.Second)
+
+	if err := s.OnEvent(context.Background(), core.Event{
+		Type:      core.EventIssueMergeConflict,
+		IssueID:   "issue-merge",
+		Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatalf("OnEvent(issue_merge_conflict) error = %v", err)
+	}
+
+	conflictIssue := waitIssueStatus(t, store, "issue-merge", core.IssueStatusMerging, 2*time.Second)
+	if conflictIssue.RunID == "" {
+		t.Fatalf("conflict issue should retain RunID while waiting triage")
+	}
+	if len(s.sem) != 1 {
+		t.Fatalf("expected slot occupied on merge conflict, got %d", len(s.sem))
+	}
+	nextIssue := waitIssueStatus(t, store, "issue-next", core.IssueStatusReady, 2*time.Second)
+	if nextIssue.RunID != "" {
+		t.Fatalf("next issue should remain pending while merge conflict unresolved")
+	}
+}
+
+func TestScheduler_IssueMergeRetryReleasesOldRunAndRedispatches(t *testing.T) {
+	store := newSchedulerTestStore(t)
+	defer store.Close()
+
+	project := mustCreateSchedulerProject(t, store, "proj-scheduler-merge-retry")
+	autoMerge := newIssueWithProfile("issue-merge", "merge", core.WorkflowProfileStrict, nil)
+	autoMerge.AutoMerge = true
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-merge-retry", core.FailBlock, []core.Issue{
+		autoMerge,
+		newIssueWithProfile("issue-next", "next", core.WorkflowProfileNormal, nil),
+	})
+
+	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 1)
+	if err := s.ScheduleIssues(context.Background(), issues); err != nil {
+		t.Fatalf("ScheduleIssues() error = %v", err)
+	}
+
+	issueMerge := waitIssueStatus(t, store, "issue-merge", core.IssueStatusExecuting, 2*time.Second)
+	originalRunID := issueMerge.RunID
+	if err := s.OnEvent(context.Background(), core.Event{
+		Type:      core.EventRunDone,
+		RunID:     originalRunID,
+		Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatalf("OnEvent(run_done merge) error = %v", err)
+	}
+	waitIssueStatus(t, store, "issue-merge", core.IssueStatusMerging, 2*time.Second)
+
+	queued := waitIssueStatus(t, store, "issue-merge", core.IssueStatusMerging, 2*time.Second)
+	queued.Status = core.IssueStatusQueued
+	queued.RunID = ""
+	if err := store.SaveIssue(queued); err != nil {
+		t.Fatalf("SaveIssue(queued retry) error = %v", err)
+	}
+
+	if err := s.OnEvent(context.Background(), core.Event{
+		Type:      core.EventIssueMergeRetry,
+		IssueID:   "issue-merge",
+		Timestamp: time.Now(),
+	}); err != nil {
+		t.Fatalf("OnEvent(issue_merge_retry) error = %v", err)
+	}
+
+	retried := waitIssueStatus(t, store, "issue-merge", core.IssueStatusExecuting, 2*time.Second)
+	if retried.RunID == "" || retried.RunID == originalRunID {
+		t.Fatalf("expected re-dispatched RunID, got %q (original %q)", retried.RunID, originalRunID)
+	}
+	if _, ok := s.RunIndex[originalRunID]; ok {
+		t.Fatalf("expected old merge RunIndex entry to be removed after retry")
+	}
+}
+
+func TestScheduler_RecoverExecutingIssuesKeepsMergingAsRunning(t *testing.T) {
+	store := newSchedulerTestStore(t)
+	defer store.Close()
+
+	project := mustCreateSchedulerProject(t, store, "proj-scheduler-recover-merging")
+	mustCreateIssueSessionWithItems(t, store, project.ID, "session-recover-merging", core.FailBlock, []core.Issue{
+		{
+			ID:        "issue-merge",
+			Title:     "merge",
+			Body:      "merge",
+			Status:    core.IssueStatusMerging,
+			RunID:     "Run-recover-merging",
+			Template:  "strict",
+			Labels:    []string{"profile:strict"},
+			AutoMerge: true,
+		},
+	})
+
+	if err := store.SaveRun(&core.Run{
+		ID:         "Run-recover-merging",
+		ProjectID:  project.ID,
+		Name:       "Run-recover-merging",
+		Status:     core.StatusInProgress,
+		Conclusion: "",
+		IssueID:    "issue-merge",
+	}); err != nil {
+		t.Fatalf("SaveRun(in_progress) error = %v", err)
+	}
+
+	s := NewDepScheduler(store, nil, (&schedulerRunner{}).Run, nil, 1)
+	if err := s.RecoverExecutingIssues(context.Background(), project.ID); err != nil {
+		t.Fatalf("RecoverExecutingIssues() error = %v", err)
+	}
+
+	recovered := waitIssueStatus(t, store, "issue-merge", core.IssueStatusMerging, 2*time.Second)
+	if recovered.RunID != "Run-recover-merging" {
+		t.Fatalf("expected merge RunID preserved, got %q", recovered.RunID)
+	}
+	if _, ok := s.RunIndex["Run-recover-merging"]; !ok {
+		t.Fatalf("expected recovered merging Run to remain indexed")
+	}
+	if len(s.sem) != 1 {
+		t.Fatalf("expected recovered merging issue to occupy one slot, got %d", len(s.sem))
+	}
+}
+
 func TestScheduler_FailPolicyBlockFailsRemainingQueuedIssues(t *testing.T) {
 	store := newSchedulerTestStore(t)
 	defer store.Close()

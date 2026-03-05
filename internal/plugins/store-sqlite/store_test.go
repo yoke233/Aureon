@@ -117,24 +117,25 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 	}
 
 	issue := &core.Issue{
-		ID:          "issue-20260302-11223344",
-		ProjectID:   project.ID,
-		SessionID:   session.ID,
-		Title:       "OAuth 登录",
-		Body:        "实现 OAuth 登录接口并补齐回归测试",
-		Labels:      []string{"backend", "auth"},
-		MilestoneID: "ms-auth",
-		Attachments: []string{"docs/auth-spec.md"},
-		DependsOn:   []string{"issue-20260302-deadbeef"},
-		Blocks:      []string{"issue-20260302-feedface"},
-		Priority:    3,
-		Template:    "standard",
-		State:       core.IssueStateOpen,
-		Status:      core.IssueStatusDraft,
-		RunID:       Run.ID,
-		Version:     1,
-		ExternalID:  "ISSUE-101",
-		FailPolicy:  core.FailBlock,
+		ID:           "issue-20260302-11223344",
+		ProjectID:    project.ID,
+		SessionID:    session.ID,
+		Title:        "OAuth 登录",
+		Body:         "实现 OAuth 登录接口并补齐回归测试",
+		Labels:       []string{"backend", "auth"},
+		MilestoneID:  "ms-auth",
+		Attachments:  []string{"docs/auth-spec.md"},
+		DependsOn:    []string{"issue-20260302-deadbeef"},
+		Blocks:       []string{"issue-20260302-feedface"},
+		Priority:     3,
+		Template:     "standard",
+		State:        core.IssueStateOpen,
+		Status:       core.IssueStatusDraft,
+		RunID:        Run.ID,
+		Version:      1,
+		ExternalID:   "ISSUE-101",
+		FailPolicy:   core.FailBlock,
+		MergeRetries: 1,
 	}
 	if err := s.CreateIssue(issue); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -147,6 +148,9 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 	if got.Title != issue.Title || got.Status != issue.Status || got.State != issue.State {
 		t.Fatalf("issue core fields mismatch: got=%#v want=%#v", got, issue)
 	}
+	if got.MergeRetries != 1 {
+		t.Fatalf("issue MergeRetries mismatch: got=%d want=1", got.MergeRetries)
+	}
 	if !reflect.DeepEqual(got.Labels, issue.Labels) ||
 		!reflect.DeepEqual(got.Attachments, issue.Attachments) ||
 		!reflect.DeepEqual(got.DependsOn, issue.DependsOn) ||
@@ -156,6 +160,7 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 
 	issue.Status = core.IssueStatusExecuting
 	issue.Version = 2
+	issue.MergeRetries = 2
 	issue.Labels = append(issue.Labels, "critical")
 	if err := s.SaveIssue(issue); err != nil {
 		t.Fatalf("save issue: %v", err)
@@ -167,6 +172,9 @@ func TestIssueRoundTrip_PersistsStructuredFields(t *testing.T) {
 	}
 	if got2.Status != core.IssueStatusExecuting || got2.Version != 2 {
 		t.Fatalf("issue update not persisted: got=%#v", got2)
+	}
+	if got2.MergeRetries != 2 {
+		t.Fatalf("issue MergeRetries after save mismatch: got=%d want=2", got2.MergeRetries)
 	}
 	if !reflect.DeepEqual(got2.Labels, issue.Labels) {
 		t.Fatalf("issue labels mismatch after save: got=%#v want=%#v", got2.Labels, issue.Labels)
@@ -246,6 +254,14 @@ func TestIssueListAndActiveIssues(t *testing.T) {
 			Status:    core.IssueStatusReviewing,
 		},
 		{
+			ID:        "issue-20260302-list-d",
+			ProjectID: project.ID,
+			Title:     "D",
+			Template:  "standard",
+			State:     core.IssueStateOpen,
+			Status:    core.IssueStatusMerging,
+		},
+		{
 			ID:        "issue-20260302-list-c",
 			ProjectID: project.ID,
 			Title:     "C",
@@ -278,7 +294,7 @@ func TestIssueListAndActiveIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list issues paged: %v", err)
 	}
-	if totalPaged != 3 || len(paged) != 1 {
+	if totalPaged != 4 || len(paged) != 1 {
 		t.Fatalf("unexpected paged result: total=%d issues=%#v", totalPaged, paged)
 	}
 
@@ -286,8 +302,8 @@ func TestIssueListAndActiveIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get active issues: %v", err)
 	}
-	if len(active) != 2 {
-		t.Fatalf("expected 2 active issues, got %d (%#v)", len(active), active)
+	if len(active) != 3 {
+		t.Fatalf("expected 3 active issues, got %d (%#v)", len(active), active)
 	}
 }
 

@@ -19,13 +19,14 @@ const (
 type IssueStatus string
 
 const (
-	IssueStatusDraft      IssueStatus = "draft"
-	IssueStatusReviewing  IssueStatus = "reviewing"
-	IssueStatusQueued     IssueStatus = "queued"
-	IssueStatusReady      IssueStatus = "ready"
-	IssueStatusExecuting  IssueStatus = "executing"
-	IssueStatusDone       IssueStatus = "done"
-	IssueStatusFailed     IssueStatus = "failed"
+	IssueStatusDraft       IssueStatus = "draft"
+	IssueStatusReviewing   IssueStatus = "reviewing"
+	IssueStatusQueued      IssueStatus = "queued"
+	IssueStatusReady       IssueStatus = "ready"
+	IssueStatusExecuting   IssueStatus = "executing"
+	IssueStatusMerging     IssueStatus = "merging"
+	IssueStatusDone        IssueStatus = "done"
+	IssueStatusFailed      IssueStatus = "failed"
 	IssueStatusDecomposing IssueStatus = "decomposing"
 	IssueStatusDecomposed  IssueStatus = "decomposed"
 	IssueStatusSuperseded  IssueStatus = "superseded"
@@ -38,13 +39,14 @@ var validIssueStates = map[IssueState]struct{}{
 }
 
 var validIssueStatuses = map[IssueStatus]struct{}{
-	IssueStatusDraft:      {},
-	IssueStatusReviewing:  {},
-	IssueStatusQueued:     {},
-	IssueStatusReady:      {},
-	IssueStatusExecuting:  {},
-	IssueStatusDone:       {},
-	IssueStatusFailed:     {},
+	IssueStatusDraft:       {},
+	IssueStatusReviewing:   {},
+	IssueStatusQueued:      {},
+	IssueStatusReady:       {},
+	IssueStatusExecuting:   {},
+	IssueStatusMerging:     {},
+	IssueStatusDone:        {},
+	IssueStatusFailed:      {},
 	IssueStatusDecomposing: {},
 	IssueStatusDecomposed:  {},
 	IssueStatusSuperseded:  {},
@@ -79,6 +81,7 @@ type Issue struct {
 	AutoMerge    bool          `json:"auto_merge"`
 	State        IssueState    `json:"state"`
 	Status       IssueStatus   `json:"status"`
+	MergeRetries int           `json:"merge_retries"`
 	RunID        string        `json:"run_id"`
 	Version      int           `json:"version"`
 	SupersededBy string        `json:"superseded_by"`

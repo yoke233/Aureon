@@ -3,6 +3,12 @@
 artifacts/
 .tmp/
 .claude/
+/ai-flow
+/vendor-sync
+/data.db
+/data.db-shm
+/data.db-wal
+/docs/.write-test.tmp
 
 # Go
 *.exe

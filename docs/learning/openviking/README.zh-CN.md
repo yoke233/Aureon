@@ -1,45 +1,32 @@
 # OpenViking 学习目录（ai-workflow）
 
-最后更新：2026-03-03
+最后更新：2026-03-05
 
-本目录用于沉淀 OpenViking 在 `ai-workflow` 中的学习记录与实操手册。  
-当前采用“先简单、可运行、可扩展”的策略：
+本目录已按“高频使用优先”压缩。旧分步文档已删除（保留 Git 历史追溯），
+当前只保留 3 份主文档 + 1 份架构深潜。
 
-- 不按角色拆目录；
-- `secretary` 负责记忆写入；
-- `worker/reviewer` 只读。
+## 快速入口（先读）
 
-## 项目级配置约定（默认）
+1. [00-start-here.zh-CN.md](./00-start-here.zh-CN.md)  
+   5 分钟总览：先做什么、先看什么、最小闭环命令。
 
-OpenViking 视为 `ai-workflow` 的配套组件，默认使用**项目级配置**：
+2. [ops-runbook.zh-CN.md](./ops-runbook.zh-CN.md)  
+   运行手册：安装、配置、启动、探活、导入、搜索、排障、联调参数。
 
-- `D:/project/ai-workflow/.runtime/openviking/ov.conf`（本地私有，不入库）
-- `D:/project/ai-workflow/.runtime/openviking/ovcli.conf`（本地私有，不入库）
+3. [integration-spec.zh-CN.md](./integration-spec.zh-CN.md)  
+   集成规范：`ai-workflow` 对接 OpenViking 的 Store 接口、URI、权限与落地阶段。
 
-仓库内只保留模板：
+4. [06-architecture-deep-dive.zh-CN.md](./06-architecture-deep-dive.zh-CN.md)  
+   架构深潜（选读）：AGFS、L0/L1/L2、检索与会话记忆机制。
+
+## 项目级配置约定
+
+OpenViking 默认按项目私有配置运行：
+
+- `D:/project/ai-workflow/.runtime/openviking/ov.conf`
+- `D:/project/ai-workflow/.runtime/openviking/ovcli.conf`
+
+模板保留在：
 
 - `configs/openviking/ov.conf.example`
 - `configs/openviking/ovcli.conf.example`
-
-## 文档导航
-
-1. [01-install-and-start-windows.zh-CN.md](./01-install-and-start-windows.zh-CN.md)  
-   Windows 本机安装与启动（最小闭环）
-
-2. [02-config-template.zh-CN.md](./02-config-template.zh-CN.md)  
-   `ov.conf` / `ovcli.conf` 配置模板与字段说明
-
-3. [03-search-runbook.zh-CN.md](./03-search-runbook.zh-CN.md)  
-   资料导入、目录浏览、搜索与排错手册
-
-4. [04-ai-workflow-minimal-integration.zh-CN.md](./04-ai-workflow-minimal-integration.zh-CN.md)  
-   与 `ai-workflow` 的最小集成方案（先不复杂化角色目录）
-
-5. [05-live-test-params.zh-CN.md](./05-live-test-params.zh-CN.md)  
-   联调与真实测试所需参数清单（你填参数，我执行真实测试）
-
-## 本目录约定
-
-- 文档以实操为主，优先给可执行命令和最小配置。
-- 先保证“能跑起来 + 有检索结果”，再优化目录和策略。
-- 未来如果记忆冲突明显，再增量拆分 `by-role/{role}` 目录，不提前设计过深层级。

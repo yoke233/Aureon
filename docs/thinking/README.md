@@ -11,15 +11,16 @@
 | 03 | [A2A 协议映射](03-a2a-escalation-mapping.zh-CN.md) | 02 的模式如何映射到 A2A 原语 | **核心已实现** — follow-up 回复、tasks/list；Escalation 路由待 02 |
 | 04 | [A2A 对外接口与权限](04-a2a-external-access-design.zh-CN.md) | 外部操控/读取的权限分层，基于 03 的协议基础 | **已实现** — 多 token 认证(submitter/role/projects)、Agent Card skills、Task artifacts |
 | 05 | [多用户多 Project 部署](05-multi-user-deployment-model.zh-CN.md) | 默认单实例多 project，三个独立问题（跨 project 分解 / 多用户 / 多实例），只在信任边界处拆实例 | **P0/P1 已实现** — 跨 Project 分解 + token 权限分层；P2 多实例联通待需求 |
+| 06 | [Actor 工作空间](06-actor-workspace.zh-CN.md) | 常驻 Actor + Inbox + Gateway，从固定流水线进化到动态多 Agent 协作 | 设计阶段 |
 
 ## 阅读顺序（思考推导链）
 
 ```
 01 (具体问题: merge 冲突怎么办)
- └→ 02 (泛化: 所有 agent 都能向上汇报)
-     └→ 03 (映射: 用 A2A 协议表达)
-         └→ 04 (扩展: 对外权限设计)
-              05 (独立: 部署拓扑)
+ └→ 02 (泛化: 所有 agent 都能向上汇报) ─┐
+     └→ 03 (映射: 用 A2A 协议表达)       ├→ 06 (Actor 工作空间: 统一通信模型)
+         └→ 04 (扩展: 对外权限设计)       │
+              05 (独立: 部署拓扑) ─────────┘
 ```
 
 ## 实施顺序（按系统缺口排优先级）

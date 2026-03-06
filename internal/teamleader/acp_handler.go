@@ -398,7 +398,7 @@ func (h *ACPHandler) HandleSessionUpdate(ctx context.Context, update acpclient.S
 		"session_id":       chatSessionID,
 		"agent_session_id": agentSessionID,
 	}
-	if rawUpdate := strings.TrimSpace(update.RawUpdateJSON); rawUpdate != "" {
+	if rawUpdate := strings.TrimSpace(string(update.RawJSON)); rawUpdate != "" {
 		data["acp_update_json"] = rawUpdate
 	}
 
@@ -423,9 +423,9 @@ func (h *ACPHandler) HandleSessionUpdate(ctx context.Context, update acpclient.S
 				if status := strings.TrimSpace(update.Status); status != "" {
 					payload["status"] = status
 				}
-				if rawUpdate := strings.TrimSpace(update.RawUpdateJSON); rawUpdate != "" {
+				if rawUpdate := strings.TrimSpace(string(update.RawJSON)); rawUpdate != "" {
 					var acpPayload any
-					if err := json.Unmarshal([]byte(rawUpdate), &acpPayload); err == nil {
+					if err := json.Unmarshal(update.RawJSON, &acpPayload); err == nil {
 						payload["acp"] = acpPayload
 					} else {
 						payload["acp_raw"] = rawUpdate
@@ -492,7 +492,7 @@ func (h *ACPHandler) appendPendingChatRunChunk(
 
 	chunkText := update.Text
 	if chunkText == "" {
-		chunkText = extractACPChunkText(update.RawUpdateJSON)
+		chunkText = extractACPChunkText(string(update.RawJSON))
 	}
 	if chunkText == "" {
 		return nil

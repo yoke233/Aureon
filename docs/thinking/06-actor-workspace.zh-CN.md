@@ -395,6 +395,313 @@ CREATE TABLE actor_messages (
 
 新增表，不改现有表。现有的 `issues`、`runs`、`checkpoints` 继续用于固定流水线。Actor 层是叠加的，不是替换的。
 
+## 从 IronClaw 吸收的能力
+
+> 参考: [IronClaw 架构学习笔记](ironclaw-architecture-study.zh-CN.md)
+>
+> IronClaw 是一个 ~83K 行 Rust 的个人 AI 助手框架，已在生产中验证。以下 8 项能力是 06 设计的重要补充。
+
+### 1. 外部通道抽象（← IronClaw ChannelManager）
+
+**问题**: Gateway 只管 Actor 间路由，但**外部世界怎么接入**没有定义。
+
+IronClaw 的做法：`Channel` trait 产生 `MessageStream`，`ChannelManager` 合并所有通道为统一输入。
+
+**吸收**:
+
+```
+Gateway = 外部通道管理 + 内部消息路由
+
+外部通道:
+  MCP     → /api/v1/mcp 调用方（IronClaw、Claude Code 等）
+  A2A     → /api/v1/a2a 标准协议对接
+  Web     → Dashboard WebSocket/SSE
+  Webhook → Telegram/Slack/GitHub 等
+
+每个通道有独立的消息流汇入 Gateway:
+  Channel.MessageStream → Gateway.Inbound → 安全检查 → 路由到目标 Inbox
+```
+
+外部调用方也是 Actor —— 它们有自己的 Inbox（`check_inbox` 拉取），消息投递到 Inbox 后立刻返回，不阻塞。这解决了 MCP 调用方"连上来调一下就走"的通知问题。
+
+### 2. Actor 执行隔离（← IronClaw WASM 沙箱）
+
+**问题**: TL 动态创建的角色，它的 ACP session 能做什么？没有安全边界。
+
+IronClaw 的做法：WASM 沙箱 + 能力声明 + 白名单 + 燃料计量 + 内存限制。
+
+**吸收**:
+
+```go
+type Actor struct {
+    // ... 现有字段
+
+    // 执行沙箱
+    Sandbox    SandboxPolicy
+    AllowTools []string       // 工具白名单（空 = 全部）
+    DenyTools  []string       // 工具黑名单
+}
+
+type SandboxPolicy struct {
+    FSRead     bool           // 文件读
+    FSWrite    bool           // 文件写（限定 workspace 目录）
+    Terminal   bool           // shell 执行
+    Network    []string       // 网络白名单
+    MCP        bool           // 是否能调 MCP 工具
+}
+```
+
+- TL 创建角色时设定安全边界
+- 动态创建的角色默认 `restricted`（只读 + 无 shell）
+- config 里静态定义的角色可以 `full`
+- ACP agent 的 `capabilities` 被 Sandbox 二次约束
+
+### 3. Skill 动态注入（← IronClaw SKILL.md + selector + attenuation）
+
+**问题**: 角色提示词在 `create_role` 时写死。Actor 处理不同消息时无法自适应。
+
+IronClaw 的做法：
+- SKILL.md 文件定义提示词 + 激活条件（关键词、正则、标签）
+- Selector 按消息内容自动匹配相关 skills，多 skill 可叠加
+- 信任级别衰减：低信任 skill 激活时，自动降低可用工具上限
+
+**吸收**:
+
+```
+Actor 处理消息时:
+  1. 加载角色基础提示词（Role.Prompt）
+  2. 根据消息内容匹配 Skills（关键词、标签）
+  3. 叠加匹配的 Skill 上下文到系统提示
+  4. 根据 Skill 信任级别衰减可用工具
+
+Skill 来源:
+  - 内置 skills（系统自带，Trusted）
+  - 项目级 skills（.ai-workflow/skills/，Trusted）
+  - 外部安装 skills（注册表，Installed = 低信任）
+```
+
+这让 Actor 可以是"通才 + 按需专项技能"，而不是创建时定死能力。
+
+### 4. 成本控制（← IronClaw CostGuard）
+
+**问题**: 开放问题 #3 "10 个常驻 Actor 的成本怎么控"没有方案。
+
+IronClaw 的做法：`CostGuard` 跟踪日预算、小时速率、单作业上限，超限则拒绝执行。
+
+**吸收**:
+
+```go
+type ActorPool struct {
+    // 现有
+    MaxConcurrentActors int
+    MaxIdleDuration     time.Duration
+    MaxSleepingDuration time.Duration
+
+    // 成本控制
+    DailyBudget      float64        // 全局日预算（美元）
+    PerActorBudget   float64        // 单 Actor 日上限
+    PerMessageBudget float64        // 单消息处理上限
+}
+```
+
+- 每次 LLM 调用记录 token 消耗和估算成本
+- Actor 超预算 → 自动休眠 → Gateway 通知 TL
+- TL 可调整预算或决定是否继续
+
+```toml
+[actor_pool]
+daily_budget        = 50.0     # 全局日预算 $50
+per_actor_budget    = 10.0     # 单 Actor 日上限 $10
+per_message_budget  = 2.0      # 单消息上限 $2
+```
+
+### 5. 自我修复（← IronClaw self_repair + heartbeat）
+
+**问题**: Actor 挂了怎么办没有设计。
+
+IronClaw 的做法：心跳检测 + 卡住检测（超时无输出）+ 自动恢复（重启 + 注入历史）。
+
+**吸收**:
+
+```
+Gateway 健康管理:
+  - 每 N 秒检查所有 busy Actor 的心跳
+  - Actor 无响应超过阈值 → 标记 dead
+  - 通知 TL，由 TL 决策：
+    a. restart（wake 注入历史）
+    b. 转发当前消息给其他 Actor
+    c. 放弃并通知消息发送方
+
+  - Actor 进程崩溃 → 自动尝试 wake（注入历史恢复上下文）
+  - 连续 N 次恢复失败 → 标记 dead，不再自动恢复
+```
+
+```toml
+[actor_pool.health]
+heartbeat_interval   = "30s"
+busy_timeout         = "10m"    # busy 超过 10 分钟无心跳 → 异常
+max_auto_restarts    = 3        # 连续自动恢复上限
+```
+
+### 6. 语义记忆（← IronClaw Workspace 混合搜索）
+
+**问题**: Actor 持久记忆只是"序列化 session_data"，休眠后只有对话历史，没有语义搜索能力。
+
+IronClaw 的做法：向量搜索 + 全文搜索 + RRF (Reciprocal Rank Fusion) 融合，800 token 分块，15% 重叠。
+
+**吸收**:
+
+```
+Actor Memory = 三层
+
+1. 短期：当前 ACP session 对话历史
+   - 随 session 生存
+   - 休眠时序列化保存
+
+2. 中期：session_data 序列化
+   - 用于休眠/唤醒恢复上下文
+   - 注入历史对话是近似恢复
+
+3. 长期：语义记忆库（新增）
+   - 每个 Actor 有独立的 memory namespace
+   - 内容: 做过的任务摘要、学到的经验、项目上下文
+   - 搜索: 向量索引 + 全文索引 + 混合搜索
+   - 工具: memory_write / memory_search（Actor 自己可调用）
+   - 持久: 休眠甚至销毁后长期记忆不丢失
+   - 共享: TL 可以把一个 Actor 的记忆挂载给另一个（只读）
+```
+
+新增存储:
+```sql
+CREATE TABLE actor_memories (
+    id         TEXT PRIMARY KEY,
+    actor_id   TEXT NOT NULL,        -- 所属 Actor（namespace）
+    content    TEXT NOT NULL,         -- 原文
+    embedding  BLOB,                 -- 向量
+    metadata   TEXT,                  -- JSON (标签、来源、时间)
+    created_at DATETIME
+);
+CREATE INDEX idx_actor_memories_actor ON actor_memories(actor_id);
+```
+
+### 7. 例程 / 自主触发（← IronClaw routine_engine）
+
+**问题**: Actor 纯被动——只有收到消息才工作。
+
+IronClaw 的做法：`routine_engine.rs` 支持 Cron 表达式和事件触发，独立于用户消息。
+
+**吸收**:
+
+```go
+type Actor struct {
+    // ... 现有字段
+
+    // 自主行为
+    Routines []ActorRoutine
+}
+
+type ActorRoutine struct {
+    Name    string
+    Trigger RoutineTrigger   // cron / event / interval
+    Action  string           // 自然语言行为描述或模板 ID
+    Enabled bool
+}
+
+// 触发类型
+type RoutineTrigger struct {
+    Cron     string   // "0 9 * * *"
+    Event    string   // "issue_created" / "run_failed"
+    Interval string   // "30m"
+}
+```
+
+示例:
+- Reviewer Actor: `cron("0 9 * * *")` → 每天早上自动检查待审 PR
+- Monitor Actor: `event("run_failed")` → Run 失败时自动分析原因
+- TL: `interval("30m")` → 每半小时汇总所有项目进度
+
+例程触发时，Gateway 生成一条 `system` 类型消息投递到 Actor Inbox，Actor 像处理普通消息一样处理。
+
+### 8. 消息安全（← IronClaw SafetyLayer）
+
+**问题**: Actor 间消息没有安全检查。如果一个 Actor 被提示注入，它可以给其他 Actor 发恶意指令。
+
+IronClaw 的做法：多层防御 — Sanitizer（注入检测）+ LeakDetector（泄露扫描）+ Validator（输入验证）+ Policy（规则引擎）。
+
+**吸收**:
+
+```
+Gateway 消息处理管道（每条消息都经过）:
+
+  1. 接收消息
+  2. Validator   — 长度、编码、格式检查
+  3. Sanitizer   — 提示注入模式检测（XML 标记脱逃等）
+  4. LeakDetector — 扫描 API 密钥、token 等敏感信息
+  5. Policy      — 规则匹配，决定 Allow / Sanitize / Block
+  6. Router      — 权限检查（路由规则）
+  7. 投递到目标 Inbox
+
+工具输出安全:
+  - Actor 的工具执行结果经过 SafetyLayer 再注入对话
+  - 防止工具返回值中的提示注入（间接注入攻击）
+  - 检测到敏感信息 → 脱敏后再传递
+
+Actor 间通信安全:
+  - Worker 给其他 Worker 发消息时，消息内容经过注入检测
+  - 防止"被污染的 Actor A"通过消息污染"干净的 Actor B"
+  - 严重威胁自动 escalate 给 TL
+```
+
+## 更新后的 Actor 模型
+
+```
+                          ┌────────────────────────────────────────────────┐
+                          │                  Gateway                       │
+                          │                                                │
+                          │  ┌───────────────────┐  外部通道              │
+                          │  │  ChannelManager    │  MCP / A2A / Web /    │
+                          │  │  (统一消息流汇入)  │  Telegram / Webhook   │
+                          │  └────────┬──────────┘                        │
+                          │           │                                    │
+                          │  ┌────────▼──────────┐  安全层                │
+                          │  │  SafetyLayer       │  注入检测 / 泄露扫描  │
+                          │  │  (每条消息必经)     │  / 输入验证 / 策略    │
+                          │  └────────┬──────────┘                        │
+                          │           │                                    │
+                          │  ┌────────▼──────────┐  路由                  │
+                          │  │  Router            │  allow / deny /       │
+                          │  │  (权限 + 目标解析)  │  redirect / transform│
+                          │  └────────┬──────────┘                        │
+                          │           │                                    │
+                          │  ┌────────▼──────────┐  健康管理              │
+                          │  │  HealthCheck       │  心跳 / 卡住检测 /   │
+                          │  │                    │  自动恢复             │
+                          │  └────────┬──────────┘                        │
+                          │           │                                    │
+                          │  ┌────────▼──────────┐  成本控制              │
+                          │  │  CostGuard         │  全局预算 / 单 Actor  │
+                          │  │                    │  预算 / 速率限制      │
+                          │  └────────┬──────────┘                        │
+                          │           │                                    │
+                          │  ┌────────▼──────────┐  例程调度              │
+                          │  │  RoutineEngine     │  Cron / 事件触发 /   │
+                          │  │                    │  生成系统消息         │
+                          │  └───────────────────┘                        │
+                          └────┬──────────┬──────────┬──────────┬────────┘
+                               │          │          │          │
+                           ┌───▼──┐  ┌───▼──┐  ┌───▼───┐  ┌───▼───┐
+                           │  TL  │  │Coder │  │Coder  │  │Review │
+                           │      │  │#1    │  │#2     │  │er     │
+                           ├──────┤  ├──────┤  ├──────┤  ├───────┤
+                           │Inbox │  │Inbox │  │Inbox │  │Inbox  │
+                           │Skills│  │Skills│  │Skills │  │Skills │
+                           │Memory│  │Memory│  │Memory│  │Memory │
+                           │Budget│  │Budget│  │Budget│  │Budget │
+                           │Sandbox│ │Sandbox│ │Sandbox│ │Sandbox│
+                           │Routine│ │Routine│ │Routine│ │Routine│
+                           └──────┘  └──────┘  └──────┘  └───────┘
+```
+
 ## 方案对比
 
 ### A: 纯 Actor（全部替换）
@@ -424,27 +731,46 @@ CREATE TABLE actor_messages (
 
 | 阶段 | 内容 | 依赖 |
 |------|------|------|
+| **P0: 基础通信** | | |
 | P0 | Gateway + Inbox + ActorMessage 存储 + 基础路由 | 无 |
+| P0 | SafetyLayer 消息管道（注入检测 + 泄露扫描） | Gateway |
+| P0 | 外部通道注册（MCP / A2A / Web 作为外部 Actor） | Gateway |
 | P0 | TL 常驻 Actor（第一个持久 session） | Gateway |
 | P0 | TL 的 `send_message` / `check_inbox` MCP 工具 | Gateway + Inbox |
+| P0 | MCP 工具优化: `project_name` resolver + `auto_approve` | MCP Server |
+| **P1: Actor 生命周期** | | |
 | P1 | Actor 生命周期管理（spawn / kill / sleep / wake） | P0 |
+| P1 | 执行隔离: SandboxPolicy + 工具白名单/黑名单 | P0 |
+| P1 | CostGuard: 全局预算 + 单 Actor 预算 + 超限休眠 | P0 |
+| P1 | HealthCheck: 心跳检测 + 卡住恢复 + 自动 restart | P0 |
 | P1 | TL 的角色管理工具（create_role / spawn_actor） | P0 |
 | P1 | Worker Actor 复用（流水线 stage 可指向常驻 Actor） | P1 |
+| **P2: 动态编排** | | |
+| P2 | Skill 动态注入: 按消息匹配 skill + 信任级别衰减 | P1 |
+| P2 | 语义记忆: actor_memories 表 + 向量搜索 + memory 工具 | P1 |
+| P2 | RoutineEngine: Cron + 事件触发 + 系统消息生成 | P1 |
 | P2 | 动态编排（TL 自由组合 Actor 完成非标任务） | P1 |
 | P2 | Actor 间 query 通信（对等问答） | P1 + 权限规则 |
+| **P3: 统一** | | |
 | P3 | 流水线 Actor 化（stage → Actor message 宏） | P2 验证后 |
 
 ## 开放问题
 
-1. **ACP session 休眠精度** — 注入历史对话能恢复多少上下文？需要实验。可能需要 ACP 协议扩展支持 session snapshot。
+### 已解答（通过 IronClaw 研究）
 
-2. **Actor 间聊天失控** — 两个 Agent 互相 query 可能无限循环。需要 Gateway 限制：每个 query 链最多 N 轮，超出自动 escalate 给 TL。
+1. ~~**资源预算**~~ → CostGuard 方案（§4 成本控制）：日/Actor/消息三级预算 + 超限自动休眠
+2. ~~**人类参与模式**~~ → 外部通道抽象（§1）：Human 是外部 Actor，通过 MCP/Web 通道接入，Inbox = Web UI 通知面板
+3. ~~**与 A2A 的关系**~~ → 外部通道抽象（§1）：A2A 是一种外部通道，消息进 Gateway 统一处理，TL 不需要区分来源
 
-3. **资源预算** — 10 个常驻 Actor = 10 个 ACP 进程。API token 消耗怎么控制？idle 状态是否计费？需要根据 agent provider 的计费模型设计休眠策略。
+### 仍然开放
 
-4. **人类参与模式** — Human 是一个特殊 Actor 还是 Gateway 的外部接口？如果是 Actor，他的 Inbox 就是 Web UI 的通知面板。
+4. **ACP session 休眠精度** — 注入历史对话能恢复多少上下文？三层记忆模型（§6 语义记忆）是缓解方案，但需要实验验证。可能需要 ACP 协议扩展支持 session snapshot。
 
-5. **与 A2A 的关系** — 外部 A2A client 发消息给"团队"，Gateway 路由到 TL。TL 是否需要感知"这条消息来自外部 A2A"还是统一当作 Inbox 消息处理？
+5. **Actor 间聊天失控** — 两个 Agent 互相 query 可能无限循环。Gateway Router 层限制：每个 query 链最多 N 轮（默认 5），超出自动 escalate 给 TL。CostGuard 的 per_message_budget 是第二道防线。
+
+6. **Skill 信任边界** — 外部安装的 Skill 包含提示词，可能被投毒。需要参考 IronClaw 的信任模型（Installed vs Trusted）和权限衰减机制，但 Go 侧没有 WASM 沙箱，隔离程度取决于 ACP agent 的能力约束。
+
+7. **跨 Actor 记忆共享** — TL 把 Actor A 的记忆挂载给 Actor B（只读），如何防止信息泄露？需要 memory namespace 的 ACL 机制。
 
 ---
 

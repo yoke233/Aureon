@@ -12,6 +12,7 @@
 | 04 | [A2A 对外接口与权限](04-a2a-external-access-design.zh-CN.md) | 外部操控/读取的权限分层，基于 03 的协议基础 | **已实现** — 多 token 认证(submitter/role/projects)、Agent Card skills、Task artifacts |
 | 05 | [多用户多 Project 部署](05-multi-user-deployment-model.zh-CN.md) | 默认单实例多 project，三个独立问题（跨 project 分解 / 多用户 / 多实例），只在信任边界处拆实例 | **P0/P1 已实现** — 跨 Project 分解 + token 权限分层；P2 多实例联通待需求 |
 | 06 | [Actor 工作空间](06-actor-workspace.zh-CN.md) | 常驻 Actor + Inbox + Gateway，从固定流水线进化到动态多 Agent 协作 | 设计阶段 |
+| -- | [IronClaw 架构学习](ironclaw-architecture-study.zh-CN.md) | IronClaw 项目架构分析，06 的 8 项能力吸收来源 | 参考资料 |
 
 ## 阅读顺序（思考推导链）
 

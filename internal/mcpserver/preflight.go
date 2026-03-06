@@ -32,9 +32,10 @@ type StepResult struct {
 
 // PreflightGate tracks the last successful preflight and gates restart.
 type PreflightGate struct {
-	mu     sync.Mutex
-	last   *PreflightResult
-	running bool
+	mu              sync.Mutex
+	last            *PreflightResult
+	running         bool
+	enforceCommitSHA bool // if true, restart requires preflight SHA == HEAD; default false
 }
 
 // NewPreflightGate creates a new gate.
@@ -56,8 +57,16 @@ func (g *PreflightGate) IsRunning() bool {
 	return g.running
 }
 
-// CanRestart checks if a restart is allowed: last preflight must have succeeded
-// for the current HEAD commit.
+// SetEnforceCommitSHA enables/disables commit SHA matching on restart.
+// When disabled (default), only requires a successful preflight regardless of commit.
+func (g *PreflightGate) SetEnforceCommitSHA(v bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.enforceCommitSHA = v
+}
+
+// CanRestart checks if a restart is allowed: last preflight must have succeeded.
+// If enforceCommitSHA is true, also requires the preflight SHA to match current HEAD.
 func (g *PreflightGate) CanRestart(currentSHA string) (bool, string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -67,7 +76,7 @@ func (g *PreflightGate) CanRestart(currentSHA string) (bool, string) {
 	if !g.last.Success {
 		return false, fmt.Sprintf("last preflight failed at %s", g.last.Timestamp.Format(time.RFC3339))
 	}
-	if g.last.CommitSHA != currentSHA {
+	if g.enforceCommitSHA && g.last.CommitSHA != currentSHA {
 		return false, fmt.Sprintf(
 			"preflight was for commit %s but HEAD is now %s; re-run self_preflight",
 			g.last.CommitSHA[:min(8, len(g.last.CommitSHA))],

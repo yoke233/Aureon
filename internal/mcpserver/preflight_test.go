@@ -40,8 +40,9 @@ func TestPreflightGateCanRestart_FailedResult(t *testing.T) {
 	t.Logf("blocked reason: %s", reason)
 }
 
-func TestPreflightGateCanRestart_WrongCommit(t *testing.T) {
+func TestPreflightGateCanRestart_WrongCommit_Enforced(t *testing.T) {
 	g := NewPreflightGate()
+	g.SetEnforceCommitSHA(true)
 	g.mu.Lock()
 	g.last = &PreflightResult{
 		Success:   true,
@@ -52,9 +53,26 @@ func TestPreflightGateCanRestart_WrongCommit(t *testing.T) {
 
 	ok, reason := g.CanRestart("def67890")
 	if ok {
-		t.Fatal("expected restart to be blocked with wrong commit")
+		t.Fatal("expected restart to be blocked with wrong commit when enforced")
 	}
 	t.Logf("blocked reason: %s", reason)
+}
+
+func TestPreflightGateCanRestart_WrongCommit_NotEnforced(t *testing.T) {
+	g := NewPreflightGate()
+	// enforceCommitSHA defaults to false
+	g.mu.Lock()
+	g.last = &PreflightResult{
+		Success:   true,
+		CommitSHA: "abc12345",
+		Timestamp: time.Now(),
+	}
+	g.mu.Unlock()
+
+	ok, reason := g.CanRestart("def67890")
+	if !ok {
+		t.Fatalf("expected restart allowed when commit SHA not enforced, got: %s", reason)
+	}
 }
 
 func TestPreflightGateCanRestart_Success(t *testing.T) {

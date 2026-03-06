@@ -1,7 +1,9 @@
+//go:build probe
+
 // Integration test: verifies that LoadSession on a real codex ACP replays
 // historical events, and that the ACPHandler suppress flag silences them.
 //
-// Requires codex-acp to be available via npx. Skip with: go test -short
+// Run manually:  go test -tags probe ./cmd/acp-probe/ -run TestLoadSession -v -timeout 300s
 package main
 
 import (

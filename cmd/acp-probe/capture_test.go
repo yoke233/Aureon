@@ -1,7 +1,9 @@
+//go:build probe
+
 // Capture tool: runs real codex ACP in multiple scenarios and dumps all events
 // to a JSON fixture file for offline mock testing.
 //
-// Run manually:  go test ./cmd/acp-probe/ -run TestCaptureACPEvents -v -timeout 300s
+// Run manually:  go test -tags probe ./cmd/acp-probe/ -run TestCaptureACPEvents -v -timeout 300s
 // The output goes to internal/acpclient/testdata/codex_fixtures.json
 package main
 

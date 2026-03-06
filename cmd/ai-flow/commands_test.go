@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,16 +22,42 @@ import (
 	"github.com/yoke233/ai-workflow/internal/web"
 )
 
+var stdoutCaptureMu sync.Mutex
+
 func TestCLI_HiCommand(t *testing.T) {
+	var runErr error
 	output := captureStdout(t, func() {
-		if err := runWithArgs([]string{"hi"}); err != nil {
-			t.Fatalf("runWithArgs(hi) error = %v", err)
-		}
+		runErr = runWithArgs([]string{"hi"})
 	})
+	if runErr != nil {
+		t.Fatalf("runWithArgs(hi) error = %v", runErr)
+	}
 
 	if output != "hi\n" {
 		t.Fatalf("hi command output = %q, want %q", output, "hi\n")
 	}
+}
+
+func TestCaptureStdout_RestoresStdoutAfterPanic(t *testing.T) {
+	originalStdout := os.Stdout
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected panic from captureStdout callback")
+		}
+		if recovered != "boom" {
+			t.Fatalf("panic value = %#v, want %q", recovered, "boom")
+		}
+		if os.Stdout != originalStdout {
+			t.Fatal("expected stdout to be restored after panic")
+		}
+	}()
+
+	_ = captureStdout(t, func() {
+		_, _ = os.Stdout.WriteString("partial output")
+		panic("boom")
+	})
 }
 
 func TestCLI_RunActionCommand(t *testing.T) {
@@ -500,15 +527,17 @@ func reserveFreePort(t *testing.T) int {
 	return addr.Port
 }
 
-func captureStdout(t *testing.T, fn func()) string {
+func captureStdout(t *testing.T, fn func()) (output string) {
 	t.Helper()
+
+	stdoutCaptureMu.Lock()
+	defer stdoutCaptureMu.Unlock()
 
 	originalStdout := os.Stdout
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("create stdout pipe: %v", err)
 	}
-	os.Stdout = writer
 
 	outputCh := make(chan string, 1)
 	go func() {
@@ -517,17 +546,15 @@ func captureStdout(t *testing.T, fn func()) string {
 		outputCh <- buffer.String()
 	}()
 
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = originalStdout
+		_ = writer.Close()
+		output = <-outputCh
+		_ = reader.Close()
+	}()
+
 	fn()
-
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close stdout writer: %v", err)
-	}
-	os.Stdout = originalStdout
-
-	output := <-outputCh
-	if err := reader.Close(); err != nil {
-		t.Fatalf("close stdout reader: %v", err)
-	}
 	return output
 }
 

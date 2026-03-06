@@ -128,4 +128,4 @@ A2A Task state = INPUT_REQUIRED，message.parts 包含结构化 escalation
 | teamleader/a2a_bridge.go | 修改 | 加 HandleFollowUp、ListTasks、Artifact 输出 |
 | web/handlers_a2a_protocol.go | 修改 | Artifact 序列化、结构化 Part |
 | config/types.go | 修改 | A2A tokens/roles 配置结构 |
-| configs/defaults.yaml | 修改 | A2A role 默认配置 |
+| internal/config/defaults.toml | 修改 | A2A role 默认配置 |

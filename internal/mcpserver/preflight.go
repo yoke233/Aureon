@@ -5,13 +5,18 @@ package mcpserver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
+
+// ProgressFunc is called after each preflight step completes.
+type ProgressFunc func(step StepResult, stepIndex, totalSteps int)
 
 // PreflightResult records the outcome of a quality gate run.
 type PreflightResult struct {
@@ -94,7 +99,8 @@ type preflightStep struct {
 }
 
 // Run executes the full preflight quality gate.
-func (g *PreflightGate) Run(ctx context.Context, sourceRoot string, skipFrontend bool) (*PreflightResult, error) {
+// If onProgress is non-nil, it is called after each step completes.
+func (g *PreflightGate) Run(ctx context.Context, sourceRoot string, skipFrontend bool, onProgress ...ProgressFunc) (*PreflightResult, error) {
 	g.mu.Lock()
 	if g.running {
 		g.mu.Unlock()
@@ -132,7 +138,7 @@ func (g *PreflightGate) Run(ctx context.Context, sourceRoot string, skipFrontend
 	results := make([]StepResult, 0, len(steps))
 	allOK := true
 
-	for _, step := range steps {
+	for i, step := range steps {
 		if ctx.Err() != nil {
 			results = append(results, StepResult{
 				Name:    step.Name,
@@ -159,12 +165,17 @@ func (g *PreflightGate) Run(ctx context.Context, sourceRoot string, skipFrontend
 		}
 
 		ok := runErr == nil
-		results = append(results, StepResult{
+		sr := StepResult{
 			Name:     step.Name,
 			Success:  ok,
 			Output:   output,
 			Duration: elapsed.Round(time.Millisecond).String(),
-		})
+		}
+		results = append(results, sr)
+
+		for _, fn := range onProgress {
+			fn(sr, i, len(steps))
+		}
 
 		if !ok {
 			allOK = false
@@ -209,4 +220,23 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// postSystemEvent sends a system event to the server for WS broadcast.
+func postSystemEvent(serverAddr, event string, data map[string]any) {
+	if serverAddr == "" {
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"event": event, "data": data})
+	req, err := http.NewRequest(http.MethodPost, serverAddr+"/api/v1/admin/ops/system-event", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
 }

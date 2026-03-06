@@ -112,15 +112,44 @@ func selfPreflightHandler(opts Options) func(context.Context, *mcp.CallToolReque
 			return errorResult("source_root not configured")
 		}
 
-		result, err := gate.Run(ctx, opts.SourceRoot, in.SkipFrontend)
+		// Broadcast preflight start.
+		postSystemEvent(opts.ServerAddr, "preflight_start", map[string]any{
+			"message": "Preflight quality gate started",
+		})
+
+		progress := func(step StepResult, idx, total int) {
+			status := "PASS"
+			if !step.Success {
+				status = "FAIL"
+			}
+			postSystemEvent(opts.ServerAddr, "preflight_step", map[string]any{
+				"step":     idx + 1,
+				"total":    total,
+				"name":     step.Name,
+				"status":   status,
+				"duration": step.Duration,
+				"message":  fmt.Sprintf("[%d/%d] %s: %s (%s)", idx+1, total, step.Name, status, step.Duration),
+			})
+		}
+
+		result, err := gate.Run(ctx, opts.SourceRoot, in.SkipFrontend, progress)
 		if err != nil {
 			return errorResult(fmt.Sprintf("preflight error: %v", err))
 		}
 
 		msg := "PASS — self_restart is now allowed"
+		event := "preflight_pass"
 		if !result.Success {
 			msg = "FAIL — self_restart is blocked until all checks pass"
+			event = "preflight_fail"
 		}
+
+		postSystemEvent(opts.ServerAddr, event, map[string]any{
+			"success":    result.Success,
+			"commit_sha": result.CommitSHA,
+			"duration":   result.Duration.String(),
+			"message":    msg,
+		})
 
 		return jsonResult(SelfPreflightOutput{
 			Success:   result.Success,

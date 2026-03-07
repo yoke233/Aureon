@@ -47,6 +47,7 @@ type createChatSessionRequest struct {
 type createChatSessionResponse struct {
 	SessionID string `json:"session_id"`
 	Status    string `json:"status"`
+	AgentName string `json:"agent_name,omitempty"`
 }
 
 type cancelChatSessionResponse struct {
@@ -62,6 +63,7 @@ type setChatSessionConfigOptionRequest struct {
 type listChatSessionEventsResponse struct {
 	SessionID  string              `json:"session_id"`
 	ProjectID  string              `json:"project_id"`
+	AgentName  string              `json:"agent_name,omitempty"`
 	UpdatedAt  time.Time           `json:"updated_at"`
 	Messages   []core.ChatMessage  `json:"messages"`
 	Events     []core.ChatRunEvent `json:"events"`
@@ -242,6 +244,7 @@ func (h *chatHandlers) createSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, createChatSessionResponse{
 		SessionID: session.ID,
 		Status:    "accepted",
+		AgentName: session.AgentName,
 	})
 
 	go h.executeChatTurn(runCtx, chatRunInput{
@@ -693,6 +696,7 @@ func (h *chatHandlers) listSessionEvents(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, listChatSessionEventsResponse{
 		SessionID:  session.ID,
 		ProjectID:  session.ProjectID,
+		AgentName:  session.AgentName,
 		UpdatedAt:  session.UpdatedAt,
 		Messages:   messagesPage,
 		Events:     eventsPage,

@@ -63,28 +63,34 @@ export function TuiActivityBlock({
 
   return (
     <div className="ml-6 my-1 border-l-2 border-slate-200 px-3 py-1 text-sm">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {collapsible ? (
-          <button
-            type="button"
-            onClick={handleToggle}
-            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800"
-            aria-label={expanded ? "收起" : "展开"}
-          >
-            <span className="select-none">{expanded ? "▼" : "▶"}</span>
+          <>
+            <button
+              type="button"
+              onClick={handleToggle}
+              className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-slate-400 hover:text-slate-700"
+              aria-label={expanded ? "收起" : "展开"}
+            >
+              <svg viewBox="0 0 12 12" className="h-3 w-3 fill-current">
+                {expanded
+                  ? <path d="M6 8L1 3h10z"/>
+                  : <path d="M8 6L3 1v10z"/>}
+              </svg>
+            </button>
             {!expanded && (
-              <>
-                <span className="font-mono">{getCollapsedPreview(detail)}</span>
+              <span className="truncate font-mono text-xs text-slate-500">
+                {getCollapsedPreview(detail)}
                 {extraLines > 0 && (
-                  <span className="text-slate-400">… +{extraLines} lines</span>
+                  <span className="ml-1 text-slate-400">… +{extraLines} lines</span>
                 )}
-              </>
+              </span>
             )}
-          </button>
+          </>
         ) : (
           <span className="text-xs text-slate-500">{isThought ? "Thinking" : activityType}</span>
         )}
-        <span className="ml-auto text-[10px] text-slate-400">{formatTime(time)}</span>
+        <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400">{formatTime(time)}</span>
       </div>
 
       {(expanded || !collapsible) && (

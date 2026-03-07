@@ -16,6 +16,7 @@ type ChatAssistantRequest struct {
 	AgentSessionID string
 	ProjectID      string
 	ChatSessionID  string
+	AgentOverride  string
 }
 
 // ChatAssistantResponse contains assistant content and provider session identity.

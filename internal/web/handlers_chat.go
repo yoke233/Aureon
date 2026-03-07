@@ -41,6 +41,7 @@ type createChatSessionRequest struct {
 	Message   string `json:"message"`
 	Role      string `json:"role,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
 }
 
 type createChatSessionResponse struct {
@@ -189,6 +190,7 @@ func (h *chatHandlers) createSession(w http.ResponseWriter, r *http.Request) {
 		session = &core.ChatSession{
 			ID:        core.NewChatSessionID(),
 			ProjectID: projectID,
+			AgentName: strings.TrimSpace(req.AgentName),
 		}
 	} else {
 		existing, err := h.store.GetChatSession(req.SessionID)
@@ -249,6 +251,7 @@ func (h *chatHandlers) createSession(w http.ResponseWriter, r *http.Request) {
 		Message:        req.Message,
 		SessionID:      session.ID,
 		AgentSessionID: strings.TrimSpace(session.AgentSessionID),
+		AgentName:      strings.TrimSpace(session.AgentName),
 	})
 }
 
@@ -259,6 +262,7 @@ type chatRunInput struct {
 	Message        string
 	SessionID      string
 	AgentSessionID string
+	AgentName      string
 }
 
 func (h *chatHandlers) executeChatTurn(ctx context.Context, input chatRunInput) {
@@ -273,6 +277,7 @@ func (h *chatHandlers) executeChatTurn(ctx context.Context, input chatRunInput) 
 		AgentSessionID: input.AgentSessionID,
 		ProjectID:      input.ProjectID,
 		ChatSessionID:  input.SessionID,
+		AgentOverride:  input.AgentName,
 	})
 	if err != nil {
 		eventType := core.EventRunFailed

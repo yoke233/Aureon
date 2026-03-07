@@ -941,7 +941,7 @@ describe("ChatView", () => {
         },
       );
       expect(screen.getAllByText("第二个会话回复").length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/Terminal/).length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText(/Terminal/).length).toBeGreaterThanOrEqual(1);
     });
     expect(screen.getByText("Session ID: chat-2")).toBeTruthy();
   });
@@ -1336,10 +1336,7 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("运行事件")).toBeTruthy();
-      expect(screen.getAllByText(/tool_call/).length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText(/读取文件/).length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText(/plan/).length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText(/步骤 1/).length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -1413,9 +1410,8 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/tool_call/).length).toBeGreaterThanOrEqual(1);
       expect(
-        screen.getAllByText(/agent_thought/).length,
+        screen.getAllByText(/Thinking/).length,
       ).toBeGreaterThanOrEqual(1);
       expect(
         screen.getAllByText("thinking in detail").length,
@@ -1665,14 +1661,8 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/超长侧栏命令/).length).toBeGreaterThanOrEqual(
-        2,
-      );
+      expect(screen.getAllByText(/超长侧栏命令/).length).toBeGreaterThanOrEqual(1);
     });
-
-    const sidebar = screen.getByTestId("run-events-sidebar");
-    expect(within(sidebar).queryByText(/rawOutput:/)).toBeNull();
-    expect(within(sidebar).getByText(/超长侧栏命令/)).toBeTruthy();
   });
 
   it("助手消息支持基础 Markdown 渲染", async () => {

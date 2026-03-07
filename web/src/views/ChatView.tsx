@@ -437,10 +437,10 @@ const buildRunEventDetail = (data: ChatEventPayload): string => {
       lines.push(`locations=${locations.join(", ")}`);
     }
     if (rawInput) {
-      lines.push(`rawInput:\n${rawInput}`);
+      lines.push(`rawInput:\n\`\`\`json\n${rawInput}\n\`\`\``);
     }
     if (rawOutput) {
-      lines.push(`rawOutput:\n${rawOutput}`);
+      lines.push(`rawOutput:\n\`\`\`json\n${rawOutput}\n\`\`\``);
     }
     return lines.join("\n");
   }
@@ -2424,40 +2424,6 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
               )}
             </div>
           )}
-        </div>
-
-        <div className="mt-4">
-          <h4 className="text-sm font-semibold text-slate-800">运行事件</h4>
-          <div
-            data-testid="run-events-sidebar"
-            className="mt-2 max-h-44 overflow-y-auto rounded-md border border-slate-200"
-          >
-            {visibleRunEvents.length > 0 ? (
-              <ul className="divide-y divide-slate-200">
-                {visibleRunEvents.map((event) => (
-                  <li
-                    key={event.id}
-                    className="px-3 py-2 text-xs text-slate-700"
-                  >
-                    <p className="font-medium text-slate-800">
-                      [{event.type}] {formatTime(event.time)}
-                    </p>
-                    <p
-                      className="mt-1 whitespace-pre-wrap break-words"
-                      title={event.detail}
-                    >
-                      {getCollapsedPreview(
-                        event.detail,
-                        event.type === "tool_call" ? 96 : 140,
-                      )}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="px-3 py-2 text-xs text-slate-500">暂无运行事件</p>
-            )}
-          </div>
         </div>
 
         <label

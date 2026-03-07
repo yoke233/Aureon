@@ -11,7 +11,7 @@ describe("TuiMessage", () => {
       <TuiMessage role="user" content="hello" time="2026-01-01T00:00:00Z" />,
     );
     expect(screen.getByText("hello")).toBeTruthy();
-    expect(screen.getByText("🧑")).toBeTruthy();
+    expect(screen.getByText("🤣")).toBeTruthy();
   });
 
   it("renders assistant message with robot icon", () => {

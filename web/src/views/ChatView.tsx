@@ -1891,6 +1891,8 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     wsClient,
   ]);
 
+  // Restore scroll position after prepend — update ref so loading-indicator
+  // height change can also be corrected, but don't clear yet.
   useLayoutEffect(() => {
     const container = timelineScrollRef.current;
     const pendingRestore = pendingScrollRestoreRef.current;
@@ -1899,10 +1901,26 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     }
     const heightDelta = container.scrollHeight - pendingRestore.scrollHeight;
     container.scrollTop = pendingRestore.scrollTop + Math.max(heightDelta, 0);
-    pendingScrollRestoreRef.current = null;
+    pendingScrollRestoreRef.current = {
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+    };
   }, [timelineItems]);
 
+  // When loading indicator disappears its height changes — correct and clear.
+  useLayoutEffect(() => {
+    const container = timelineScrollRef.current;
+    const pendingRestore = pendingScrollRestoreRef.current;
+    if (!container || !pendingRestore || historyLoadingMore) {
+      return;
+    }
+    const heightDelta = container.scrollHeight - pendingRestore.scrollHeight;
+    container.scrollTop = pendingRestore.scrollTop + Math.max(heightDelta, 0);
+    pendingScrollRestoreRef.current = null;
+  }, [historyLoadingMore]);
+
   useEffect(() => {
+    // Skip auto-scroll while a history restore is pending (cleared by layout effect above).
     if (pendingScrollRestoreRef.current) {
       return;
     }

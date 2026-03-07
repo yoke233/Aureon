@@ -47,7 +47,7 @@ export const TuiMessage = forwardRef<HTMLDivElement, TuiMessageProps>(
       return (
         <div ref={ref} id={id} className="border-b border-slate-200 px-4 py-3">
           <div className="flex items-start gap-2">
-            <span className="mt-0.5 select-none text-base" aria-hidden>🧑</span>
+            <span className="mt-0.5 select-none text-base" aria-hidden>🤣</span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1">
                 <span className="text-xs text-slate-400">{formatTime(time)}</span>

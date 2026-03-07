@@ -138,21 +138,6 @@ const getErrorMessage = (error: unknown): string => {
   return "请求失败，请稍后重试";
 };
 
-const parseFilePathsDraft = (raw: string): string[] => {
-  const unique: string[] = [];
-  const seen = new Set<string>();
-  raw
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-    .forEach((item) => {
-      if (!seen.has(item)) {
-        seen.add(item);
-        unique.push(item);
-      }
-    });
-  return unique;
-};
 
 const toStringValue = (value: unknown): string => {
   if (typeof value !== "string") {
@@ -766,7 +751,6 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
   const setCommands = useChatStore((state) => state.setCommands);
   const setConfigOptions = useChatStore((state) => state.setConfigOptions);
   const [draft, setDraft] = useState("");
-  const [filePathsDraft, setFilePathsDraft] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [leftPanelTab, setLeftPanelTab] = useState<"tree" | "git">("tree");
   const [leftPanelOpen, setLeftPanelOpen] = useState(false);
@@ -822,7 +806,6 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
     chatRequestIdRef.current += 1;
     issueFromFilesRequestIdRef.current += 1;
     setDraft("");
-    setFilePathsDraft("");
     setSelectedFiles([]);
     setLeftPanelTab("tree");
     setSessionId(null);
@@ -897,10 +880,7 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
   const canSubmit = chatLoading
     ? !!sessionId && !chatCancelling && !syncingFromOtherTerminal
     : draft.trim().length > 0;
-  const filePaths = useMemo(
-    () => parseFilePathsDraft(filePathsDraft),
-    [filePathsDraft],
-  );
+  const filePaths = selectedFiles;
   const canCreateIssueFromFiles =
     !!sessionId &&
     filePaths.length > 0 &&
@@ -1618,7 +1598,6 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
       if (!selected && exists) {
         next = prev.filter((item) => item !== normalizedPath);
       }
-      setFilePathsDraft(next.join(", "));
       return next;
     });
   };
@@ -1982,9 +1961,6 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
               </svg>
             </button>
           </div>
-          <p className="mt-1 text-xs text-slate-600">
-            在文件树中选择文件后，会自动同步到右侧“文件路径”输入框。
-          </p>
           <div className="mt-3 grid grid-cols-2 rounded-md bg-slate-100 p-1 text-xs">
             <button
               type="button"
@@ -2025,6 +2001,28 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
               <GitStatusPanel apiClient={apiClient} projectId={projectId} />
             )}
           </div>
+          {leftPanelTab === "tree" && (
+            <div className="mt-3 border-t border-slate-200 pt-3">
+              {selectedFiles.length > 0 && (
+                <p className="mb-2 text-xs text-slate-500">
+                  已选 {selectedFiles.length} 个文件
+                </p>
+              )}
+              <button
+                type="button"
+                className="w-full rounded-md border border-sky-700 px-3 py-2 text-sm font-semibold text-sky-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+                disabled={!canCreateIssueFromFiles}
+                onClick={() => { void handleCreateIssueFromFiles(); }}
+              >
+                {issueFromFilesLoading ? "创建中..." : "从选中文件创建 issue"}
+              </button>
+              {issueNotice ? (
+                <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-700">
+                  {issueNotice}
+                </p>
+              ) : null}
+            </div>
+          )}
         </aside>
       )}
 
@@ -2070,7 +2068,7 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
           <div className="mt-4 flex min-h-0 flex-1">
             <div
               ref={timelineScrollRef}
-              className="flex-1 overflow-y-auto font-mono text-sm"
+              className="flex-1 overflow-y-auto font-mono text-base"
               onScroll={handleTimelineScroll}
             >
               {historyLoadingMore ? (
@@ -2426,39 +2424,6 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
           )}
         </div>
 
-        <label
-          className="mt-4 block text-xs text-slate-700"
-          htmlFor="issue-file-paths"
-        >
-          文件路径（逗号分隔）
-          <input
-            id="issue-file-paths"
-            className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-            placeholder="例如：cmd/app/main.go, internal/core/task.go"
-            value={filePathsDraft}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              setFilePathsDraft(nextValue);
-              setSelectedFiles(parseFilePathsDraft(nextValue));
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          className="mt-2 w-full rounded-md border border-sky-700 px-3 py-2 text-sm font-semibold text-sky-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
-          disabled={!canCreateIssueFromFiles}
-          onClick={() => {
-            void handleCreateIssueFromFiles();
-          }}
-        >
-          {issueFromFilesLoading ? "从文件创建中..." : "从文件创建 issue"}
-        </button>
-
-        {issueNotice ? (
-          <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {issueNotice}
-          </p>
-        ) : null}
         {crossTerminalRunNotice ? (
           <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             {crossTerminalRunNotice}

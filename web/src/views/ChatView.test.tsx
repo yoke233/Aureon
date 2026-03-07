@@ -843,27 +843,25 @@ describe("ChatView", () => {
       data: { session_id: "chat-1", reply: "done" },
     });
 
+    // 打开左侧文件树面板
+    fireEvent.click(screen.getByTitle("展开仓库视图"));
+
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: "从文件创建 issue" }),
+        screen.getByRole("button", { name: "从选中文件创建 issue" }),
       ).toBeTruthy();
     });
 
-    fireEvent.change(screen.getByLabelText("文件路径（逗号分隔）"), {
-      target: {
-        value: "cmd/app/main.go, internal/core/task.go,  ,web/src/App.tsx",
-      },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "从文件创建 issue" }));
+    // 通过 FileTree 选择文件
+    fireEvent.click(screen.getByRole("button", { name: "选择 main.go" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择 task.go" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "从选中文件创建 issue" }));
 
     await waitFor(() => {
       expect(apiClient.createIssueFromFiles).toHaveBeenCalledWith("proj-1", {
         session_id: "chat-1",
-        file_paths: [
-          "cmd/app/main.go",
-          "internal/core/task.go",
-          "web/src/App.tsx",
-        ],
+        file_paths: ["cmd/app/main.go", "internal/core/task.go"],
       });
     });
     expect(screen.getByText("已从文件创建 issue：plan-files-1")).toBeTruthy();
@@ -1718,7 +1716,7 @@ describe("ChatView", () => {
     expect(screen.getByText("run test")).toBeTruthy();
   });
 
-  it("文件树选择会自动同步到文件路径输入框", () => {
+  it("文件树选择后已选文件数显示在创建按钮上方", () => {
     const apiClient = createMockApiClient();
     const wsHarness = createMockWsHarness();
     render(
@@ -1729,20 +1727,19 @@ describe("ChatView", () => {
       />,
     );
 
-    const input = screen.getByLabelText(
-      "文件路径（逗号分隔）",
-    ) as HTMLInputElement;
-    expect(input.value).toBe("");
+    fireEvent.click(screen.getByTitle("展开仓库视图"));
 
-    fireEvent.click(screen.getByRole("button", { name: "文件" }));
+    // 未选择时无已选提示
+    expect(screen.queryByText(/已选 \d+ 个文件/)).toBeNull();
+
     fireEvent.click(screen.getByRole("button", { name: "选择 main.go" }));
-    expect(input.value).toBe("cmd/app/main.go");
+    expect(screen.getByText("已选 1 个文件")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "选择 task.go" }));
-    expect(input.value).toBe("cmd/app/main.go, internal/core/task.go");
+    expect(screen.getByText("已选 2 个文件")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "取消 main.go" }));
-    expect(input.value).toBe("internal/core/task.go");
+    expect(screen.getByText("已选 1 个文件")).toBeTruthy();
   });
 
   it("左侧面板支持在文件树与 Git Status 之间切换", () => {

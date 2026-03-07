@@ -3,6 +3,7 @@ import ChatView from "./views/ChatView";
 import A2AChatView from "./views/A2AChatView";
 import BoardView from "./views/BoardView";
 import ProjectAdminPanel from "./components/ProjectAdminPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import SystemEventBanner from "./components/SystemEventBanner";
 import { createApiClient, type ApiClient } from "./lib/apiClient";
 import { createA2AClient, type A2AClient } from "./lib/a2aClient";
@@ -134,6 +135,7 @@ const App = ({ a2aEnabledOverride }: AppProps = {}) => {
   const [activeView, setActiveView] = useState<AppView>(() => parseViewFromLocation());
   const [refreshToken, setRefreshToken] = useState(0);
   const [wsStatus, setWsStatus] = useState(wsClient.getStatus());
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const selectedProjectIdRef = useRef<string | null>(selectedProjectId);
   useEffect(() => {
@@ -281,6 +283,18 @@ const App = ({ a2aEnabledOverride }: AppProps = {}) => {
               >
                 刷新项目
               </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  title="外观设置"
+                  aria-label="外观设置"
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50"
+                >
+                  ⚙️
+                </button>
+                <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+              </div>
             </div>
           </div>
 
@@ -317,7 +331,7 @@ const App = ({ a2aEnabledOverride }: AppProps = {}) => {
                 }}
                 className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
                   activeView === view
-                    ? "bg-slate-900 text-white"
+                    ? "accent-bg"
                     : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >

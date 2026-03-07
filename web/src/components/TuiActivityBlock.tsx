@@ -62,7 +62,7 @@ export function TuiActivityBlock({
   const isThought = activityType === "agent_thought";
 
   return (
-    <div className="ml-6 my-1 border-l-2 border-slate-200 px-3 py-1 text-sm">
+    <div className={`ml-6 my-1 border-l-2 px-3 py-1 text-sm ${expanded ? "accent-border" : "border-slate-200"}`}>
       <div className="flex items-center gap-1.5">
         {collapsible ? (
           <>

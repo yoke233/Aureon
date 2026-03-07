@@ -2028,7 +2028,7 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
               )}
               <button
                 type="button"
-                className="w-full rounded-md border border-sky-700 px-3 py-2 text-sm font-semibold text-sky-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
+                className="accent-border accent-text w-full rounded-md border px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400"
                 disabled={!canCreateIssueFromFiles}
                 onClick={() => { void handleCreateIssueFromFiles(); }}
               >
@@ -2214,7 +2214,7 @@ const ChatView = ({ apiClient, wsClient, projectId }: ChatViewProps) => {
             </div>
             <button
               type="button"
-              className="w-36 rounded-md border border-slate-300 px-4 py-2 text-center text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="accent-bg w-36 rounded-md px-4 py-2 text-center text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!canSubmit}
               onClick={() => {
                 if (chatLoading) {

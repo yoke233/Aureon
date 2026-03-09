@@ -88,6 +88,13 @@ type Manager struct {
 
 	twoPhaseReview  managerTwoPhaseReview
 	reviewSubmitter managerIssueReviewSubmitter
+	gateChain       *GateChain
+}
+
+// SetGateChain installs a GateChain for gate-based issue review.
+// When set, submitIssues uses the gate chain path instead of the legacy review path.
+func (m *Manager) SetGateChain(gc *GateChain) {
+	m.gateChain = gc
 }
 
 func NewManager(store core.Store, _ any, review any, scheduler managerScheduler, opts ...ManagerOption) (*Manager, error) {
@@ -409,6 +416,10 @@ func (m *Manager) ApplyIssueAction(ctx context.Context, issueID, action, feedbac
 }
 
 func (m *Manager) submitIssues(ctx context.Context, issues []*core.Issue) error {
+	if m.gateChain != nil {
+		return m.submitIssuesViaGateChain(ctx, issues)
+	}
+
 	switch {
 	case m.twoPhaseReview != nil:
 		if err := m.twoPhaseReview.SubmitForReview(ctx, cloneManagerIssues(issues)); err != nil {
@@ -428,6 +439,29 @@ func (m *Manager) submitIssues(ctx context.Context, issues []*core.Issue) error 
 	default:
 		return errors.New("no issue review submitter configured")
 	}
+}
+
+func (m *Manager) submitIssuesViaGateChain(ctx context.Context, issues []*core.Issue) error {
+	for _, issue := range issues {
+		wp := core.WorkflowProfile{Type: workflowProfileFromIssue(issue), SLAMinutes: 10}
+		gates := wp.ResolveGates()
+
+		result, err := m.gateChain.Run(ctx, issue, gates)
+		if err != nil {
+			return fmt.Errorf("gate chain for issue %s: %w", issue.ID, err)
+		}
+		if result.AllPassed {
+			// Gate chain passed — the issue will be approved by the caller
+			// (SubmitForReview handles the post-submit approve logic).
+		} else if result.PendingGate != "" {
+			// Awaiting human intervention — do nothing, leave in reviewing state.
+		} else if result.FailedCheck != nil {
+			// Gate failed — mark as rejected so the caller does not auto-approve.
+			m.recordTaskStep(issue.ID, core.StepGateFailed, "system",
+				fmt.Sprintf("gate %s failed: %s", result.FailedCheck.GateName, result.FailedCheck.Reason))
+		}
+	}
+	return nil
 }
 
 func (m *Manager) applyIssueApprove(ctx context.Context, issue *core.Issue, feedback string) (*core.Issue, error) {

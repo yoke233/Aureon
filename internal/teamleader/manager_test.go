@@ -94,11 +94,11 @@ func TestManager_CreateIssuesPersistsDraftWithDefaults(t *testing.T) {
 	if issue.FailPolicy != core.FailBlock {
 		t.Fatalf("created fail_policy = %q, want %q", issue.FailPolicy, core.FailBlock)
 	}
-	if len(issue.DependsOn) != 0 {
-		t.Fatalf("created depends_on = %#v, want [] in v2", issue.DependsOn)
+	if got, want := issue.DependsOn, []string{"issue-prep"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("created depends_on = %#v, want %#v", got, want)
 	}
-	if len(issue.Blocks) != 0 {
-		t.Fatalf("created blocks = %#v, want [] in v2", issue.Blocks)
+	if got, want := issue.Blocks, []string{"issue-deploy"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("created blocks = %#v, want %#v", got, want)
 	}
 
 	persisted, err := store.GetIssue(issue.ID)
@@ -113,6 +113,53 @@ func TestManager_CreateIssuesPersistsDraftWithDefaults(t *testing.T) {
 	}
 	if persisted.SessionID != sessionID {
 		t.Fatalf("persisted session_id = %q, want %q", persisted.SessionID, sessionID)
+	}
+	if got, want := persisted.DependsOn, []string{"issue-prep"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("persisted depends_on = %#v, want %#v", got, want)
+	}
+	if got, want := persisted.Blocks, []string{"issue-deploy"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("persisted blocks = %#v, want %#v", got, want)
+	}
+}
+
+func TestManager_ConfirmCreatedIssuesQueuesAndDispatches(t *testing.T) {
+	t.Parallel()
+
+	store := newManagerTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project := mustCreateManagerProject(t, store, "proj-manager-confirm-created")
+	issue := mustCreateManagerIssue(t, store, project.ID, "issue-confirm-created", core.IssueStatusDraft, core.IssueStateOpen)
+
+	scheduler := &fakeManagerScheduler{}
+	manager, err := NewManager(store, nil, nil, scheduler)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	confirmed, err := manager.ConfirmCreatedIssues(context.Background(), []string{issue.ID}, "confirmed from test")
+	if err != nil {
+		t.Fatalf("ConfirmCreatedIssues() error = %v", err)
+	}
+	if len(confirmed) != 1 || confirmed[0] == nil {
+		t.Fatalf("confirmed issues = %#v", confirmed)
+	}
+	if confirmed[0].Status != core.IssueStatusQueued {
+		t.Fatalf("confirmed status = %q, want %q", confirmed[0].Status, core.IssueStatusQueued)
+	}
+
+	persisted, err := store.GetIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s) error = %v", issue.ID, err)
+	}
+	if persisted.Status != core.IssueStatusQueued {
+		t.Fatalf("persisted status = %q, want %q", persisted.Status, core.IssueStatusQueued)
+	}
+	if scheduler.startIssueCalls != 1 {
+		t.Fatalf("scheduler startIssueCalls = %d, want 1", scheduler.startIssueCalls)
+	}
+	if len(scheduler.startedIssues) != 1 || scheduler.startedIssues[0].ID != issue.ID {
+		t.Fatalf("scheduler started issues = %#v, want [%s]", scheduler.startedIssues, issue.ID)
 	}
 }
 

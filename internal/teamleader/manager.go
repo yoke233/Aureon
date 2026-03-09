@@ -184,15 +184,14 @@ func (m *Manager) CreateIssues(ctx context.Context, input CreateIssuesInput) ([]
 		}
 
 		issue := &core.Issue{
-			ID:        issueID,
-			ProjectID: projectID,
-			SessionID: strings.TrimSpace(input.SessionID),
-			Title:     strings.TrimSpace(spec.Title),
-			Body:      spec.Body,
-			Labels:    cloneStringSlice(spec.Labels),
-			// V2 removes runtime dependency graph; dependency fields are ignored.
-			DependsOn:   nil,
-			Blocks:      nil,
+			ID:          issueID,
+			ProjectID:   projectID,
+			SessionID:   strings.TrimSpace(input.SessionID),
+			Title:       strings.TrimSpace(spec.Title),
+			Body:        spec.Body,
+			Labels:      cloneStringSlice(spec.Labels),
+			DependsOn:   normalizeIssueRefs(spec.DependsOn),
+			Blocks:      normalizeIssueRefs(spec.Blocks),
 			Priority:    spec.Priority,
 			Template:    template,
 			AutoMerge:   autoMerge,
@@ -217,6 +216,55 @@ func (m *Manager) CreateIssues(ctx context.Context, input CreateIssuesInput) ([]
 		created = append(created, latest)
 	}
 	return created, nil
+}
+
+func (m *Manager) ConfirmCreatedIssues(ctx context.Context, issueIDs []string, feedback string) ([]*core.Issue, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	issues, err := m.loadIssues(issueIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	reason := strings.TrimSpace(feedback)
+	if reason == "" {
+		reason = "confirmed from decompose proposal"
+	}
+
+	updatedIssues := make([]*core.Issue, 0, len(issues))
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		if issue.Status != core.IssueStatusDraft {
+			return nil, fmt.Errorf("issue %s must be in draft before confirm, got %s", issue.ID, issue.Status)
+		}
+
+		reviewing := cloneManagerIssue(issue)
+		before := reviewing.Status
+		if err := transitionIssueStatus(reviewing, core.IssueStatusReviewing); err != nil {
+			return nil, fmt.Errorf("transition issue %s to reviewing: %w", reviewing.ID, err)
+		}
+		if err := m.store.SaveIssue(reviewing); err != nil {
+			return nil, fmt.Errorf("save issue %s as reviewing: %w", reviewing.ID, err)
+		}
+		m.recordTaskStep(reviewing.ID, core.StepSubmittedForReview, "system", reason)
+		if err := m.saveIssueChange(reviewing.ID, "status", string(before), string(reviewing.Status), "decompose_confirm"); err != nil {
+			return nil, err
+		}
+
+		approved, err := m.applyIssueApprove(ctx, reviewing, reason)
+		if err != nil {
+			return nil, err
+		}
+		updatedIssues = append(updatedIssues, approved)
+	}
+	return updatedIssues, nil
 }
 
 func (m *Manager) SubmitForReview(ctx context.Context, issueIDs []string) error {

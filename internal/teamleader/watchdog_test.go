@@ -1,8 +1,11 @@
 package teamleader
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +89,69 @@ func TestWatchdogOnce_SemLeakReleasesExcessSlots(t *testing.T) {
 
 	if got := len(s.sem); got != 0 {
 		t.Fatalf("expected watchdog to release leaked slots, got %d", got)
+	}
+}
+
+func TestWatchdogOnce_QueueStaleOnlyLogs(t *testing.T) {
+	store := newSchedulerTestStore(t)
+	defer store.Close()
+
+	project := mustCreateSchedulerProject(t, store, "proj-watchdog-queue-stale")
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-watchdog-queue-stale", core.FailSkip, []core.Issue{
+		newIssueWithProfile("issue-watchdog-queue-stale", "queue stale", core.WorkflowProfileStrict, nil),
+	})
+
+	s := NewDepScheduler(store, nil, nil, nil, 0)
+	if err := s.ScheduleIssues(context.Background(), issues); err != nil {
+		t.Fatalf("ScheduleIssues() error = %v", err)
+	}
+
+	issue := waitIssueStatus(t, store, "issue-watchdog-queue-stale", core.IssueStatusExecuting, 3*time.Second)
+	issue.Status = core.IssueStatusQueued
+	issue.RunID = ""
+	if err := store.SaveIssue(issue); err != nil {
+		t.Fatalf("SaveIssue(%s) error = %v", issue.ID, err)
+	}
+
+	s.mu.Lock()
+	sessionID := makeSessionID(issue.ProjectID, issue.SessionID)
+	rs := s.sessions[sessionID]
+	if rs == nil {
+		s.mu.Unlock()
+		t.Fatalf("expected running session %q", sessionID)
+	}
+	delete(rs.Running, issue.ID)
+	if current := rs.IssueByID[issue.ID]; current != nil {
+		current.Status = core.IssueStatusQueued
+		current.RunID = ""
+		current.UpdatedAt = time.Now().Add(-2 * time.Hour)
+	}
+	s.mu.Unlock()
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	testLogger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	slog.SetDefault(testLogger)
+	defer slog.SetDefault(prevLogger)
+
+	s.watchdogOnce(context.Background(), config.WatchdogConfig{
+		Enabled:       true,
+		Interval:      config.Duration{Duration: time.Minute},
+		StuckRunTTL:   config.Duration{Duration: time.Hour},
+		StuckMergeTTL: config.Duration{Duration: time.Hour},
+		QueueStaleTTL: config.Duration{Duration: 5 * time.Millisecond},
+	})
+
+	after := waitIssueStatus(t, store, "issue-watchdog-queue-stale", core.IssueStatusQueued, 500*time.Millisecond)
+	if after.RunID != "" {
+		t.Fatalf("expected queue stale issue to keep empty run id, got %q", after.RunID)
+	}
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "watchdog: stale queue item") {
+		t.Fatalf("expected queue stale warning log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "issue-watchdog-queue-stale") {
+		t.Fatalf("expected queue stale log to include issue id, got %q", logOutput)
 	}
 }
 

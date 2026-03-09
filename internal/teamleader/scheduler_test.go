@@ -362,6 +362,86 @@ func TestScheduler_FailPolicyBlockSkipsMergingIssue(t *testing.T) {
 	}
 }
 
+func TestScheduler_RunPanicMarksIssueFailedAndDispatchesNext(t *testing.T) {
+	store := newSchedulerTestStore(t)
+	defer store.Close()
+
+	project := mustCreateSchedulerProject(t, store, "proj-scheduler-run-panic")
+	issues := mustCreateIssueSessionWithItems(t, store, project.ID, "session-run-panic", core.FailSkip, []core.Issue{
+		newIssueWithProfile("issue-panic", "panic", core.WorkflowProfileStrict, nil),
+		newIssueWithProfile("issue-next", "next", core.WorkflowProfileNormal, nil),
+	})
+
+	var (
+		mu        sync.Mutex
+		runCalls  []string
+		panicOnce = true
+	)
+	runFn := func(_ context.Context, runID string) error {
+		mu.Lock()
+		runCalls = append(runCalls, runID)
+		shouldPanic := panicOnce
+		if panicOnce {
+			panicOnce = false
+		}
+		mu.Unlock()
+		if shouldPanic {
+			panic("boom")
+		}
+		return nil
+	}
+
+	bus := &recordingSchedulerBus{}
+	s := NewDepScheduler(store, bus, runFn, nil, 1)
+	if err := s.ScheduleIssues(context.Background(), issues); err != nil {
+		t.Fatalf("ScheduleIssues() error = %v", err)
+	}
+
+	failed := waitIssueStatus(t, store, "issue-panic", core.IssueStatusFailed, 2*time.Second)
+	if failed.RunID == "" {
+		t.Fatalf("panic-failed issue should retain RunID for diagnostics")
+	}
+	if _, ok := s.RunIndex[failed.RunID]; ok {
+		t.Fatalf("expected failed panic run %q to be removed from RunIndex", failed.RunID)
+	}
+
+	next := waitIssueStatus(t, store, "issue-next", core.IssueStatusExecuting, 2*time.Second)
+	if next.RunID == "" {
+		t.Fatalf("next issue should dispatch after panic recovery")
+	}
+	if len(s.sem) != 1 {
+		t.Fatalf("expected slot to be re-used by next issue, got %d", len(s.sem))
+	}
+
+	if evt, ok := bus.FirstEvent(core.EventIssueFailed, "issue-panic"); !ok {
+		t.Fatalf("expected EventIssueFailed for panic-failed issue")
+	} else if !strings.Contains(evt.Error, "panic: boom") {
+		t.Fatalf("failure event error = %q, want contains panic text", evt.Error)
+	}
+
+	steps, err := store.ListTaskSteps("issue-panic")
+	if err != nil {
+		t.Fatalf("ListTaskSteps(issue-panic) error = %v", err)
+	}
+	foundFailedStep := false
+	for _, step := range steps {
+		if step.Action == core.StepFailed && strings.Contains(step.Note, "panic: boom") {
+			foundFailedStep = true
+			break
+		}
+	}
+	if !foundFailedStep {
+		t.Fatalf("expected failed task step with panic note, got %#v", steps)
+	}
+
+	mu.Lock()
+	gotCalls := append([]string(nil), runCalls...)
+	mu.Unlock()
+	if len(gotCalls) != 2 {
+		t.Fatalf("run calls = %#v, want 2", gotCalls)
+	}
+}
+
 func TestScheduler_RecoverExecutingIssuesKeepsMergingAsRunning(t *testing.T) {
 	store := newSchedulerTestStore(t)
 	defer store.Close()

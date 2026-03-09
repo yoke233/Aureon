@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../lib/apiClient";
-import type { IssueTimelineEntry, TaskStep } from "../types/api";
+import type {
+  DecomposeProposal,
+  IssueTimelineEntry,
+  ProposalItem,
+  TaskStep,
+} from "../types/api";
+import DagPreview from "../components/DagPreview";
 import IssueFlowTree from "../components/IssueFlowTree";
+import QuickInput from "../components/QuickInput";
 
 interface BoardViewProps {
   apiClient: ApiClient;
@@ -416,11 +423,19 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
   const [taskSteps, setTaskSteps] = useState<TaskStep[]>([]);
   const [taskStepsError, setTaskStepsError] = useState<string | null>(null);
   const [timelineReloadToken, setTimelineReloadToken] = useState(0);
+  const [decomposeLoading, setDecomposeLoading] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [proposal, setProposal] = useState<DecomposeProposal | null>(null);
+  const [decomposeError, setDecomposeError] = useState<string | null>(null);
   const hasLoadedTasksRef = useRef(false);
   const hasLoadedTimelineRef = useRef(false);
   const timelineIssueRef = useRef("");
+  const confirmInFlightRef = useRef(false);
+  const dagRequestVersionRef = useRef(0);
 
   useEffect(() => {
+    dagRequestVersionRef.current += 1;
+    confirmInFlightRef.current = false;
     hasLoadedTasksRef.current = false;
     hasLoadedTimelineRef.current = false;
     timelineIssueRef.current = "";
@@ -430,6 +445,10 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
     setTimelineLoading(false);
     setTimelineError(null);
     setTimelineEntries([]);
+    setProposal(null);
+    setDecomposeLoading(false);
+    setConfirmLoading(false);
+    setDecomposeError(null);
   }, [projectId]);
 
   useEffect(() => {
@@ -758,10 +777,89 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
     writeRouteIssueID(null);
   };
 
+  const handleDecompose = useCallback(
+    async (prompt: string) => {
+      const trimmedProjectID = projectId.trim();
+      if (!trimmedProjectID) {
+        return;
+      }
+      const requestVersion = dagRequestVersionRef.current;
+      setDecomposeLoading(true);
+      setDecomposeError(null);
+      try {
+        const nextProposal = await apiClient.decompose(trimmedProjectID, { prompt });
+        if (dagRequestVersionRef.current !== requestVersion) {
+          return;
+        }
+        setProposal(nextProposal);
+      } catch (requestError) {
+        if (dagRequestVersionRef.current !== requestVersion) {
+          return;
+        }
+        setDecomposeError(getErrorMessage(requestError));
+      } finally {
+        if (dagRequestVersionRef.current !== requestVersion) {
+          return;
+        }
+        setDecomposeLoading(false);
+      }
+    },
+    [apiClient, projectId],
+  );
+
+  const handleConfirmDecompose = useCallback(
+    async (items: ProposalItem[]) => {
+      const trimmedProjectID = projectId.trim();
+      if (!trimmedProjectID || !proposal || confirmInFlightRef.current) {
+        return;
+      }
+      if (proposal.project_id.trim() !== trimmedProjectID) {
+        setProposal(null);
+        setDecomposeError("当前 DAG 提案已失效，请重新拆解。");
+        return;
+      }
+      const requestVersion = dagRequestVersionRef.current;
+      confirmInFlightRef.current = true;
+      setConfirmLoading(true);
+      setDecomposeError(null);
+      try {
+        const response = await apiClient.confirmDecompose(trimmedProjectID, {
+          proposal_id: proposal.proposal_id,
+          issues: items,
+        });
+        if (dagRequestVersionRef.current !== requestVersion) {
+          return;
+        }
+        setProposal(null);
+        setManualReloadToken((current) => current + 1);
+        setActionNotice(`已创建 ${response.created_issues.length} 个 Issue`);
+      } catch (requestError) {
+        if (dagRequestVersionRef.current !== requestVersion) {
+          return;
+        }
+        setDecomposeError(getErrorMessage(requestError));
+      } finally {
+        confirmInFlightRef.current = false;
+        if (dagRequestVersionRef.current !== requestVersion) {
+          return;
+        }
+        setConfirmLoading(false);
+      }
+    },
+    [apiClient, projectId, proposal],
+  );
+
   return (
     <section className="flex flex-col gap-4">
       <header className="rounded-md border border-[#d0d7de] bg-white p-4">
         <h1 className="text-xl font-semibold text-[#24292f]">Issues</h1>
+        <div className="mt-3">
+          <QuickInput
+            onSubmit={handleDecompose}
+            loading={decomposeLoading}
+            placeholder="描述你的需求，AI 将自动拆解为任务..."
+          />
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
           <button
             type="button"
@@ -809,9 +907,34 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
         </div>
       </header>
 
+      {proposal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-4xl">
+            <DagPreview
+              items={proposal.issues}
+              summary={proposal.summary}
+              error={decomposeError}
+              loading={confirmLoading}
+              onConfirm={handleConfirmDecompose}
+              onCancel={() => {
+                if (!confirmLoading) {
+                  setProposal(null);
+                  setDecomposeError(null);
+                }
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {error ? (
         <p className="rounded-md border border-[#cf222e] bg-[#ffebe9] px-3 py-2 text-sm text-[#cf222e]">
           {error}
+        </p>
+      ) : null}
+      {decomposeError && !proposal ? (
+        <p className="rounded-md border border-[#cf222e] bg-[#ffebe9] px-3 py-2 text-sm text-[#cf222e]">
+          {decomposeError}
         </p>
       ) : null}
 

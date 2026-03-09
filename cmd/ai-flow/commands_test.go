@@ -10,16 +10,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/yoke233/ai-workflow/internal/config"
 	"github.com/yoke233/ai-workflow/internal/core"
 	"github.com/yoke233/ai-workflow/internal/engine"
 	pluginfactory "github.com/yoke233/ai-workflow/internal/plugins/factory"
+	storesqlite "github.com/yoke233/ai-workflow/internal/plugins/store-sqlite"
 	"github.com/yoke233/ai-workflow/internal/teamleader"
 	"github.com/yoke233/ai-workflow/internal/web"
 )
@@ -301,7 +304,7 @@ func TestRunServer_PortPriority(t *testing.T) {
 			newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 				return fakeScheduler, nil
 			}
-			newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ core.EventBus, _ config.TeamLeaderConfig, _ config.RoleBindings) (serverIssueManager, error) {
+			newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ core.EventBus, _ config.WatchdogConfig, _ config.TeamLeaderConfig, _ config.RoleBindings) (serverIssueManager, error) {
 				return fakeIssueManager, nil
 			}
 			newAPIServer = func(cfg web.Config) apiServer {
@@ -349,7 +352,7 @@ func TestRunServer_StartFailureJoinsSchedulerStopError(t *testing.T) {
 	newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 		return fakeScheduler, nil
 	}
-	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ core.EventBus, _ config.TeamLeaderConfig, _ config.RoleBindings) (serverIssueManager, error) {
+	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ core.EventBus, _ config.WatchdogConfig, _ config.TeamLeaderConfig, _ config.RoleBindings) (serverIssueManager, error) {
 		return fakeIssueManager, nil
 	}
 	newAPIServer = func(_ web.Config) apiServer {
@@ -397,7 +400,7 @@ func TestRunServer_IssueManagerReceivesReviewRoleBindings(t *testing.T) {
 	newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
 		return fakeScheduler, nil
 	}
-	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ core.EventBus, _ config.TeamLeaderConfig, roleBinds config.RoleBindings) (serverIssueManager, error) {
+	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ core.EventBus, _ config.WatchdogConfig, _ config.TeamLeaderConfig, roleBinds config.RoleBindings) (serverIssueManager, error) {
 		capturedRoleBinds = roleBinds
 		return fakeIssueManager, nil
 	}
@@ -420,6 +423,105 @@ func TestRunServer_IssueManagerReceivesReviewRoleBindings(t *testing.T) {
 	}
 	if got := capturedRoleBinds.ReviewOrchestrator.Reviewers["feasibility"]; got != "reviewer" {
 		t.Fatalf("captured feasibility reviewer binding = %q, want %q", got, "reviewer")
+	}
+}
+
+func TestRunServer_IssueManagerReceivesWatchdogConfig(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("USERPROFILE", tempHome)
+	t.Chdir(tempHome)
+
+	origSchedulerFactory := newServerScheduler
+	origServerFactory := newAPIServer
+	origIssueManagerFactory := newServerIssueManager
+	t.Cleanup(func() {
+		newServerScheduler = origSchedulerFactory
+		newAPIServer = origServerFactory
+		newServerIssueManager = origIssueManagerFactory
+	})
+
+	startErr := errors.New("server start failed")
+	fakeScheduler := &testScheduler{}
+	fakeIssueManager := &testServerIssueManager{}
+	var capturedWatchdog config.WatchdogConfig
+
+	newServerScheduler = func(_ *engine.Executor, _ core.Store) (serverScheduler, error) {
+		return fakeScheduler, nil
+	}
+	newServerIssueManager = func(_ *engine.Executor, _ *pluginfactory.BootstrapSet, _ core.EventBus, watchdogCfg config.WatchdogConfig, _ config.TeamLeaderConfig, _ config.RoleBindings) (serverIssueManager, error) {
+		capturedWatchdog = watchdogCfg
+		return fakeIssueManager, nil
+	}
+	newAPIServer = func(_ web.Config) apiServer {
+		return &testAPIServer{startErr: startErr}
+	}
+
+	err := runServer(context.Background(), nil)
+	if !errors.Is(err, startErr) {
+		t.Fatalf("expected server start error, got %v", err)
+	}
+	if !capturedWatchdog.Enabled {
+		t.Fatal("expected watchdog config to be passed into issue manager factory")
+	}
+	if got := capturedWatchdog.Interval.Duration; got != 5*time.Minute {
+		t.Fatalf("captured watchdog interval = %s, want %s", got, 5*time.Minute)
+	}
+	if got := capturedWatchdog.StuckRunTTL.Duration; got != 30*time.Minute {
+		t.Fatalf("captured watchdog stuck_run_ttl = %s, want %s", got, 30*time.Minute)
+	}
+	if got := capturedWatchdog.StuckMergeTTL.Duration; got != 15*time.Minute {
+		t.Fatalf("captured watchdog stuck_merge_ttl = %s, want %s", got, 15*time.Minute)
+	}
+	if got := capturedWatchdog.QueueStaleTTL.Duration; got != 60*time.Minute {
+		t.Fatalf("captured watchdog queue_stale_ttl = %s, want %s", got, 60*time.Minute)
+	}
+}
+
+func TestNewServerIssueManager_ConfiguresDepSchedulerWatchdog(t *testing.T) {
+	store, err := storesqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("storesqlite.New() error = %v", err)
+	}
+	defer store.Close()
+
+	defaults := config.Defaults()
+	issueManager, err := newServerIssueManager(
+		&engine.Executor{},
+		&pluginfactory.BootstrapSet{Store: store},
+		nil,
+		defaults.Scheduler.Watchdog,
+		defaults.TeamLeader,
+		defaults.RoleBinds,
+	)
+	if err != nil {
+		t.Fatalf("newServerIssueManager() error = %v", err)
+	}
+
+	adapter, ok := issueManager.(*teamLeaderIssueManagerAdapter)
+	if !ok {
+		t.Fatalf("issue manager type = %T, want *teamLeaderIssueManagerAdapter", issueManager)
+	}
+
+	managerVal := reflect.ValueOf(adapter.manager)
+	if managerVal.Kind() != reflect.Pointer || managerVal.IsNil() {
+		t.Fatalf("manager value = %v, want non-nil pointer", managerVal)
+	}
+	managerElem := managerVal.Elem()
+	schedulerField := managerElem.FieldByName("scheduler")
+	schedulerValue := reflect.NewAt(schedulerField.Type(), unsafe.Pointer(schedulerField.UnsafeAddr())).Elem().Interface()
+
+	depAdapter, ok := schedulerValue.(*depSchedulerIssueAdapter)
+	if !ok {
+		t.Fatalf("scheduler type = %T, want *depSchedulerIssueAdapter", schedulerValue)
+	}
+
+	schedulerReflect := reflect.ValueOf(depAdapter.scheduler).Elem()
+	watchdogField := schedulerReflect.FieldByName("watchdogCfg")
+	actualWatchdog := reflect.NewAt(watchdogField.Type(), unsafe.Pointer(watchdogField.UnsafeAddr())).Elem().Interface().(config.WatchdogConfig)
+
+	if actualWatchdog != defaults.Scheduler.Watchdog {
+		t.Fatalf("dep scheduler watchdog config = %+v, want %+v", actualWatchdog, defaults.Scheduler.Watchdog)
 	}
 }
 

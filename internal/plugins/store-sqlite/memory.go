@@ -85,14 +85,14 @@ func (m *SQLiteMemory) RecallHot(issueID string, runID string) (string, error) {
 		return "", nil
 	}
 
-	issueID = strings.TrimSpace(issueID)
-	if issueID == "" {
-		return "", nil
+	issue, err := m.getIssue(issueID)
+	if err != nil || issue == nil {
+		return "", err
 	}
 
 	var sections []string
 
-	steps, err := m.store.ListTaskSteps(issueID)
+	steps, err := m.store.ListTaskSteps(issue.ID)
 	if err != nil {
 		return "", err
 	}
@@ -121,7 +121,7 @@ func (m *SQLiteMemory) RecallHot(issueID string, runID string) (string, error) {
 		}
 	}
 
-	reviews, err := m.store.GetReviewRecords(issueID)
+	reviews, err := m.store.GetReviewRecords(issue.ID)
 	if err != nil {
 		return "", err
 	}

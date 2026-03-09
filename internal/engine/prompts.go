@@ -21,6 +21,9 @@ type PromptVars struct {
 	RetryError        string
 	MergeConflictHint string
 	RetryCount        int
+	ColdContext       string
+	WarmContext       string
+	HotContext        string
 }
 
 func RenderPrompt(stage string, vars PromptVars) (string, error) {

@@ -19,6 +19,7 @@ func TestTaskStepActionDeriveStatus(t *testing.T) {
 		{StepReady, IssueStatusReady, true},
 		{StepExecutionStarted, IssueStatusExecuting, true},
 		{StepMergeStarted, IssueStatusMerging, true},
+		{StepCompleted, IssueStatusDone, true},
 		{StepMergeCompleted, IssueStatusDone, true},
 		{StepFailed, IssueStatusFailed, true},
 		{StepAbandoned, IssueStatusAbandoned, true},
@@ -31,6 +32,7 @@ func TestTaskStepActionDeriveStatus(t *testing.T) {
 		{StepStageCompleted, "", false},
 		{StepStageFailed, "", false},
 		{StepRunCompleted, "", false},
+		{StepRunFailed, "", false},
 	}
 
 	for _, tt := range tests {

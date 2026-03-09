@@ -31,6 +31,7 @@ import type {
   ListIssueTimelineQuery,
   ListIssueTimelineResponse,
   ListTaskStepsResponse,
+  TaskStep,
   ListIssuesResponse,
   ListRunCheckpointsResponse,
   ListRunsResponse,
@@ -424,6 +425,97 @@ const normalizeIssueTimelineEntry = (
       stage: toSafeString(refs.stage),
     },
     meta,
+  };
+};
+
+const normalizeTaskStep = (rawStep: unknown, index: number): TaskStep => {
+  const step =
+    rawStep && typeof rawStep === "object"
+      ? (rawStep as Record<string, unknown>)
+      : {};
+  const id = toSafeString(step.id) ?? `task-step-${index + 1}`;
+  const issueID = toSafeString(step.issue_id) ?? "";
+  const createdAt = toSafeString(step.created_at) ?? new Date(0).toISOString();
+
+  return {
+    id,
+    issue_id: issueID,
+    run_id: toSafeString(step.run_id) ?? "",
+    agent_id: toSafeString(step.agent_id) ?? "",
+    action: (toSafeString(step.action) ?? "queued") as TaskStep["action"],
+    stage_id: toSafeString(step.stage_id) ?? "",
+    input: toSafeString(step.input) ?? "",
+    output: toSafeString(step.output) ?? "",
+    note: toSafeString(step.note) ?? "",
+    ref_id: toSafeString(step.ref_id) ?? "",
+    ref_type: toSafeString(step.ref_type) ?? "",
+    created_at: createdAt,
+  };
+};
+
+const taskStepStatusToTimelineTone = (
+  action: TaskStep["action"],
+): IssueTimelineEntry["status"] => {
+  switch (action) {
+    case "completed":
+    case "review_approved":
+    case "merge_completed":
+    case "stage_completed":
+    case "run_completed":
+      return "success";
+    case "review_rejected":
+      return "warning";
+    case "failed":
+    case "stage_failed":
+    case "run_failed":
+      return "failed";
+    case "execution_started":
+    case "merge_started":
+    case "run_started":
+    case "stage_started":
+      return "running";
+    default:
+      return "info";
+  }
+};
+
+const taskStepToTimelineEntry = (
+  rawStep: unknown,
+  index: number,
+): { step: TaskStep; item: IssueTimelineEntry } => {
+  const step = normalizeTaskStep(rawStep, index);
+  const actorName = step.agent_id || "system";
+  const detail =
+    [step.note, step.output, step.input].find(
+      (candidate) => candidate.trim().length > 0,
+    ) ?? "";
+
+  return {
+    step,
+    item: {
+      event_id: `task-step:${step.id}`,
+      kind: "action",
+      created_at: step.created_at,
+      actor_type: step.agent_id ? "agent" : "system",
+      actor_name: actorName,
+      actor_avatar_seed: actorName,
+      title: `task step · ${step.action}`,
+      body: detail,
+      status: taskStepStatusToTimelineTone(step.action),
+      refs: {
+        issue_id: step.issue_id,
+        run_id: step.run_id || undefined,
+        stage: step.stage_id || undefined,
+      },
+      meta: {
+        action: step.action,
+        summary: step.note,
+        input: step.input,
+        output: step.output,
+        ref_id: step.ref_id,
+        ref_type: step.ref_type,
+      },
+    },
   };
 };
 
@@ -896,11 +988,31 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
           offset: query?.offset,
         },
       });
+      const rawSteps = Array.isArray(response.steps) ? response.steps : [];
+      if (rawSteps.length > 0) {
+        const normalized = rawSteps.map((step, index) =>
+          taskStepToTimelineEntry(step, index),
+        );
+        return {
+          items: normalized.map((item) => item.item),
+          steps: normalized.map((item) => item.step),
+          total:
+            typeof response.total === "number"
+              ? response.total
+              : normalized.length,
+          offset:
+            typeof response.offset === "number"
+              ? response.offset
+              : (query?.offset ?? 0),
+        };
+      }
+
       const rawItems = Array.isArray(response.items) ? response.items : [];
       return {
         items: rawItems.map((item, index) =>
           normalizeIssueTimelineEntry(item, index),
         ),
+        steps: [],
         total:
           typeof response.total === "number" ? response.total : rawItems.length,
         offset:
@@ -909,10 +1021,17 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
             : (query?.offset ?? 0),
       };
     },
-    listIssueTaskSteps: (projectId, issueId) =>
-      request<ListTaskStepsResponse>({
+    listIssueTaskSteps: async (projectId, issueId) => {
+      const response = await request<ListTaskStepsResponse>({
         path: `/api/v1/projects/${projectId}/issues/${issueId}/timeline`,
-      }),
+      });
+      const rawSteps = Array.isArray(response.steps) ? response.steps : [];
+      return {
+        steps: rawSteps.map((step, index) => normalizeTaskStep(step, index)),
+        total:
+          typeof response.total === "number" ? response.total : rawSteps.length,
+      };
+    },
     listAdminAuditLog: (query) =>
       request<ListAdminAuditLogResponse>({
         path: "/api/v1/admin/audit-log",

@@ -175,7 +175,7 @@ func adminTargetStatusAction(status core.IssueStatus) core.TaskStepAction {
 	case core.IssueStatusMerging:
 		return core.StepMergeStarted
 	case core.IssueStatusDone:
-		return core.StepMergeCompleted
+		return core.StepCompleted
 	case core.IssueStatusFailed:
 		return core.StepFailed
 	case core.IssueStatusDecomposing:

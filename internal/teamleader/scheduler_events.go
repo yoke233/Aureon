@@ -60,7 +60,7 @@ func (s *DepScheduler) handleRunEventLocked(evt core.Event) error {
 		if err := s.saveIssue(issue); err != nil {
 			return err
 		}
-		s.recordTaskStep(issue, core.StepMergeCompleted, "system", "run completed with auto_merge disabled")
+		s.recordTaskStep(issue, core.StepCompleted, "system", "run completed with auto_merge disabled")
 		s.publishIssueEvent(core.EventIssueDone, issue, nil, "")
 	case core.EventRunFailed:
 		if err := transitionIssueStatus(issue, core.IssueStatusFailed); err != nil {

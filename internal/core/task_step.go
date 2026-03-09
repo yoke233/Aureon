@@ -19,6 +19,7 @@ const (
 	StepReady              TaskStepAction = "ready"
 	StepExecutionStarted   TaskStepAction = "execution_started"
 	StepMergeStarted       TaskStepAction = "merge_started"
+	StepCompleted          TaskStepAction = "completed"
 	StepMergeCompleted     TaskStepAction = "merge_completed"
 	StepFailed             TaskStepAction = "failed"
 	StepAbandoned          TaskStepAction = "abandoned"
@@ -35,6 +36,7 @@ const (
 	StepStageCompleted TaskStepAction = "stage_completed"
 	StepStageFailed    TaskStepAction = "stage_failed"
 	StepRunCompleted   TaskStepAction = "run_completed"
+	StepRunFailed      TaskStepAction = "run_failed"
 )
 
 var actionToStatus = map[TaskStepAction]IssueStatus{
@@ -46,6 +48,7 @@ var actionToStatus = map[TaskStepAction]IssueStatus{
 	StepReady:              IssueStatusReady,
 	StepExecutionStarted:   IssueStatusExecuting,
 	StepMergeStarted:       IssueStatusMerging,
+	StepCompleted:          IssueStatusDone,
 	StepMergeCompleted:     IssueStatusDone,
 	StepFailed:             IssueStatusFailed,
 	StepAbandoned:          IssueStatusAbandoned,
@@ -57,11 +60,11 @@ var actionToStatus = map[TaskStepAction]IssueStatus{
 var validTaskStepActions = map[TaskStepAction]struct{}{
 	StepCreated: {}, StepSubmittedForReview: {}, StepReviewApproved: {},
 	StepReviewRejected: {}, StepQueued: {}, StepReady: {},
-	StepExecutionStarted: {}, StepMergeStarted: {}, StepMergeCompleted: {},
+	StepExecutionStarted: {}, StepMergeStarted: {}, StepCompleted: {}, StepMergeCompleted: {},
 	StepFailed: {}, StepAbandoned: {}, StepDecomposeStarted: {},
 	StepDecomposed: {}, StepSuperseded: {},
 	StepRunCreated: {}, StepRunStarted: {}, StepStageStarted: {},
-	StepStageCompleted: {}, StepStageFailed: {}, StepRunCompleted: {},
+	StepStageCompleted: {}, StepStageFailed: {}, StepRunCompleted: {}, StepRunFailed: {},
 }
 
 // DeriveIssueStatus returns the IssueStatus this action implies.

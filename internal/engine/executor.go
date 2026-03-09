@@ -511,7 +511,7 @@ func (e *Executor) failRun(p *core.Run, message string, cause error) error {
 	if err := e.store.SaveRun(p); err != nil {
 		return err
 	}
-	e.recordRunTaskStep(p, core.StepRunCompleted, "", "", "run completed: failure")
+	e.recordRunTaskStep(p, core.StepRunFailed, "", "", "run completed: failure")
 	traceID := RunTraceID(p)
 	issueNumber := issueNumberFromRun(p)
 	extra := map[string]string{}

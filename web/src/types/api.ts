@@ -305,7 +305,9 @@ export interface ListIssueTimelineQuery {
   offset?: number;
 }
 
-export type ListIssueTimelineResponse = PaginatedResponse<IssueTimelineEntry>;
+export type ListIssueTimelineResponse = PaginatedResponse<IssueTimelineEntry> & {
+  steps?: TaskStep[];
+};
 
 export type TaskStepAction =
   | "created"
@@ -316,6 +318,7 @@ export type TaskStepAction =
   | "ready"
   | "execution_started"
   | "merge_started"
+  | "completed"
   | "merge_completed"
   | "failed"
   | "abandoned"
@@ -327,7 +330,8 @@ export type TaskStepAction =
   | "stage_started"
   | "stage_completed"
   | "stage_failed"
-  | "run_completed";
+  | "run_completed"
+  | "run_failed";
 
 export interface TaskStep {
   id: string;

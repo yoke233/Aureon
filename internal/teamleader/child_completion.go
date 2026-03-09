@@ -141,7 +141,7 @@ func (h *ChildCompletionHandler) resolveParentSuccess(parent *core.Issue) {
 		h.log.Error("child_completion: save parent done", "parent_id", parent.ID, "error", err)
 		return
 	}
-	h.recordTaskStep(parent, core.StepMergeCompleted, "system", "all children done")
+	h.recordTaskStep(parent, core.StepCompleted, "system", "all children done")
 	h.pub.Publish(context.Background(), core.Event{
 		Type:      core.EventIssueDone,
 		IssueID:   parent.ID,

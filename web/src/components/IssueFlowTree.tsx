@@ -13,7 +13,6 @@ type FlowNode = {
   meta?: string;
   note?: string;
   timestamp?: string;
-  kind: "issue" | "run" | "step";
   children: FlowNode[];
 };
 
@@ -26,6 +25,7 @@ const ACTION_LABELS: Record<string, string> = {
   ready: "Ready",
   execution_started: "Execution started",
   merge_started: "Merge started",
+  completed: "Completed",
   merge_completed: "Merge completed",
   failed: "Failed",
   abandoned: "Abandoned",
@@ -38,29 +38,32 @@ const ACTION_LABELS: Record<string, string> = {
   stage_completed: "Stage completed",
   stage_failed: "Stage failed",
   run_completed: "Run completed",
+  run_failed: "Run failed",
 };
 
 const ACTION_ICONS: Record<string, string> = {
-  created: "??",
-  submitted_for_review: "??",
-  review_approved: "?",
-  review_rejected: "?",
-  queued: "?",
-  ready: "??",
-  execution_started: "?",
-  merge_started: "??",
-  merge_completed: "??",
-  failed: "?",
-  abandoned: "??",
-  decompose_started: "??",
-  decomposed: "??",
-  superseded: "?",
-  run_created: "??",
-  run_started: "??",
-  stage_started: "?",
-  stage_completed: "?",
-  stage_failed: "?",
-  run_completed: "??",
+  created: "C",
+  submitted_for_review: "R",
+  review_approved: "A",
+  review_rejected: "X",
+  queued: "Q",
+  ready: "Y",
+  execution_started: "E",
+  merge_started: "M",
+  completed: "D",
+  merge_completed: "G",
+  failed: "F",
+  abandoned: "B",
+  decompose_started: "P",
+  decomposed: "S",
+  superseded: "U",
+  run_created: "RC",
+  run_started: "RS",
+  stage_started: "SS",
+  stage_completed: "SC",
+  stage_failed: "SF",
+  run_completed: "RD",
+  run_failed: "RF",
 };
 
 const formatAction = (action: string) => ACTION_LABELS[action] ?? action.replace(/_/g, " ");
@@ -70,7 +73,16 @@ const formatTime = (value: string) => {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 };
 
-const buildFlow = (steps: TaskStep[]): FlowNode[] => {
+const stepLabel = (step: TaskStep) => `${ACTION_ICONS[step.action] ?? "?"} ${formatAction(step.action)}`;
+
+const stepMeta = (step: TaskStep) =>
+  [step.agent_id ? `agent: ${step.agent_id}` : "", step.stage_id ? `stage: ${step.stage_id}` : ""]
+    .filter(Boolean)
+    .join(" ? ");
+
+const stepNote = (step: TaskStep) => step.note || (step.ref_id ? `ref: ${step.ref_type || "unknown"}/${step.ref_id}` : "");
+
+const buildFlow = (steps: TaskStep[], issueId: string): FlowNode[] => {
   const ordered = [...steps].sort((left, right) => {
     const leftTime = new Date(left.created_at).getTime();
     const rightTime = new Date(right.created_at).getTime();
@@ -86,32 +98,28 @@ const buildFlow = (steps: TaskStep[]): FlowNode[] => {
     return leftTime - rightTime;
   });
 
-  const roots: FlowNode[] = [];
-  let latestIssueNode: FlowNode | null = null;
+  const issueRoot: FlowNode = {
+    id: `issue-${issueId}`,
+    label: `Issue ${issueId}`,
+    meta: "lifecycle",
+    children: [],
+  };
+
+  const preRunNodes: FlowNode[] = [];
   const runNodes = new Map<string, FlowNode>();
 
   ordered.forEach((step) => {
-    const baseNode: FlowNode = {
+    const node: FlowNode = {
       id: step.id,
-      label: `${ACTION_ICONS[step.action] ?? "?"} ${formatAction(step.action)}`,
-      meta: [step.agent_id ? `agent: ${step.agent_id}` : "", step.stage_id ? `stage: ${step.stage_id}` : ""]
-        .filter(Boolean)
-        .join(" ? "),
-      note: step.note || (step.ref_id ? `ref: ${step.ref_type || "unknown"}/${step.ref_id}` : ""),
+      label: stepLabel(step),
+      meta: stepMeta(step),
+      note: stepNote(step),
       timestamp: step.created_at,
-      kind: "step",
       children: [],
     };
 
     if (!step.run_id) {
-      const issueNode: FlowNode = {
-        ...baseNode,
-        id: `issue-${step.id}`,
-        kind: "issue",
-        children: [],
-      };
-      roots.push(issueNode);
-      latestIssueNode = issueNode;
+      preRunNodes.push(node);
       return;
     }
 
@@ -119,22 +127,18 @@ const buildFlow = (steps: TaskStep[]): FlowNode[] => {
     if (!runNode) {
       runNode = {
         id: `run-${step.run_id}`,
-        label: `?? Run ${step.run_id}`,
+        label: `Run ${step.run_id}`,
         meta: "execution trace",
-        kind: "run",
         children: [],
       };
       runNodes.set(step.run_id, runNode);
-      if (latestIssueNode) {
-        latestIssueNode.children.push(runNode);
-      } else {
-        roots.push(runNode);
-      }
+      issueRoot.children.push(runNode);
     }
-    runNode.children.push(baseNode);
+    runNode.children.push(node);
   });
 
-  return roots.reverse();
+  issueRoot.children = [...preRunNodes, ...issueRoot.children];
+  return [issueRoot];
 };
 
 function FlowBranch({ node, level }: { node: FlowNode; level: number }) {
@@ -153,7 +157,7 @@ function FlowBranch({ node, level }: { node: FlowNode; level: number }) {
           disabled={!hasChildren}
           onClick={() => setExpanded((current) => !current)}
         >
-          {hasChildren ? (expanded ? "?" : "+") : "?"}
+          {hasChildren ? (expanded ? "-" : "+") : "."}
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-[#57606a]">
@@ -176,7 +180,7 @@ function FlowBranch({ node, level }: { node: FlowNode; level: number }) {
 }
 
 export default function IssueFlowTree({ projectId, issueId, steps }: IssueFlowTreeProps) {
-  const flow = useMemo(() => buildFlow(steps), [steps]);
+  const flow = useMemo(() => buildFlow(steps, issueId), [steps, issueId]);
 
   return (
     <section className="rounded-md border border-[#d0d7de] bg-white p-3">
@@ -192,7 +196,7 @@ export default function IssueFlowTree({ projectId, issueId, steps }: IssueFlowTr
         </span>
       </div>
 
-      {flow.length === 0 ? (
+      {steps.length === 0 ? (
         <p className="mt-3 text-xs text-[#57606a]">?? flow ???</p>
       ) : (
         <ol className="mt-3 space-y-1">

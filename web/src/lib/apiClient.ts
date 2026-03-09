@@ -30,6 +30,7 @@ import type {
   IssueTimelineEntry,
   ListIssueTimelineQuery,
   ListIssueTimelineResponse,
+  ListTaskStepsResponse,
   ListIssuesResponse,
   ListRunCheckpointsResponse,
   ListRunsResponse,
@@ -556,6 +557,10 @@ export interface ApiClient {
     issueId: string,
     query?: ListIssueTimelineQuery,
   ): Promise<ListIssueTimelineResponse>;
+  listIssueTaskSteps(
+    projectId: string,
+    issueId: string,
+  ): Promise<ListTaskStepsResponse>;
   listAdminAuditLog?(
     query?: AdminAuditLogQuery,
   ): Promise<ListAdminAuditLogResponse>;
@@ -904,6 +909,10 @@ export const createApiClient = (options: ApiClientOptions): ApiClient => {
             : (query?.offset ?? 0),
       };
     },
+    listIssueTaskSteps: (projectId, issueId) =>
+      request<ListTaskStepsResponse>({
+        path: `/api/v1/projects/${projectId}/issues/${issueId}/timeline`,
+      }),
     listAdminAuditLog: (query) =>
       request<ListAdminAuditLogResponse>({
         path: "/api/v1/admin/audit-log",

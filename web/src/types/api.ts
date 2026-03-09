@@ -307,6 +307,48 @@ export interface ListIssueTimelineQuery {
 
 export type ListIssueTimelineResponse = PaginatedResponse<IssueTimelineEntry>;
 
+export type TaskStepAction =
+  | "created"
+  | "submitted_for_review"
+  | "review_approved"
+  | "review_rejected"
+  | "queued"
+  | "ready"
+  | "execution_started"
+  | "merge_started"
+  | "merge_completed"
+  | "failed"
+  | "abandoned"
+  | "decompose_started"
+  | "decomposed"
+  | "superseded"
+  | "run_created"
+  | "run_started"
+  | "stage_started"
+  | "stage_completed"
+  | "stage_failed"
+  | "run_completed";
+
+export interface TaskStep {
+  id: string;
+  issue_id: string;
+  run_id: string;
+  agent_id: string;
+  action: TaskStepAction;
+  stage_id: string;
+  input: string;
+  output: string;
+  note: string;
+  ref_id: string;
+  ref_type: string;
+  created_at: string;
+}
+
+export interface ListTaskStepsResponse {
+  steps: TaskStep[];
+  total: number;
+}
+
 export interface AdminAuditLogItem {
   id: number;
   project_id?: string;

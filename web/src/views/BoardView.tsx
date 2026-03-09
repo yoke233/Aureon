@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../lib/apiClient";
-import type { IssueTimelineEntry } from "../types/api";
+import type { IssueTimelineEntry, TaskStep } from "../types/api";
+import IssueFlowTree from "../components/IssueFlowTree";
 
 interface BoardViewProps {
   apiClient: ApiClient;
@@ -412,6 +413,8 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [timelineEntries, setTimelineEntries] = useState<IssueTimelineEntry[]>([]);
+  const [taskSteps, setTaskSteps] = useState<TaskStep[]>([]);
+  const [taskStepsError, setTaskStepsError] = useState<string | null>(null);
   const [timelineReloadToken, setTimelineReloadToken] = useState(0);
   const hasLoadedTasksRef = useRef(false);
   const hasLoadedTimelineRef = useRef(false);
@@ -552,6 +555,8 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
       setTimelineLoading(false);
       setTimelineError(null);
       setTimelineEntries([]);
+      setTaskSteps([]);
+      setTaskStepsError(null);
       hasLoadedTimelineRef.current = false;
       timelineIssueRef.current = "";
       return;
@@ -571,14 +576,17 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
     setTimelineError(null);
     const loadTimeline = async () => {
       try {
-        const response = await apiClient.listIssueTimeline(projectId, timelineIssueID, {
-          limit: 200,
-          offset: 0,
-        });
+        const [timelineResponse, taskStepResponse] = await Promise.all([
+          apiClient.listIssueTimeline(projectId, timelineIssueID, {
+            limit: 200,
+            offset: 0,
+          }),
+          apiClient.listIssueTaskSteps(projectId, timelineIssueID),
+        ]);
         if (cancelled) {
           return;
         }
-        const sorted = [...response.items].sort((a, b) => {
+        const sorted = [...timelineResponse.items].sort((a, b) => {
           const left = new Date(parseTimelineTimestamp(a)).getTime();
           const right = new Date(parseTimelineTimestamp(b)).getTime();
           if (Number.isNaN(left) && Number.isNaN(right)) {
@@ -593,11 +601,15 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
           return right - left;
         });
         setTimelineEntries(sorted);
+        setTaskSteps(Array.isArray(taskStepResponse.steps) ? taskStepResponse.steps : []);
+        setTaskStepsError(null);
         hasLoadedTimelineRef.current = true;
       } catch (requestError) {
         if (!cancelled) {
           setTimelineError(getErrorMessage(requestError));
           setTimelineEntries([]);
+          setTaskSteps([]);
+          setTaskStepsError(getErrorMessage(requestError));
           hasLoadedTimelineRef.current = false;
         }
       } finally {
@@ -887,6 +899,17 @@ const BoardView = ({ apiClient, projectId, refreshToken }: BoardViewProps) => {
                     {timelineError}
                   </p>
                 ) : null}
+                {taskStepsError && !timelineError ? (
+                  <p className="rounded-md border border-[#cf222e] bg-[#ffebe9] px-2 py-1 text-xs text-[#cf222e]">
+                    {taskStepsError}
+                  </p>
+                ) : null}
+
+                <IssueFlowTree
+                  projectId={projectId}
+                  issueId={detailTask.id}
+                  steps={taskSteps}
+                />
 
                 {timelineLoading && timelineItems.length === 0 ? (
                   <p className="text-xs text-[#57606a]">timeline 加载中...</p>

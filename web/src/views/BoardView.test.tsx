@@ -73,6 +73,10 @@ const createMockApiClient = (): ApiClient => {
       total: 0,
       offset: 0,
     }),
+    listIssueTaskSteps: vi.fn().mockResolvedValue({
+      steps: [],
+      total: 0,
+    }),
     listAdminAuditLog: vi.fn(),
     getRun: vi.fn(),
     getRepoTree: vi.fn(),
@@ -564,4 +568,3 @@ describe("BoardView", () => {
     expect(interval.value).toBe("30000");
   });
 });
-

@@ -250,7 +250,7 @@ CREATE INDEX IF NOT EXISTS idx_task_steps_run ON task_steps(run_id, created_at);
 
 // schemaVersion tracks which migrations have been applied.
 // Bump this when adding new migrations.
-const schemaVersion = 11
+const schemaVersion = 14
 
 func applyMigrations(db *sql.DB) error {
 	if _, err := db.Exec(schemaTables); err != nil {
@@ -323,6 +323,21 @@ func applyMigrations(db *sql.DB) error {
 	if currentVersion < 11 {
 		if err := migrateAddChildrenMode(db); err != nil {
 			return fmt.Errorf("migration v11 (issues.children_mode): %w", err)
+		}
+	}
+	if currentVersion < 12 {
+		if err := migrateAddDecisions(db); err != nil {
+			return fmt.Errorf("migration v12 (decisions): %w", err)
+		}
+	}
+	if currentVersion < 13 {
+		if err := migrateAddGateChecks(db); err != nil {
+			return fmt.Errorf("migration v13 (gate_checks): %w", err)
+		}
+	}
+	if currentVersion < 14 {
+		if err := migrateHardenGateChecks(db); err != nil {
+			return fmt.Errorf("migration v14 (gate_checks constraints): %w", err)
 		}
 	}
 	if err := migrateBackfillLegacyColumns(db); err != nil {
@@ -459,6 +474,120 @@ CREATE INDEX IF NOT EXISTS idx_task_steps_issue ON task_steps(issue_id, created_
 CREATE INDEX IF NOT EXISTS idx_task_steps_run ON task_steps(run_id, created_at);
 `)
 	return err
+}
+
+func migrateAddDecisions(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS decisions (
+	id               TEXT PRIMARY KEY,
+	issue_id         TEXT NOT NULL,
+	run_id           TEXT NOT NULL DEFAULT '',
+	stage_id         TEXT NOT NULL DEFAULT '',
+	agent_id         TEXT NOT NULL DEFAULT '',
+	type             TEXT NOT NULL,
+	prompt_hash      TEXT NOT NULL,
+	prompt_preview   TEXT NOT NULL DEFAULT '',
+	model            TEXT NOT NULL DEFAULT '',
+	template         TEXT NOT NULL DEFAULT '',
+	template_version TEXT NOT NULL DEFAULT '',
+	input_tokens     INTEGER NOT NULL DEFAULT 0,
+	action           TEXT NOT NULL,
+	reasoning        TEXT NOT NULL DEFAULT '',
+	confidence       REAL NOT NULL DEFAULT 0,
+	output_tokens    INTEGER NOT NULL DEFAULT 0,
+	output_data      TEXT NOT NULL DEFAULT '{}',
+	duration_ms      INTEGER NOT NULL DEFAULT 0,
+	created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_issue ON decisions(issue_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_type  ON decisions(type, created_at);
+`)
+	return err
+}
+
+func migrateAddGateChecks(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS gate_checks (
+	id          TEXT PRIMARY KEY,
+	issue_id    TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	gate_name   TEXT NOT NULL,
+	gate_type   TEXT NOT NULL,
+	attempt     INTEGER NOT NULL DEFAULT 1,
+	status      TEXT NOT NULL DEFAULT 'pending',
+	reason      TEXT NOT NULL DEFAULT '',
+	decision_id TEXT NOT NULL DEFAULT '',
+	checked_by  TEXT NOT NULL DEFAULT '',
+	created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(issue_id, gate_name, attempt)
+);
+CREATE INDEX IF NOT EXISTS idx_gate_checks_issue ON gate_checks(issue_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_gate_checks_name  ON gate_checks(issue_id, gate_name);
+`)
+	return err
+}
+
+func migrateHardenGateChecks(db *sql.DB) error {
+	exists, err := hasTable(db, "gate_checks")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return migrateAddGateChecks(db)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin gate_checks hardening tx: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.Exec(`ALTER TABLE gate_checks RENAME TO gate_checks_old`); err != nil {
+		return fmt.Errorf("rename gate_checks: %w", err)
+	}
+	if _, err = tx.Exec(`
+DROP INDEX IF EXISTS idx_gate_checks_issue;
+DROP INDEX IF EXISTS idx_gate_checks_name;
+`); err != nil {
+		return fmt.Errorf("drop old gate_checks indexes: %w", err)
+	}
+	if _, err = tx.Exec(`
+CREATE TABLE gate_checks (
+	id          TEXT PRIMARY KEY,
+	issue_id    TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	gate_name   TEXT NOT NULL,
+	gate_type   TEXT NOT NULL,
+	attempt     INTEGER NOT NULL DEFAULT 1,
+	status      TEXT NOT NULL DEFAULT 'pending',
+	reason      TEXT NOT NULL DEFAULT '',
+	decision_id TEXT NOT NULL DEFAULT '',
+	checked_by  TEXT NOT NULL DEFAULT '',
+	created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(issue_id, gate_name, attempt)
+);
+CREATE INDEX idx_gate_checks_issue ON gate_checks(issue_id, created_at);
+CREATE INDEX idx_gate_checks_name  ON gate_checks(issue_id, gate_name);
+`); err != nil {
+		return fmt.Errorf("recreate gate_checks: %w", err)
+	}
+	if _, err = tx.Exec(`
+INSERT OR IGNORE INTO gate_checks (id, issue_id, gate_name, gate_type, attempt, status, reason, decision_id, checked_by, created_at)
+SELECT old.id, old.issue_id, old.gate_name, old.gate_type, old.attempt, old.status, old.reason, old.decision_id, old.checked_by, old.created_at
+FROM gate_checks_old old
+WHERE EXISTS (SELECT 1 FROM issues WHERE issues.id = old.issue_id)
+`); err != nil {
+		return fmt.Errorf("copy hardened gate_checks rows: %w", err)
+	}
+	if _, err = tx.Exec(`DROP TABLE gate_checks_old`); err != nil {
+		return fmt.Errorf("drop old gate_checks: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit gate_checks hardening: %w", err)
+	}
+	return nil
 }
 
 func migrateBackfillLegacyColumns(db *sql.DB) error {

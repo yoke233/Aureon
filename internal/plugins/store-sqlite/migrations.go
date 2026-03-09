@@ -249,7 +249,7 @@ CREATE INDEX IF NOT EXISTS idx_task_steps_run ON task_steps(run_id, created_at);
 
 // schemaVersion tracks which migrations have been applied.
 // Bump this when adding new migrations.
-const schemaVersion = 10
+const schemaVersion = 12
 
 func applyMigrations(db *sql.DB) error {
 	if _, err := db.Exec(schemaTables); err != nil {
@@ -317,6 +317,16 @@ func applyMigrations(db *sql.DB) error {
 	if currentVersion < 10 {
 		if err := migrateAddTaskSteps(db); err != nil {
 			return fmt.Errorf("migration v10 (task_steps): %w", err)
+		}
+	}
+	if currentVersion < 11 {
+		if err := migrateAddDecisions(db); err != nil {
+			return fmt.Errorf("migration v11 (decisions): %w", err)
+		}
+	}
+	if currentVersion < 12 {
+		if err := migrateAddGateChecks(db); err != nil {
+			return fmt.Errorf("migration v12 (gate_checks): %w", err)
 		}
 	}
 	if err := migrateBackfillLegacyColumns(db); err != nil {
@@ -451,6 +461,55 @@ CREATE TABLE IF NOT EXISTS task_steps (
 );
 CREATE INDEX IF NOT EXISTS idx_task_steps_issue ON task_steps(issue_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_steps_run ON task_steps(run_id, created_at);
+`)
+	return err
+}
+
+func migrateAddDecisions(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS decisions (
+	id               TEXT PRIMARY KEY,
+	issue_id         TEXT NOT NULL,
+	run_id           TEXT NOT NULL DEFAULT '',
+	stage_id         TEXT NOT NULL DEFAULT '',
+	agent_id         TEXT NOT NULL DEFAULT '',
+	type             TEXT NOT NULL,
+	prompt_hash      TEXT NOT NULL,
+	prompt_preview   TEXT NOT NULL DEFAULT '',
+	model            TEXT NOT NULL DEFAULT '',
+	template         TEXT NOT NULL DEFAULT '',
+	template_version TEXT NOT NULL DEFAULT '',
+	input_tokens     INTEGER NOT NULL DEFAULT 0,
+	action           TEXT NOT NULL,
+	reasoning        TEXT NOT NULL DEFAULT '',
+	confidence       REAL NOT NULL DEFAULT 0,
+	output_tokens    INTEGER NOT NULL DEFAULT 0,
+	output_data      TEXT NOT NULL DEFAULT '{}',
+	duration_ms      INTEGER NOT NULL DEFAULT 0,
+	created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_issue ON decisions(issue_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_type  ON decisions(type, created_at);
+`)
+	return err
+}
+
+func migrateAddGateChecks(db *sql.DB) error {
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS gate_checks (
+	id          TEXT PRIMARY KEY,
+	issue_id    TEXT NOT NULL,
+	gate_name   TEXT NOT NULL,
+	gate_type   TEXT NOT NULL,
+	attempt     INTEGER NOT NULL DEFAULT 1,
+	status      TEXT NOT NULL DEFAULT 'pending',
+	reason      TEXT NOT NULL DEFAULT '',
+	decision_id TEXT NOT NULL DEFAULT '',
+	checked_by  TEXT NOT NULL DEFAULT '',
+	created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_gate_checks_issue ON gate_checks(issue_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_gate_checks_name  ON gate_checks(issue_id, gate_name);
 `)
 	return err
 }

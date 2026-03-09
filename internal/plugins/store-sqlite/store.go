@@ -1516,6 +1516,115 @@ func (s *SQLiteStore) GetReviewRecords(issueID string) ([]core.ReviewRecord, err
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) SaveDecision(d *core.Decision) error {
+	_, err := s.db.Exec(
+		`INSERT INTO decisions (id, issue_id, run_id, stage_id, agent_id, type, prompt_hash, prompt_preview, model, template, template_version, input_tokens, action, reasoning, confidence, output_tokens, output_data, duration_ms, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		d.ID, d.IssueID, d.RunID, string(d.StageID), d.AgentID, d.Type,
+		d.PromptHash, d.PromptPreview, d.Model, d.Template, d.TemplateVersion,
+		d.InputTokens, d.Action, d.Reasoning, d.Confidence,
+		d.OutputTokens, d.OutputData, d.DurationMs, d.CreatedAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetDecision(id string) (*core.Decision, error) {
+	row := s.db.QueryRow(
+		`SELECT id, issue_id, run_id, stage_id, agent_id, type, prompt_hash, prompt_preview, model, template, template_version, input_tokens, action, reasoning, confidence, output_tokens, output_data, duration_ms, created_at
+		 FROM decisions WHERE id=?`, id,
+	)
+	var d core.Decision
+	var stageID string
+	err := row.Scan(&d.ID, &d.IssueID, &d.RunID, &stageID, &d.AgentID, &d.Type,
+		&d.PromptHash, &d.PromptPreview, &d.Model, &d.Template, &d.TemplateVersion,
+		&d.InputTokens, &d.Action, &d.Reasoning, &d.Confidence,
+		&d.OutputTokens, &d.OutputData, &d.DurationMs, &d.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	d.StageID = core.StageID(stageID)
+	return &d, nil
+}
+
+func (s *SQLiteStore) ListDecisions(issueID string) ([]core.Decision, error) {
+	rows, err := s.db.Query(
+		`SELECT id, issue_id, run_id, stage_id, agent_id, type, prompt_hash, prompt_preview, model, template, template_version, input_tokens, action, reasoning, confidence, output_tokens, output_data, duration_ms, created_at
+		 FROM decisions WHERE issue_id=? ORDER BY created_at`, issueID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.Decision
+	for rows.Next() {
+		var d core.Decision
+		var stageID string
+		if err := rows.Scan(&d.ID, &d.IssueID, &d.RunID, &stageID, &d.AgentID, &d.Type,
+			&d.PromptHash, &d.PromptPreview, &d.Model, &d.Template, &d.TemplateVersion,
+			&d.InputTokens, &d.Action, &d.Reasoning, &d.Confidence,
+			&d.OutputTokens, &d.OutputData, &d.DurationMs, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		d.StageID = core.StageID(stageID)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) SaveGateCheck(gc *core.GateCheck) error {
+	_, err := s.db.Exec(
+		`INSERT INTO gate_checks (id, issue_id, gate_name, gate_type, attempt, status, reason, decision_id, checked_by, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		gc.ID, gc.IssueID, gc.GateName, string(gc.GateType), gc.Attempt,
+		string(gc.Status), gc.Reason, gc.DecisionID, gc.CheckedBy, gc.CreatedAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) GetGateChecks(issueID string) ([]core.GateCheck, error) {
+	rows, err := s.db.Query(
+		`SELECT id, issue_id, gate_name, gate_type, attempt, status, reason, decision_id, checked_by, created_at
+		 FROM gate_checks WHERE issue_id=? ORDER BY created_at`, issueID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []core.GateCheck
+	for rows.Next() {
+		var gc core.GateCheck
+		var gateType, status string
+		if err := rows.Scan(&gc.ID, &gc.IssueID, &gc.GateName, &gateType, &gc.Attempt,
+			&status, &gc.Reason, &gc.DecisionID, &gc.CheckedBy, &gc.CreatedAt); err != nil {
+			return nil, err
+		}
+		gc.GateType = core.GateType(gateType)
+		gc.Status = core.GateStatus(status)
+		out = append(out, gc)
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLiteStore) GetLatestGateCheck(issueID, gateName string) (*core.GateCheck, error) {
+	row := s.db.QueryRow(
+		`SELECT id, issue_id, gate_name, gate_type, attempt, status, reason, decision_id, checked_by, created_at
+		 FROM gate_checks WHERE issue_id=? AND gate_name=? ORDER BY created_at DESC LIMIT 1`,
+		issueID, gateName,
+	)
+	var gc core.GateCheck
+	var gateType, status string
+	err := row.Scan(&gc.ID, &gc.IssueID, &gc.GateName, &gateType, &gc.Attempt,
+		&status, &gc.Reason, &gc.DecisionID, &gc.CheckedBy, &gc.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	gc.GateType = core.GateType(gateType)
+	gc.Status = core.GateStatus(status)
+	return &gc, nil
+}
+
 func (s *SQLiteStore) SaveEvent(event core.UnifiedEvent) error {
 	_, err := s.db.Exec(
 		`INSERT INTO events (scope, event_type, project_id, run_id, issue_id, session_id, stage, agent, payload_json, error)

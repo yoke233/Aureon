@@ -29,10 +29,10 @@ func (s *Store) CreateStep(ctx context.Context, st *core.Step) (int64, error) {
 	}
 	now := time.Now().UTC()
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO steps (flow_id, name, type, status, depends_on, sub_flow_id, agent_role,
+		`INSERT INTO steps (flow_id, name, description, type, status, depends_on, sub_flow_id, agent_role,
 		        required_capabilities, acceptance_criteria, timeout_ms, config, max_retries, retry_count, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		st.FlowID, st.Name, st.Type, st.Status, deps, st.SubFlowID, st.AgentRole,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		st.FlowID, st.Name, st.Description, st.Type, st.Status, deps, st.SubFlowID, st.AgentRole,
 		caps, criteria, st.Timeout.Milliseconds(), cfg,
 		st.MaxRetries, st.RetryCount, now, now,
 	)
@@ -51,11 +51,11 @@ func (s *Store) GetStep(ctx context.Context, id int64) (*core.Step, error) {
 	var deps, cfg, caps, criteria sql.NullString
 	var timeoutMs int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, flow_id, name, type, status, depends_on, sub_flow_id, agent_role,
+		`SELECT id, flow_id, name, description, type, status, depends_on, sub_flow_id, agent_role,
 		        required_capabilities, acceptance_criteria, timeout_ms, config,
 		        max_retries, retry_count, created_at, updated_at
 		 FROM steps WHERE id = ?`, id,
-	).Scan(&st.ID, &st.FlowID, &st.Name, &st.Type, &st.Status, &deps, &st.SubFlowID,
+	).Scan(&st.ID, &st.FlowID, &st.Name, &st.Description, &st.Type, &st.Status, &deps, &st.SubFlowID,
 		&st.AgentRole, &caps, &criteria, &timeoutMs, &cfg,
 		&st.MaxRetries, &st.RetryCount, &st.CreatedAt, &st.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -74,7 +74,7 @@ func (s *Store) GetStep(ctx context.Context, id int64) (*core.Step, error) {
 
 func (s *Store) ListStepsByFlow(ctx context.Context, flowID int64) ([]*core.Step, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, flow_id, name, type, status, depends_on, sub_flow_id, agent_role,
+		`SELECT id, flow_id, name, description, type, status, depends_on, sub_flow_id, agent_role,
 		        required_capabilities, acceptance_criteria, timeout_ms, config,
 		        max_retries, retry_count, created_at, updated_at
 		 FROM steps WHERE flow_id = ? ORDER BY id`, flowID,
@@ -89,7 +89,7 @@ func (s *Store) ListStepsByFlow(ctx context.Context, flowID int64) ([]*core.Step
 		st := &core.Step{}
 		var deps, cfg, caps, criteria sql.NullString
 		var timeoutMs int64
-		if err := rows.Scan(&st.ID, &st.FlowID, &st.Name, &st.Type, &st.Status, &deps, &st.SubFlowID,
+		if err := rows.Scan(&st.ID, &st.FlowID, &st.Name, &st.Description, &st.Type, &st.Status, &deps, &st.SubFlowID,
 			&st.AgentRole, &caps, &criteria, &timeoutMs, &cfg,
 			&st.MaxRetries, &st.RetryCount, &st.CreatedAt, &st.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan step: %w", err)
@@ -126,11 +126,11 @@ func (s *Store) UpdateStep(ctx context.Context, st *core.Step) error {
 	criteria, _ := marshalJSON(st.AcceptanceCriteria)
 	now := time.Now().UTC()
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE steps SET name = ?, type = ?, status = ?, depends_on = ?, sub_flow_id = ?,
+		`UPDATE steps SET name = ?, description = ?, type = ?, status = ?, depends_on = ?, sub_flow_id = ?,
 		        agent_role = ?, required_capabilities = ?, acceptance_criteria = ?,
 		        timeout_ms = ?, config = ?, max_retries = ?, retry_count = ?, updated_at = ?
 		 WHERE id = ?`,
-		st.Name, st.Type, st.Status, deps, st.SubFlowID,
+		st.Name, st.Description, st.Type, st.Status, deps, st.SubFlowID,
 		st.AgentRole, caps, criteria,
 		st.Timeout.Milliseconds(), cfg, st.MaxRetries, st.RetryCount, now,
 		st.ID,
@@ -143,6 +143,18 @@ func (s *Store) UpdateStep(ctx context.Context, st *core.Step) error {
 		return core.ErrNotFound
 	}
 	st.UpdatedAt = now
+	return nil
+}
+
+func (s *Store) DeleteStep(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM steps WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete step %d: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return core.ErrNotFound
+	}
 	return nil
 }
 

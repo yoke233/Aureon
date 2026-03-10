@@ -81,7 +81,7 @@ func TestStepCRUD(t *testing.T) {
 		Type:                 core.StepExec,
 		Status:               core.StepPending,
 		AgentRole:            "worker",
-		RequiredCapabilities: []string{"dev.backend", "dev.go"},
+		RequiredCapabilities: []string{"backend", "go"},
 		AcceptanceCriteria:   []string{"unit tests pass", "no lint errors"},
 		Timeout:              5 * time.Minute,
 		MaxRetries:           2,
@@ -102,7 +102,7 @@ func TestStepCRUD(t *testing.T) {
 	if got.Config["timeout"] != "5m" {
 		t.Fatalf("config not preserved: %v", got.Config)
 	}
-	if len(got.RequiredCapabilities) != 2 || got.RequiredCapabilities[0] != "dev.backend" {
+	if len(got.RequiredCapabilities) != 2 || got.RequiredCapabilities[0] != "backend" {
 		t.Fatalf("required_capabilities not preserved: %v", got.RequiredCapabilities)
 	}
 	if len(got.AcceptanceCriteria) != 2 || got.AcceptanceCriteria[0] != "unit tests pass" {
@@ -148,7 +148,7 @@ func TestStepUpdate(t *testing.T) {
 
 	got, _ := s.GetStep(ctx, id)
 	got.AcceptanceCriteria = []string{"new criteria"}
-	got.RequiredCapabilities = []string{"dev.frontend"}
+	got.RequiredCapabilities = []string{"frontend"}
 	if err := s.UpdateStep(ctx, got); err != nil {
 		t.Fatalf("update step: %v", err)
 	}

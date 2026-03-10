@@ -26,6 +26,7 @@ import (
 	v2api "github.com/yoke233/ai-workflow/internal/v2/api"
 	v2core "github.com/yoke233/ai-workflow/internal/v2/core"
 	v2engine "github.com/yoke233/ai-workflow/internal/v2/engine"
+	v2llm "github.com/yoke233/ai-workflow/internal/v2/llm"
 	v2sqlite "github.com/yoke233/ai-workflow/internal/v2/store/sqlite"
 	"github.com/yoke233/ai-workflow/internal/web"
 )
@@ -667,23 +668,25 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 
 	wsProvider := v2engine.NewCompositeProvider()
 
-	// Optional: metadata collector (extracts JSON from step markdown artifacts).
+	// Optional: shared LLM client for collector + DAG generator.
+	var llmClient *v2llm.Client
 	var engOpts []v2engine.Option
 	engOpts = append(engOpts, v2engine.WithWorkspaceProvider(wsProvider))
 	if bootstrapCfg != nil {
 		openaiCfg := bootstrapCfg.V2.Collector.OpenAI
 		if strings.TrimSpace(openaiCfg.APIKey) != "" && strings.TrimSpace(openaiCfg.Model) != "" {
-			completer, err := v2engine.NewOpenAICompleter(v2engine.OpenAICompleterConfig{
+			c, err := v2llm.New(v2llm.Config{
 				BaseURL:    openaiCfg.BaseURL,
 				APIKey:     openaiCfg.APIKey,
 				Model:      openaiCfg.Model,
 				MaxRetries: bootstrapCfg.V2.Collector.MaxRetries,
 			})
 			if err != nil {
-				slog.Warn("v2 bootstrap: collector disabled (invalid openai config)", "error", err)
+				slog.Warn("v2 bootstrap: LLM client disabled (invalid openai config)", "error", err)
 			} else {
-				engOpts = append(engOpts, v2engine.WithCollector(v2engine.NewLLMCollector(completer.Complete)))
-				slog.Info("v2 bootstrap: collector enabled")
+				llmClient = c
+				engOpts = append(engOpts, v2engine.WithCollector(v2engine.NewLLMCollector(llmClient.Complete)))
+				slog.Info("v2 bootstrap: LLM client enabled (collector + DAG generator)")
 			}
 		}
 	}
@@ -713,10 +716,17 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 		})
 	}
 
+	// DAG generator: AI-powered step decomposition.
+	var dagGen *v2engine.DAGGenerator
+	if llmClient != nil {
+		dagGen = v2engine.NewDAGGenerator(llmClient, registry)
+	}
+
 	handler := v2api.NewHandler(v2Store, v2Bus, eng,
 		v2api.WithLeadAgent(leadAgent),
 		v2api.WithScheduler(scheduler),
 		v2api.WithRegistry(registry),
+		v2api.WithDAGGenerator(dagGen),
 	)
 	registrar := func(r chi.Router) {
 		handler.Register(r)

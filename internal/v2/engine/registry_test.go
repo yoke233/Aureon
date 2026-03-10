@@ -113,7 +113,7 @@ func TestConfigRegistry_ProfileCRUD(t *testing.T) {
 	reg := NewConfigRegistry()
 	reg.LoadDrivers([]*core.AgentDriver{testDriver("claude-acp")})
 
-	p := testProfile("worker-1", "claude-acp", core.RoleWorker, "dev.backend")
+	p := testProfile("worker-1", "claude-acp", core.RoleWorker, "backend")
 
 	// Create
 	if err := reg.CreateProfile(ctx, p); err != nil {
@@ -139,7 +139,7 @@ func TestConfigRegistry_ProfileCRUD(t *testing.T) {
 	if got.Role != core.RoleWorker {
 		t.Fatalf("expected worker, got %s", got.Role)
 	}
-	if len(got.Capabilities) != 1 || got.Capabilities[0] != "dev.backend" {
+	if len(got.Capabilities) != 1 || got.Capabilities[0] != "backend" {
 		t.Fatalf("unexpected capabilities: %v", got.Capabilities)
 	}
 
@@ -150,7 +150,7 @@ func TestConfigRegistry_ProfileCRUD(t *testing.T) {
 	}
 
 	// Update
-	p2 := testProfile("worker-1", "claude-acp", core.RoleWorker, "dev.backend", "dev.frontend")
+	p2 := testProfile("worker-1", "claude-acp", core.RoleWorker, "backend", "frontend")
 	if err := reg.UpdateProfile(ctx, p2); err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
@@ -222,8 +222,8 @@ func TestConfigRegistry_ResolveForStep(t *testing.T) {
 	reg.LoadDrivers([]*core.AgentDriver{testDriver("claude-acp"), testDriver("codex-acp")})
 	reg.LoadProfiles([]*core.AgentProfile{
 		testProfile("lead", "claude-acp", core.RoleLead, "planning"),
-		testProfile("worker-be", "codex-acp", core.RoleWorker, "dev.backend"),
-		testProfile("worker-fe", "claude-acp", core.RoleWorker, "dev.frontend"),
+		testProfile("worker-be", "codex-acp", core.RoleWorker, "backend"),
+		testProfile("worker-fe", "claude-acp", core.RoleWorker, "frontend"),
 		testProfile("gate", "claude-acp", core.RoleGate, "code.review"),
 	})
 
@@ -240,17 +240,17 @@ func TestConfigRegistry_ResolveForStep(t *testing.T) {
 		},
 		{
 			name:   "match by role + capability",
-			step:   &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"dev.backend"}},
+			step:   &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"backend"}},
 			wantID: "worker-be",
 		},
 		{
 			name:   "match by capability only",
-			step:   &core.Step{RequiredCapabilities: []string{"dev.frontend"}},
+			step:   &core.Step{RequiredCapabilities: []string{"frontend"}},
 			wantID: "worker-fe",
 		},
 		{
 			name:    "no match",
-			step:    &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"dev.mobile"}},
+			step:    &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"mobile"}},
 			wantErr: core.ErrNoMatchingAgent,
 		},
 	}

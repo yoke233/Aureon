@@ -3,16 +3,10 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
-	"time"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/responses"
-	"github.com/openai/openai-go/shared"
 	"github.com/yoke233/ai-workflow/internal/v2/core"
+	"github.com/yoke233/ai-workflow/internal/v2/llm"
 )
 
 // LLMCollector extracts structured metadata from agent markdown output
@@ -22,20 +16,12 @@ type LLMCollector struct {
 	// prompt is the fully assembled extraction prompt.
 	// tools carries the JSON schema used to define the expected JSON output.
 	// Returns the raw JSON output.
-	Complete func(ctx context.Context, prompt string, tools []ToolDef) (json.RawMessage, error)
-}
-
-// ToolDef describes a tool for the LLM to call.
-type ToolDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
+	Complete func(ctx context.Context, prompt string, tools []llm.ToolDef) (json.RawMessage, error)
 }
 
 // NewLLMCollector creates a Collector backed by an LLM completion function.
-// The Complete function should call a small model (Haiku) with tool_use forced,
-// and return the tool input JSON.
-func NewLLMCollector(complete func(ctx context.Context, prompt string, tools []ToolDef) (json.RawMessage, error)) *LLMCollector {
+// Typical usage: NewLLMCollector(llmClient.Complete)
+func NewLLMCollector(complete func(ctx context.Context, prompt string, tools []llm.ToolDef) (json.RawMessage, error)) *LLMCollector {
 	return &LLMCollector{Complete: complete}
 }
 
@@ -85,10 +71,10 @@ Return ONLY a JSON object matching the provided JSON schema.`
 }
 
 // extractionTools returns the tool definitions for a given step type.
-func extractionTools(stepType core.StepType) []ToolDef {
+func extractionTools(stepType core.StepType) []llm.ToolDef {
 	switch stepType {
 	case core.StepGate:
-		return []ToolDef{{
+		return []llm.ToolDef{{
 			Name:        "extract_gate_metadata",
 			Description: "Extract structured metadata from a gate review output.",
 			InputSchema: map[string]any{
@@ -113,7 +99,7 @@ func extractionTools(stepType core.StepType) []ToolDef {
 			},
 		}}
 	case core.StepComposite:
-		return []ToolDef{{
+		return []llm.ToolDef{{
 			Name:        "extract_composite_metadata",
 			Description: "Extract structured metadata from a composite step output.",
 			InputSchema: map[string]any{
@@ -129,7 +115,7 @@ func extractionTools(stepType core.StepType) []ToolDef {
 			},
 		}}
 	default: // exec
-		return []ToolDef{{
+		return []llm.ToolDef{{
 			Name:        "extract_exec_metadata",
 			Description: "Extract structured metadata from an execution output.",
 			InputSchema: map[string]any{
@@ -155,195 +141,20 @@ func extractionTools(stepType core.StepType) []ToolDef {
 	}
 }
 
-// OpenAICompleter calls OpenAI Responses API with Structured Outputs (JSON schema)
-// and returns the raw JSON text output.
-//
-// Note: This completer does NOT use tool/function calling. The `tools` parameter is
-// only used as a carrier for JSON schema definitions (see extractionTools).
-type OpenAICompleter struct {
-	client     openai.Client
-	model      shared.ResponsesModel
-	maxRetries int
-	minBackoff time.Duration
-	maxBackoff time.Duration
-}
+// OpenAICompleter is a backward-compatible wrapper around llm.Client.
+// Deprecated: Use llm.New() directly instead.
+type OpenAICompleter = llm.Client
 
-type OpenAICompleterConfig struct {
-	BaseURL    string
-	APIKey     string
-	Model      string
-	MaxRetries int
-	MinBackoff time.Duration
-	MaxBackoff time.Duration
-}
+// OpenAICompleterConfig is a backward-compatible alias for llm.Config.
+// Deprecated: Use llm.Config directly instead.
+type OpenAICompleterConfig = llm.Config
 
+// NewOpenAICompleter is a backward-compatible wrapper around llm.New.
+// Deprecated: Use llm.New() directly instead.
 func NewOpenAICompleter(cfg OpenAICompleterConfig) (*OpenAICompleter, error) {
-	if strings.TrimSpace(cfg.APIKey) == "" {
-		return nil, fmt.Errorf("openai api_key is required")
-	}
-	if strings.TrimSpace(cfg.Model) == "" {
-		return nil, fmt.Errorf("openai model is required")
-	}
-
-	opts := []option.RequestOption{option.WithAPIKey(cfg.APIKey)}
-	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
-	}
-
-	minBackoff := cfg.MinBackoff
-	if minBackoff <= 0 {
-		minBackoff = 200 * time.Millisecond
-	}
-	maxBackoff := cfg.MaxBackoff
-	if maxBackoff <= 0 {
-		maxBackoff = 2 * time.Second
-	}
-
-	return &OpenAICompleter{
-		client:     openai.NewClient(opts...),
-		model:      shared.ResponsesModel(strings.TrimSpace(cfg.Model)),
-		maxRetries: max(0, cfg.MaxRetries),
-		minBackoff: minBackoff,
-		maxBackoff: maxBackoff,
-	}, nil
+	return llm.New(cfg)
 }
 
-func (c *OpenAICompleter) Complete(ctx context.Context, prompt string, tools []ToolDef) (json.RawMessage, error) {
-	if c == nil {
-		return nil, fmt.Errorf("OpenAICompleter is not initialized")
-	}
-	if strings.TrimSpace(prompt) == "" {
-		return nil, fmt.Errorf("prompt is empty")
-	}
-	if len(tools) == 0 {
-		return nil, fmt.Errorf("no json schema tool definitions provided")
-	}
-
-	tool := tools[0]
-	name := strings.TrimSpace(tool.Name)
-	if name == "" {
-		name = "extract_metadata"
-	}
-	schema := tool.InputSchema
-	if schema == nil {
-		return nil, fmt.Errorf("tool %q schema is nil", name)
-	}
-	// Make strict mode friendlier by default: disallow extra top-level keys.
-	if _, ok := schema["additionalProperties"]; !ok {
-		schema = cloneMap(schema)
-		schema["additionalProperties"] = false
-	}
-
-	maxAttempts := c.maxRetries + 1
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
-			Model: shared.ResponsesModel(c.model),
-			Input: responses.ResponseNewParamsInputUnion{
-				OfString: openai.String(prompt),
-			},
-			Temperature: openai.Float(0),
-			Text: responses.ResponseTextConfigParam{
-				Format: responses.ResponseFormatTextConfigUnionParam{
-					OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-						Name:        name,
-						Schema:      schema,
-						Strict:      openai.Bool(true),
-						Description: openai.String(strings.TrimSpace(tool.Description)),
-					},
-				},
-			},
-		})
-		if err == nil {
-			out := strings.TrimSpace(resp.OutputText())
-			out = stripCodeFences(out)
-			if out == "" {
-				lastErr = fmt.Errorf("openai returned empty output")
-			} else if !json.Valid([]byte(out)) {
-				lastErr = fmt.Errorf("openai output is not valid json")
-			} else {
-				return json.RawMessage(out), nil
-			}
-		} else {
-			lastErr = err
-		}
-
-		if attempt == maxAttempts || !isRetryableOpenAIError(lastErr) {
-			break
-		}
-		sleepBackoff(ctx, backoffDelay(attempt, c.minBackoff, c.maxBackoff))
-	}
-	return nil, fmt.Errorf("openai complete failed after %d attempt(s): %w", maxAttempts, lastErr)
-}
-
-func isRetryableOpenAIError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return false
-	}
-	var apierr *openai.Error
-	if errors.As(err, &apierr) {
-		switch apierr.StatusCode {
-		case 408, 409, 425, 429, 500, 502, 503, 504:
-			return true
-		default:
-			return false
-		}
-	}
-	// Network / transient errors that are not wrapped as *openai.Error.
-	return true
-}
-
-func backoffDelay(attempt int, minBackoff, maxBackoff time.Duration) time.Duration {
-	// attempt starts at 1; after first failure we delay for ~minBackoff.
-	d := minBackoff << (attempt - 1)
-	if d > maxBackoff {
-		return maxBackoff
-	}
-	return d
-}
-
-func sleepBackoff(ctx context.Context, d time.Duration) {
-	if d <= 0 {
-		return
-	}
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-	case <-t.C:
-	}
-}
-
-func stripCodeFences(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") {
-		return s
-	}
-	// Very small defensive parser: strip ```lang ... ``` if present.
-	lines := strings.Split(s, "\n")
-	if len(lines) < 2 {
-		return s
-	}
-	if strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
-		lines = lines[1:]
-	}
-	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "```" {
-		lines = lines[:len(lines)-1]
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-func cloneMap(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
+// ToolDef is a backward-compatible alias for llm.ToolDef.
+// Deprecated: Use llm.ToolDef directly instead.
+type ToolDef = llm.ToolDef

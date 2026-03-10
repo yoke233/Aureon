@@ -27,13 +27,14 @@ const (
 
 // Step is a single node in the Flow DAG.
 type Step struct {
-	ID         int64      `json:"id"`
-	FlowID     int64      `json:"flow_id"`
-	Name       string     `json:"name"`
-	Type       StepType   `json:"type"`
-	Status     StepStatus `json:"status"`
-	DependsOn  []int64    `json:"depends_on,omitempty"`  // upstream Step IDs
-	SubFlowID  *int64     `json:"sub_flow_id,omitempty"` // composite -> child Flow
+	ID          int64      `json:"id"`
+	FlowID      int64      `json:"flow_id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"` // what this step should accomplish
+	Type        StepType   `json:"type"`
+	Status      StepStatus `json:"status"`
+	DependsOn   []int64    `json:"depends_on,omitempty"`  // upstream Step IDs
+	SubFlowID   *int64     `json:"sub_flow_id,omitempty"` // composite -> child Flow
 
 	// Agent binding
 	AgentRole            string   `json:"agent_role,omitempty"`             // lead | worker | gate | support

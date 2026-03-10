@@ -347,15 +347,15 @@ func TestErrorKindPermanent(t *testing.T) {
 // TestProfileRegistry: resolve by role + capabilities.
 func TestProfileRegistry(t *testing.T) {
 	profiles := []*core.AgentProfile{
-		{ID: "claude-worker", Role: core.RoleWorker, Capabilities: []string{"dev.backend", "dev.frontend"}},
-		{ID: "claude-gate", Role: core.RoleGate, Capabilities: []string{"review.code"}},
-		{ID: "codex-worker", Role: core.RoleWorker, Capabilities: []string{"dev.backend", "test.qa"}},
+		{ID: "claude-worker", Role: core.RoleWorker, Capabilities: []string{"backend", "frontend"}},
+		{ID: "claude-gate", Role: core.RoleGate, Capabilities: []string{"code-review"}},
+		{ID: "codex-worker", Role: core.RoleWorker, Capabilities: []string{"backend", "qa"}},
 	}
 	reg := NewProfileRegistry(profiles)
 	ctx := context.Background()
 
 	// Match role + capability.
-	id, err := reg.Resolve(ctx, &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"test.qa"}})
+	id, err := reg.Resolve(ctx, &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"qa"}})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestProfileRegistry(t *testing.T) {
 	}
 
 	// No match.
-	_, err = reg.Resolve(ctx, &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"deploy.k8s"}})
+	_, err = reg.Resolve(ctx, &core.Step{AgentRole: "worker", RequiredCapabilities: []string{"k8s"}})
 	if err != core.ErrNoMatchingAgent {
 		t.Fatalf("expected ErrNoMatchingAgent, got %v", err)
 	}
@@ -486,7 +486,7 @@ func TestResolverIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	profiles := []*core.AgentProfile{
-		{ID: "my-worker", Role: core.RoleWorker, Capabilities: []string{"dev.go"}},
+		{ID: "my-worker", Role: core.RoleWorker, Capabilities: []string{"go"}},
 	}
 
 	var capturedAgentID string
@@ -504,7 +504,7 @@ func TestResolverIntegration(t *testing.T) {
 		Type:                 core.StepExec,
 		Status:               core.StepPending,
 		AgentRole:            "worker",
-		RequiredCapabilities: []string{"dev.go"},
+		RequiredCapabilities: []string{"go"},
 	})
 
 	if err := eng.Run(ctx, fID); err != nil {
@@ -766,7 +766,7 @@ func TestFlowE2E_ResolverBriefingCollector(t *testing.T) {
 
 	profiles := []*core.AgentProfile{
 		{ID: "designer", Role: core.RoleWorker, Capabilities: []string{"design"}},
-		{ID: "coder", Role: core.RoleWorker, Capabilities: []string{"dev.go"}},
+		{ID: "coder", Role: core.RoleWorker, Capabilities: []string{"go"}},
 	}
 
 	collector := CollectorFunc(func(_ context.Context, stepType core.StepType, md string) (map[string]any, error) {
@@ -811,7 +811,7 @@ func TestFlowE2E_ResolverBriefingCollector(t *testing.T) {
 		Status:               core.StepPending,
 		DependsOn:            []int64{designID},
 		AgentRole:            "worker",
-		RequiredCapabilities: []string{"dev.go"},
+		RequiredCapabilities: []string{"go"},
 		Config:               map[string]any{"objective": "Build login API"},
 	})
 
@@ -1158,8 +1158,8 @@ func TestFlowE2E_FullOrchestration(t *testing.T) {
 
 	profiles := []*core.AgentProfile{
 		{ID: "architect", Role: core.RoleWorker, Capabilities: []string{"design"}},
-		{ID: "coder", Role: core.RoleWorker, Capabilities: []string{"dev.go"}},
-		{ID: "reviewer", Role: core.RoleGate, Capabilities: []string{"review.code"}},
+		{ID: "coder", Role: core.RoleWorker, Capabilities: []string{"go"}},
+		{ID: "reviewer", Role: core.RoleGate, Capabilities: []string{"code-review"}},
 		{ID: "deployer", Role: core.RoleWorker, Capabilities: []string{"deploy"}},
 	}
 
@@ -1209,8 +1209,8 @@ func TestFlowE2E_FullOrchestration(t *testing.T) {
 
 	expander := ExpanderFunc(func(_ context.Context, step *core.Step) ([]*core.Step, error) {
 		return []*core.Step{
-			{Name: "code", Type: core.StepExec, AgentRole: "worker", RequiredCapabilities: []string{"dev.go"}},
-			{Name: "test", Type: core.StepExec, AgentRole: "worker", RequiredCapabilities: []string{"dev.go"}},
+			{Name: "code", Type: core.StepExec, AgentRole: "worker", RequiredCapabilities: []string{"go"}},
+			{Name: "test", Type: core.StepExec, AgentRole: "worker", RequiredCapabilities: []string{"go"}},
 		}, nil
 	})
 
@@ -1246,7 +1246,7 @@ func TestFlowE2E_FullOrchestration(t *testing.T) {
 		Status:               core.StepPending,
 		DependsOn:            []int64{implID},
 		AgentRole:            "gate",
-		RequiredCapabilities: []string{"review.code"},
+		RequiredCapabilities: []string{"code-review"},
 	})
 	deployID, _ := store.CreateStep(ctx, &core.Step{
 		FlowID:               fID,

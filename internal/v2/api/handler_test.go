@@ -183,7 +183,7 @@ func TestAPI_CreateStep(t *testing.T) {
 		"name":                  "build",
 		"type":                  "exec",
 		"agent_role":            "worker",
-		"required_capabilities": []string{"dev.go"},
+		"required_capabilities": []string{"go"},
 		"max_retries":           2,
 		"timeout":               "30s",
 	})

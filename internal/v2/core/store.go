@@ -34,6 +34,7 @@ type StepStore interface {
 	ListStepsByFlow(ctx context.Context, flowID int64) ([]*Step, error)
 	UpdateStepStatus(ctx context.Context, id int64, status StepStatus) error
 	UpdateStep(ctx context.Context, s *Step) error
+	DeleteStep(ctx context.Context, id int64) error
 }
 
 // ExecutionStore persists Execution aggregates.

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS steps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     flow_id INTEGER NOT NULL REFERENCES flows(id),
     name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     type TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     depends_on TEXT,
@@ -158,6 +159,8 @@ func runMigrations(db *sql.DB) error {
 		`ALTER TABLE projects ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE projects ADD COLUMN metadata TEXT`,
 		// resource_bindings table is handled by CREATE TABLE IF NOT EXISTS in schemaV1.
+		// Add description column to steps (v2 schema upgrade).
+		`ALTER TABLE steps ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			if strings.Contains(err.Error(), "duplicate column name") {

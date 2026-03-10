@@ -18,6 +18,7 @@ type Handler struct {
 	lead      *engine.LeadAgent
 	scheduler *engine.FlowScheduler
 	registry  core.AgentRegistry
+	dagGen    *engine.DAGGenerator
 }
 
 // NewHandler creates the v2 API handler.
@@ -45,6 +46,11 @@ func WithScheduler(s *engine.FlowScheduler) HandlerOption {
 // WithRegistry sets the agent registry for driver/profile management.
 func WithRegistry(r core.AgentRegistry) HandlerOption {
 	return func(h *Handler) { h.registry = r }
+}
+
+// WithDAGGenerator sets the DAG generator for AI-powered step decomposition.
+func WithDAGGenerator(g *engine.DAGGenerator) HandlerOption {
+	return func(h *Handler) { h.dagGen = g }
 }
 
 // Register mounts all v2 routes onto the given chi router.
@@ -78,6 +84,11 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/flows/{flowID}/steps", h.createStep)
 	r.Get("/flows/{flowID}/steps", h.listSteps)
 	r.Get("/steps/{stepID}", h.getStep)
+	r.Put("/steps/{stepID}", h.updateStep)
+	r.Delete("/steps/{stepID}", h.deleteStep)
+
+	// DAG generation (AI-powered)
+	r.Post("/flows/{flowID}/generate-steps", h.generateSteps)
 
 	// Executions
 	r.Get("/steps/{stepID}/executions", h.listExecutions)

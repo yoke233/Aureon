@@ -52,8 +52,14 @@ type V2Config struct {
 	// Useful for smoke tests and environments without LLM credentials.
 	MockExecutor bool              `toml:"mock_executor" yaml:"mock_executor"`
 	Collector    V2CollectorConfig `toml:"collector" yaml:"collector"`
+	Sandbox      V2SandboxConfig   `toml:"sandbox"   yaml:"sandbox"`
 	Agents       V2AgentsConfig    `toml:"agents"    yaml:"agents"`
 	Prompts      V2PromptsConfig   `toml:"prompts"   yaml:"prompts"`
+}
+
+// V2SandboxConfig configures per-ACP-process sandbox isolation.
+type V2SandboxConfig struct {
+	Enabled bool `toml:"enabled" yaml:"enabled"`
 }
 
 // V2PromptsConfig stores user-maintained prompt templates for v2 runtime behaviors.
@@ -243,8 +249,13 @@ type ConfigLayer struct {
 
 type V2Layer struct {
 	Collector *V2CollectorLayer `toml:"collector" yaml:"collector"`
+	Sandbox   *V2SandboxLayer   `toml:"sandbox"   yaml:"sandbox"`
 	Agents    *V2AgentsLayerCfg `toml:"agents"    yaml:"agents"`
 	Prompts   *V2PromptsLayer   `toml:"prompts"   yaml:"prompts"`
+}
+
+type V2SandboxLayer struct {
+	Enabled *bool `toml:"enabled" yaml:"enabled"`
 }
 
 type V2PromptsLayer struct {

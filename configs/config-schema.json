@@ -767,6 +767,9 @@
         "collector": {
           "$ref": "#/$defs/V2CollectorConfig"
         },
+        "sandbox": {
+          "$ref": "#/$defs/V2SandboxConfig"
+        },
         "agents": {
           "$ref": "#/$defs/V2AgentsConfig"
         },
@@ -778,6 +781,7 @@
       "required": [
         "mock_executor",
         "collector",
+        "sandbox",
         "agents",
         "prompts"
       ]
@@ -903,6 +907,17 @@
       "required": [
         "rework_followup",
         "continue_followup"
+      ]
+    },
+    "V2SandboxConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled"
       ]
     },
     "V2SessionConfig": {

@@ -547,9 +547,24 @@ func buildServerAddress(host string, port int) string {
 	return net.JoinHostPort(trimmedHost, strconv.Itoa(port))
 }
 
-func buildV2Sandbox(dataDir string) v2sandbox.Sandbox {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("AI_WORKFLOW_ACP_SANDBOX")))
-	if mode == "off" || mode == "0" || mode == "false" {
+func buildV2Sandbox(cfg *config.Config, dataDir string) v2sandbox.Sandbox {
+	// Default: disabled (config-driven).
+	enabled := false
+	if cfg != nil && cfg.V2.Sandbox.Enabled {
+		enabled = true
+	}
+
+	// Optional env override (wins if explicitly set).
+	if raw := strings.TrimSpace(os.Getenv("AI_WORKFLOW_ACP_SANDBOX")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "1", "true", "yes", "on":
+			enabled = true
+		case "0", "false", "no", "off":
+			enabled = false
+		}
+	}
+
+	if !enabled {
 		return v2sandbox.NoopSandbox{}
 	}
 
@@ -780,7 +795,7 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 	if dd, err := resolveDataDir(); err == nil {
 		dataDir = dd
 	}
-	sb := buildV2Sandbox(dataDir)
+	sb := buildV2Sandbox(bootstrapCfg, dataDir)
 
 	// Step executor: by default spawns ACP agent processes. Optionally use a mock executor
 	// for environments without external agent credentials.

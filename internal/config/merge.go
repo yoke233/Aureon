@@ -349,6 +349,11 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 				}
 			}
 		}
+		if sandbox := v2.Sandbox; sandbox != nil {
+			if sandbox.Enabled != nil {
+				cfg.V2.Sandbox.Enabled = *sandbox.Enabled
+			}
+		}
 		if agents := v2.Agents; agents != nil {
 			if agents.Drivers != nil {
 				cfg.V2.Agents.Drivers = cloneV2Drivers(*agents.Drivers)

@@ -136,6 +136,11 @@ max_retries = 2
   # 例如: "gpt-4o-mini"
   model    = "deepseek-v3.2"
 
+# v2 ACP 进程沙箱隔离（每个进程独立 HOME/TMP/skills）。
+# 默认关闭；开启后会影响 agent 的认证/缓存目录位置。
+[v2.sandbox]
+enabled = false
+
 # v2 会话复用（session.reuse=true）时的“增量提示词”。
 # 这些内容会作为同一 session 的后续消息发送，以复用已有上下文和 prompt cache，所以应尽量简短。
 [v2.prompts]

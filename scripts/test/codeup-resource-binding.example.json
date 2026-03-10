@@ -1,0 +1,19 @@
+{
+  "kind": "git",
+  "uri": "D:/repo/xiaoin-rag-service",
+  "label": "codeup-main",
+  "config": {
+    "provider": "codeup",
+    "base_branch": "main",
+    "project_id": 2369234,
+    "source_project_id": 2369234,
+    "target_project_id": 2369234,
+    "reviewer_user_ids": [
+      "user-id-1"
+    ],
+    "work_item_ids": "722200214032b6b31e6f1434ab",
+    "trigger_ai_review_run": false,
+    "remove_source_branch": false,
+    "merge_method": "no-fast-forward"
+  }
+}

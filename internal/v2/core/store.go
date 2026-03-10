@@ -1,0 +1,86 @@
+package core
+
+import "context"
+
+// FlowStore persists Flow aggregates.
+type FlowStore interface {
+	CreateFlow(ctx context.Context, f *Flow) (int64, error)
+	GetFlow(ctx context.Context, id int64) (*Flow, error)
+	ListFlows(ctx context.Context, filter FlowFilter) ([]*Flow, error)
+	UpdateFlowStatus(ctx context.Context, id int64, status FlowStatus) error
+}
+
+// StepStore persists Step aggregates.
+type StepStore interface {
+	CreateStep(ctx context.Context, s *Step) (int64, error)
+	GetStep(ctx context.Context, id int64) (*Step, error)
+	ListStepsByFlow(ctx context.Context, flowID int64) ([]*Step, error)
+	UpdateStepStatus(ctx context.Context, id int64, status StepStatus) error
+	UpdateStep(ctx context.Context, s *Step) error
+}
+
+// ExecutionStore persists Execution aggregates.
+type ExecutionStore interface {
+	CreateExecution(ctx context.Context, e *Execution) (int64, error)
+	GetExecution(ctx context.Context, id int64) (*Execution, error)
+	ListExecutionsByStep(ctx context.Context, stepID int64) ([]*Execution, error)
+	UpdateExecution(ctx context.Context, e *Execution) error
+}
+
+// ArtifactStore persists Artifact records.
+type ArtifactStore interface {
+	CreateArtifact(ctx context.Context, a *Artifact) (int64, error)
+	GetArtifact(ctx context.Context, id int64) (*Artifact, error)
+	GetLatestArtifactByStep(ctx context.Context, stepID int64) (*Artifact, error)
+	ListArtifactsByExecution(ctx context.Context, execID int64) ([]*Artifact, error)
+	UpdateArtifact(ctx context.Context, a *Artifact) error
+}
+
+// BriefingStore persists Briefing records.
+type BriefingStore interface {
+	CreateBriefing(ctx context.Context, b *Briefing) (int64, error)
+	GetBriefing(ctx context.Context, id int64) (*Briefing, error)
+	GetBriefingByStep(ctx context.Context, stepID int64) (*Briefing, error)
+}
+
+// AgentContextStore persists AgentContext records.
+type AgentContextStore interface {
+	CreateAgentContext(ctx context.Context, ac *AgentContext) (int64, error)
+	GetAgentContext(ctx context.Context, id int64) (*AgentContext, error)
+	FindAgentContext(ctx context.Context, agentID string, flowID int64) (*AgentContext, error)
+	UpdateAgentContext(ctx context.Context, ac *AgentContext) error
+}
+
+// EventStore persists domain events.
+type EventStore interface {
+	CreateEvent(ctx context.Context, e *Event) (int64, error)
+	ListEvents(ctx context.Context, filter EventFilter) ([]*Event, error)
+}
+
+// Store is the aggregate interface combining all sub-stores.
+type Store interface {
+	FlowStore
+	StepStore
+	ExecutionStore
+	ArtifactStore
+	BriefingStore
+	AgentContextStore
+	EventStore
+	Close() error
+}
+
+// FlowFilter constrains Flow queries.
+type FlowFilter struct {
+	Status *FlowStatus
+	Limit  int
+	Offset int
+}
+
+// EventFilter constrains Event queries.
+type EventFilter struct {
+	FlowID *int64
+	StepID *int64
+	Types  []EventType
+	Limit  int
+	Offset int
+}

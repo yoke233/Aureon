@@ -1,0 +1,84 @@
+package api
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/yoke233/ai-workflow/internal/v2/core"
+	"github.com/yoke233/ai-workflow/internal/v2/engine"
+)
+
+// Handler is the top-level HTTP handler for the v2 API.
+type Handler struct {
+	store  core.Store
+	bus    core.EventBus
+	engine *engine.FlowEngine
+}
+
+// NewHandler creates the v2 API handler.
+func NewHandler(store core.Store, bus core.EventBus, eng *engine.FlowEngine) *Handler {
+	return &Handler{store: store, bus: bus, engine: eng}
+}
+
+// Register mounts all v2 routes onto the given chi router.
+// Caller is responsible for mounting this under a prefix like /api/v2.
+func (h *Handler) Register(r chi.Router) {
+	// Flows
+	r.Post("/flows", h.createFlow)
+	r.Get("/flows", h.listFlows)
+	r.Get("/flows/{flowID}", h.getFlow)
+	r.Post("/flows/{flowID}/run", h.runFlow)
+	r.Post("/flows/{flowID}/cancel", h.cancelFlow)
+
+	// Steps
+	r.Post("/flows/{flowID}/steps", h.createStep)
+	r.Get("/flows/{flowID}/steps", h.listSteps)
+	r.Get("/steps/{stepID}", h.getStep)
+
+	// Executions
+	r.Get("/steps/{stepID}/executions", h.listExecutions)
+	r.Get("/executions/{execID}", h.getExecution)
+
+	// Artifacts
+	r.Get("/artifacts/{artifactID}", h.getArtifact)
+	r.Get("/steps/{stepID}/artifact", h.getLatestArtifact)
+	r.Get("/executions/{execID}/artifacts", h.listArtifactsByExec)
+
+	// Briefings
+	r.Get("/briefings/{briefingID}", h.getBriefing)
+	r.Get("/steps/{stepID}/briefing", h.getBriefingByStep)
+
+	// Events
+	r.Get("/events", h.listEvents)
+	r.Get("/flows/{flowID}/events", h.listFlowEvents)
+
+	// WebSocket
+	r.Get("/ws", h.wsEvents)
+}
+
+// urlParamInt64 extracts an int64 from a chi URL path parameter.
+func urlParamInt64(r *http.Request, name string) (int64, bool) {
+	s := chi.URLParam(r, name)
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// queryInt parses an optional int query parameter with a default value.
+func queryInt(r *http.Request, name string, defaultVal int) int {
+	s := r.URL.Query().Get(name)
+	if s == "" {
+		return defaultVal
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultVal
+	}
+	return v
+}

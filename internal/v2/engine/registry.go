@@ -253,6 +253,9 @@ func cloneProfile(p *core.AgentProfile) *core.AgentProfile {
 	if p.ActionsAllowed != nil {
 		cp.ActionsAllowed = append([]core.Action(nil), p.ActionsAllowed...)
 	}
+	if p.Skills != nil {
+		cp.Skills = append([]string(nil), p.Skills...)
+	}
 	if p.MCP.Tools != nil {
 		cp.MCP.Tools = append([]string(nil), p.MCP.Tools...)
 	}

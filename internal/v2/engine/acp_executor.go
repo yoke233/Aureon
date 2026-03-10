@@ -5,24 +5,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"text/template"
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/yoke233/ai-workflow/internal/acpclient"
 	"github.com/yoke233/ai-workflow/internal/teamleader"
 	"github.com/yoke233/ai-workflow/internal/v2/core"
+	v2sandbox "github.com/yoke233/ai-workflow/internal/v2/sandbox"
 )
 
 // ACPExecutorConfig configures the ACP step executor.
 type ACPExecutorConfig struct {
-	Registry       core.AgentRegistry
-	Store          core.Store
-	Bus            core.EventBus
-	DefaultWorkDir string
-	MCPEnv         teamleader.MCPEnvConfig
+	Registry                 core.AgentRegistry
+	Store                    core.Store
+	Bus                      core.EventBus
+	DefaultWorkDir           string
+	MCPEnv                   teamleader.MCPEnvConfig
+	SessionPool              *ACPSessionPool
+	ReworkFollowupTemplate   string
+	ContinueFollowupTemplate string
+	Sandbox                  v2sandbox.Sandbox
 }
 
 // NewACPStepExecutor creates a StepExecutor that spawns ACP agent processes.
@@ -49,7 +56,7 @@ func NewACPStepExecutor(cfg ACPExecutorConfig) StepExecutor {
 			Command: driver.LaunchCommand,
 			Args:    driver.LaunchArgs,
 			WorkDir: workDir,
-			Env:     driver.Env,
+			Env:     cloneEnv(driver.Env),
 		}
 
 		bridge := NewEventBridge(cfg.Bus, core.EventExecAgentOutput, EventBridgeScope{
@@ -65,36 +72,131 @@ func NewACPStepExecutor(cfg ACPExecutorConfig) StepExecutor {
 			Terminal: caps.Terminal,
 		}
 
-		client, err := acpclient.New(launchCfg, &acpclient.NopHandler{},
-			acpclient.WithEventHandler(bridge))
-		if err != nil {
-			return fmt.Errorf("launch ACP agent %q: %w", driver.ID, err)
-		}
-		defer client.Close(context.Background())
+		reuse := profile.Session.Reuse && cfg.SessionPool != nil
 
-		if err := client.Initialize(ctx, acpCaps); err != nil {
-			return fmt.Errorf("initialize ACP agent %q: %w", driver.ID, err)
-		}
+		var (
+			client    *acpclient.Client
+			sessionID acpproto.SessionId
+			lockMu    *sync.Mutex
+			turns     *int
+			ac        *core.AgentContext
+			pooled    *pooledACPSession
+		)
 
-		var mcpServers []acpproto.McpServer
-		if profile.MCP.Enabled {
+		if reuse {
 			roleProfile := acpclient.RoleProfile{
 				ID:         profile.ID,
-				MCPEnabled: true,
+				MCPEnabled: profile.MCP.Enabled,
 				MCPTools:   append([]string(nil), profile.MCP.Tools...),
 			}
-			mcpServers = teamleader.MCPToolsFromRoleConfig(roleProfile, cfg.MCPEnv, client.SupportsSSEMCP())
+			sb := cfg.Sandbox
+			if sb == nil {
+				sb = v2sandbox.NoopSandbox{}
+			}
+			sandboxedLaunch, sbErr := sb.Prepare(ctx, v2sandbox.PrepareInput{
+				Profile: profile,
+				Driver:  driver,
+				Launch:  launchCfg,
+				Scope:   fmt.Sprintf("flow-%d", step.FlowID),
+			})
+			if sbErr != nil {
+				return fmt.Errorf("prepare sandbox: %w", sbErr)
+			}
+			launchCfg = sandboxedLaunch
+			sess, agentCtx, err := cfg.SessionPool.Acquire(ctx, acpSessionAcquireInput{
+				Profile: profile,
+				Driver:  driver,
+				Launch:  launchCfg,
+				Caps:    acpCaps,
+				WorkDir: workDir,
+				MCPFactory: func(agentSupportsSSE bool) []acpproto.McpServer {
+					return teamleader.MCPToolsFromRoleConfig(roleProfile, cfg.MCPEnv, agentSupportsSSE)
+				},
+				FlowID:   step.FlowID,
+				StepID:   step.ID,
+				ExecID:   exec.ID,
+				IdleTTL:  profile.Session.IdleTTL,
+				MaxTurns: profile.Session.MaxTurns,
+			})
+			if err != nil {
+				return err
+			}
+			pooled = sess
+			ac = agentCtx
+			if ac != nil && ac.ID > 0 {
+				exec.AgentContextID = &ac.ID
+			}
+
+			// Route streaming events to the current bridge.
+			if sess != nil && sess.events != nil {
+				sess.events.Set(bridge)
+				defer sess.events.Set(nil)
+			}
+
+			client = sess.client
+			sessionID = sess.sessionID
+			lockMu = &sess.mu
+			turns = &sess.turns
+		} else {
+			sb := cfg.Sandbox
+			if sb == nil {
+				sb = v2sandbox.NoopSandbox{}
+			}
+			sandboxedLaunch, sbErr := sb.Prepare(ctx, v2sandbox.PrepareInput{
+				Profile: profile,
+				Driver:  driver,
+				Launch:  launchCfg,
+				Scope:   fmt.Sprintf("flow-%d-exec-%d", step.FlowID, exec.ID),
+			})
+			if sbErr != nil {
+				return fmt.Errorf("prepare sandbox: %w", sbErr)
+			}
+			launchCfg = sandboxedLaunch
+			handler := teamleader.NewACPHandler(workDir, "", nil)
+			handler.SetSuppressEvents(true)
+			client, err = acpclient.New(launchCfg, handler,
+				acpclient.WithEventHandler(bridge))
+			if err != nil {
+				return fmt.Errorf("launch ACP agent %q: %w", driver.ID, err)
+			}
+			defer client.Close(context.Background())
+
+			if err := client.Initialize(ctx, acpCaps); err != nil {
+				return fmt.Errorf("initialize ACP agent %q: %w", driver.ID, err)
+			}
+
+			var mcpServers []acpproto.McpServer
+			if profile.MCP.Enabled {
+				roleProfile := acpclient.RoleProfile{
+					ID:         profile.ID,
+					MCPEnabled: true,
+					MCPTools:   append([]string(nil), profile.MCP.Tools...),
+				}
+				mcpServers = teamleader.MCPToolsFromRoleConfig(roleProfile, cfg.MCPEnv, client.SupportsSSEMCP())
+			}
+
+			sid, err := client.NewSession(ctx, acpproto.NewSessionRequest{
+				Cwd:        workDir,
+				McpServers: mcpServers,
+			})
+			if err != nil {
+				return fmt.Errorf("create ACP session: %w", err)
+			}
+			sessionID = sid
+			handler.SetSessionID(string(sessionID))
 		}
 
-		sessionID, err := client.NewSession(ctx, acpproto.NewSessionRequest{
-			Cwd:        workDir,
-			McpServers: mcpServers,
-		})
-		if err != nil {
-			return fmt.Errorf("create ACP session: %w", err)
+		hasPriorTurns := false
+		if turns != nil && *turns > 0 {
+			hasPriorTurns = true
 		}
 
-		prompt := buildPromptFromBriefing(exec.BriefingSnapshot, step)
+		prompt := buildPromptForStep(profile, exec.BriefingSnapshot, step, hasPriorTurns, cfg.ReworkFollowupTemplate, cfg.ContinueFollowupTemplate)
+
+		if lockMu != nil {
+			lockMu.Lock()
+			defer lockMu.Unlock()
+		}
 
 		result, err := client.Prompt(ctx, acpproto.PromptRequest{
 			SessionId: sessionID,
@@ -104,6 +206,10 @@ func NewACPStepExecutor(cfg ACPExecutorConfig) StepExecutor {
 		})
 		if err != nil {
 			return fmt.Errorf("ACP prompt failed: %w", err)
+		}
+
+		if reuse && pooled != nil {
+			cfg.SessionPool.NoteTurn(ctx, ac, pooled)
 		}
 
 		// Flush any remaining accumulated chunks.
@@ -125,6 +231,9 @@ func NewACPStepExecutor(cfg ACPExecutorConfig) StepExecutor {
 			StepID:         step.ID,
 			FlowID:         step.FlowID,
 			ResultMarkdown: replyText,
+		}
+		if step.Type == core.StepGate {
+			art.Metadata = extractGateMetadata(replyText)
 		}
 		artID, err := cfg.Store.CreateArtifact(ctx, art)
 		if err != nil {
@@ -149,6 +258,34 @@ func NewACPStepExecutor(cfg ACPExecutorConfig) StepExecutor {
 	}
 }
 
+var reGateJSONLine = regexp.MustCompile(`(?m)^AI_WORKFLOW_GATE_JSON:\s*(\{.*\})\s*$`)
+
+// extractGateMetadata parses a deterministic JSON line emitted by the reviewer agent.
+// Expected format (single line):
+//
+//	AI_WORKFLOW_GATE_JSON: {"verdict":"pass"|"reject","reason":"...","reject_targets":[1,2,3]}
+func extractGateMetadata(markdown string) map[string]any {
+	m := reGateJSONLine.FindAllStringSubmatch(markdown, -1)
+	if len(m) == 0 {
+		return map[string]any{"verdict": "pass"}
+	}
+	raw := strings.TrimSpace(m[len(m)-1][1])
+	if raw == "" {
+		return map[string]any{"verdict": "pass"}
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return map[string]any{"verdict": "reject", "reason": "invalid gate json"}
+	}
+	verdict, _ := parsed["verdict"].(string)
+	verdict = strings.ToLower(strings.TrimSpace(verdict))
+	if verdict != "reject" {
+		verdict = "pass"
+	}
+	parsed["verdict"] = verdict
+	return parsed
+}
+
 // buildPromptFromBriefing constructs the prompt text sent to the ACP agent.
 func buildPromptFromBriefing(snapshot string, step *core.Step) string {
 	var sb strings.Builder
@@ -165,6 +302,122 @@ func buildPromptFromBriefing(snapshot string, step *core.Step) string {
 	}
 
 	return sb.String()
+}
+
+func cloneEnv(in map[string]string) map[string]string {
+	if in == nil {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func buildPromptForStep(profile *core.AgentProfile, snapshot string, step *core.Step, hasPriorTurns bool, reworkTmpl string, continueTmpl string) string {
+	// For gate steps, always repeat the full instruction block to ensure deterministic output.
+	if step != nil && step.Type == core.StepGate {
+		return buildPromptFromBriefing(snapshot, step)
+	}
+
+	feedback := latestGateFeedback(step)
+	// If the agent is in a reused session and we already have prior turns, send only the incremental
+	// feedback to preserve prompt caching and leverage the existing context window.
+	if profile != nil && profile.Session.Reuse && hasPriorTurns {
+		if feedback != "" {
+			return renderFollowupPrompt(reworkTmpl, followupVars{Feedback: feedback, StepName: stepName(step)})
+		}
+		// No explicit feedback — continue without re-sending the full base prompt.
+		return renderFollowupPrompt(continueTmpl, followupVars{StepName: stepName(step)})
+	}
+
+	// Default: full base prompt + optional feedback section.
+	base := buildPromptFromBriefing(snapshot, step)
+	if feedback == "" {
+		return base
+	}
+	return base + "\n\n# Gate Feedback (Rework)\n\n" + feedback + "\n"
+}
+
+func latestGateFeedback(step *core.Step) string {
+	if step == nil || step.Config == nil {
+		return ""
+	}
+	last, _ := step.Config["last_gate_feedback"].(map[string]any)
+	if last == nil {
+		// Fall back to the end of rework_history.
+		if arr, ok := step.Config["rework_history"].([]any); ok && len(arr) > 0 {
+			if m, ok := arr[len(arr)-1].(map[string]any); ok {
+				last = m
+			}
+		}
+	}
+	if last == nil {
+		return ""
+	}
+	reason, _ := last["reason"].(string)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Reason: ")
+	sb.WriteString(reason)
+	if prURL, ok := last["pr_url"].(string); ok && strings.TrimSpace(prURL) != "" {
+		sb.WriteString("\nPR: ")
+		sb.WriteString(strings.TrimSpace(prURL))
+	}
+	if n, ok := last["pr_number"]; ok {
+		sb.WriteString("\nPR Number: ")
+		sb.WriteString(fmt.Sprint(n))
+	}
+	return sb.String()
+}
+
+type followupVars struct {
+	Feedback string
+	StepName string
+}
+
+func stepName(step *core.Step) string {
+	if step == nil {
+		return ""
+	}
+	return strings.TrimSpace(step.Name)
+}
+
+func renderFollowupPrompt(tmplText string, vars followupVars) string {
+	// Safe fallback: no template provided.
+	if strings.TrimSpace(tmplText) == "" {
+		if strings.TrimSpace(vars.Feedback) == "" {
+			if vars.StepName == "" {
+				return "# Continue\n\n请继续完成当前任务（复用已有上下文）。\n"
+			}
+			return "# Continue\n\n请继续完成本 step（复用已有上下文）： " + vars.StepName + "\n"
+		}
+		if vars.StepName == "" {
+			return "# Rework Requested\n\n反馈：\n" + vars.Feedback + "\n"
+		}
+		return "# Rework Requested\n\n(step: " + vars.StepName + ")\n\n反馈：\n" + vars.Feedback + "\n"
+	}
+
+	tmpl, err := template.New("v2-followup").Parse(tmplText)
+	if err != nil {
+		// Never fail the execution due to prompt template issues.
+		slog.Warn("v2 followup prompt: invalid template", "error", err)
+		return "# Rework Requested\n\n反馈：\n" + vars.Feedback + "\n"
+	}
+	var b strings.Builder
+	if err := tmpl.Execute(&b, vars); err != nil {
+		slog.Warn("v2 followup prompt: render failed", "error", err)
+		return "# Rework Requested\n\n反馈：\n" + vars.Feedback + "\n"
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return "# Rework Requested\n\n反馈：\n" + vars.Feedback + "\n"
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

@@ -136,6 +136,26 @@ max_retries = 2
   # 例如: "gpt-4o-mini"
   model    = "deepseek-v3.2"
 
+# v2 会话复用（session.reuse=true）时的“增量提示词”。
+# 这些内容会作为同一 session 的后续消息发送，以复用已有上下文和 prompt cache，所以应尽量简短。
+[v2.prompts]
+rework_followup = """
+# Rework Requested
+
+上一轮提交未通过 gate，请根据反馈继续修改并在本地跑必要测试（不要只做 smoke）。
+
+反馈：
+{{.Feedback}}
+
+请回复：你改了什么、怎么验证的、以及是否需要进一步协助。
+"""
+
+continue_followup = """
+# Continue
+
+请继续完成本 step（复用已有上下文，不要重复粘贴大段背景）：{{.StepName}}
+"""
+
 # ─── V2 Agent Drivers & Profiles ─────────────────────────────────
 # Driver = 进程启动配置（共享二进制）
 # Profile = 角色实例（绑定 driver + 能力 + 动作白名单）
@@ -166,6 +186,7 @@ max_retries = 2
 # driver          = "claude-acp"
 # role            = "lead"
 # capabilities    = ["planning", "code.review", "dev.fullstack"]
+# skills          = ["writing-wave-plans", "executing-wave-plans"]
 # actions_allowed = ["read_context", "search_files", "fs_write", "terminal", "create_step", "expand_flow", "submit"]
 # prompt_template = "team_leader"
 # [v2.agents.profiles.session]

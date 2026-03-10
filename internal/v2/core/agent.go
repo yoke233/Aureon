@@ -16,17 +16,17 @@ const (
 type Action string
 
 const (
-	ActionReadContext  Action = "read_context"
-	ActionSearchFiles  Action = "search_files"
-	ActionFSWrite      Action = "fs_write"
-	ActionTerminal     Action = "terminal"
-	ActionSubmit       Action = "submit"
-	ActionMarkBlocked  Action = "mark_blocked"
-	ActionRequestHelp  Action = "request_help"
-	ActionApprove      Action = "approve"
-	ActionReject       Action = "reject"
-	ActionCreateStep   Action = "create_step"
-	ActionExpandFlow   Action = "expand_flow"
+	ActionReadContext Action = "read_context"
+	ActionSearchFiles Action = "search_files"
+	ActionFSWrite     Action = "fs_write"
+	ActionTerminal    Action = "terminal"
+	ActionSubmit      Action = "submit"
+	ActionMarkBlocked Action = "mark_blocked"
+	ActionRequestHelp Action = "request_help"
+	ActionApprove     Action = "approve"
+	ActionReject      Action = "reject"
+	ActionCreateStep  Action = "create_step"
+	ActionExpandFlow  Action = "expand_flow"
 )
 
 // AgentProfile defines an agent's identity, role, capabilities, and constraints.
@@ -39,6 +39,7 @@ type AgentProfile struct {
 	Capabilities   []string  `json:"capabilities,omitempty"`    // capability tags (dev.backend, test.qa, ...)
 	ActionsAllowed []Action  `json:"actions_allowed,omitempty"` // permitted actions
 	PromptTemplate string    `json:"prompt_template,omitempty"`
+	Skills         []string  `json:"skills,omitempty"` // skill folder names to enable for this profile
 
 	Session ProfileSession `json:"session,omitempty"`
 	MCP     ProfileMCP     `json:"mcp,omitempty"`

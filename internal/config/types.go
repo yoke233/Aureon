@@ -48,8 +48,20 @@ type LLMFilterConfig struct {
 
 // V2Config holds configuration for the v2 engine runtime.
 type V2Config struct {
-	Collector V2CollectorConfig `toml:"collector" yaml:"collector"`
-	Agents    V2AgentsConfig    `toml:"agents"    yaml:"agents"`
+	// MockExecutor makes v2 step execution use an in-process stub instead of ACP agents.
+	// Useful for smoke tests and environments without LLM credentials.
+	MockExecutor bool              `toml:"mock_executor" yaml:"mock_executor"`
+	Collector    V2CollectorConfig `toml:"collector" yaml:"collector"`
+	Agents       V2AgentsConfig    `toml:"agents"    yaml:"agents"`
+	Prompts      V2PromptsConfig   `toml:"prompts"   yaml:"prompts"`
+}
+
+// V2PromptsConfig stores user-maintained prompt templates for v2 runtime behaviors.
+// These prompts are used as incremental messages when reusing ACP sessions, so they
+// should be concise to preserve prompt caching and reuse existing context.
+type V2PromptsConfig struct {
+	ReworkFollowup   string `toml:"rework_followup"   yaml:"rework_followup"`
+	ContinueFollowup string `toml:"continue_followup" yaml:"continue_followup"`
 }
 
 // V2AgentsConfig defines agent drivers and profiles for the v2 engine.
@@ -76,6 +88,7 @@ type V2ProfileConfig struct {
 	Capabilities   []string        `toml:"capabilities"    yaml:"capabilities"`
 	ActionsAllowed []string        `toml:"actions_allowed" yaml:"actions_allowed"`
 	PromptTemplate string          `toml:"prompt_template" yaml:"prompt_template"`
+	Skills         []string        `toml:"skills"          yaml:"skills"`
 	Session        V2SessionConfig `toml:"session"         yaml:"session"`
 	MCP            MCPConfig       `toml:"mcp"             yaml:"mcp"`
 }
@@ -229,8 +242,14 @@ type ConfigLayer struct {
 }
 
 type V2Layer struct {
-	Collector *V2CollectorLayer  `toml:"collector" yaml:"collector"`
-	Agents    *V2AgentsLayerCfg  `toml:"agents"    yaml:"agents"`
+	Collector *V2CollectorLayer `toml:"collector" yaml:"collector"`
+	Agents    *V2AgentsLayerCfg `toml:"agents"    yaml:"agents"`
+	Prompts   *V2PromptsLayer   `toml:"prompts"   yaml:"prompts"`
+}
+
+type V2PromptsLayer struct {
+	ReworkFollowup   *string `toml:"rework_followup"   yaml:"rework_followup"`
+	ContinueFollowup *string `toml:"continue_followup" yaml:"continue_followup"`
 }
 
 type V2AgentsLayerCfg struct {

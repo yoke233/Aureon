@@ -196,6 +196,12 @@
         },
         "log": {
           "$ref": "#/$defs/LogConfig"
+        },
+        "llm_filter": {
+          "$ref": "#/$defs/LLMFilterConfig"
+        },
+        "v2": {
+          "$ref": "#/$defs/V2Config"
         }
       },
       "type": "object",
@@ -211,7 +217,9 @@
         "github",
         "store",
         "context",
-        "log"
+        "log",
+        "llm_filter",
+        "v2"
       ]
     },
     "ContextConfig": {
@@ -369,6 +377,25 @@
         "reviewers",
         "labels",
         "branch_prefix"
+      ]
+    },
+    "LLMFilterConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled",
+        "provider",
+        "model"
       ]
     },
     "LogConfig": {
@@ -590,12 +617,16 @@
         "max_project_runs": {
           "type": "integer",
           "description": "每个项目最多的并发 run 数"
+        },
+        "watchdog": {
+          "$ref": "#/$defs/WatchdogConfig"
         }
       },
       "type": "object",
       "required": [
         "max_global_agents",
-        "max_project_runs"
+        "max_project_runs",
+        "watchdog"
       ]
     },
     "ServerConfig": {
@@ -607,22 +638,12 @@
         "port": {
           "type": "integer",
           "description": "监听端口"
-        },
-        "auth_enabled": {
-          "type": "boolean",
-          "description": "是否启用 API 认证"
-        },
-        "auth_token": {
-          "type": "string",
-          "description": "API 认证 token"
         }
       },
       "type": "object",
       "required": [
         "host",
-        "port",
-        "auth_enabled",
-        "auth_token"
+        "port"
       ]
     },
     "SessionConfig": {
@@ -700,6 +721,264 @@
         "review_gate_plugin",
         "review_orchestrator",
         "dag_scheduler"
+      ]
+    },
+    "V2AgentsConfig": {
+      "properties": {
+        "drivers": {
+          "items": {
+            "$ref": "#/$defs/V2DriverConfig"
+          },
+          "type": "array"
+        },
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/V2ProfileConfig"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "required": [
+        "drivers",
+        "profiles"
+      ]
+    },
+    "V2CollectorConfig": {
+      "properties": {
+        "max_retries": {
+          "type": "integer"
+        },
+        "openai": {
+          "$ref": "#/$defs/V2OpenAIConfig"
+        }
+      },
+      "type": "object",
+      "required": [
+        "max_retries",
+        "openai"
+      ]
+    },
+    "V2Config": {
+      "properties": {
+        "mock_executor": {
+          "type": "boolean"
+        },
+        "collector": {
+          "$ref": "#/$defs/V2CollectorConfig"
+        },
+        "agents": {
+          "$ref": "#/$defs/V2AgentsConfig"
+        },
+        "prompts": {
+          "$ref": "#/$defs/V2PromptsConfig"
+        }
+      },
+      "type": "object",
+      "required": [
+        "mock_executor",
+        "collector",
+        "agents",
+        "prompts"
+      ]
+    },
+    "V2DriverConfig": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "launch_command": {
+          "type": "string"
+        },
+        "launch_args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "capabilities_max": {
+          "$ref": "#/$defs/CapabilitiesConfig"
+        }
+      },
+      "type": "object",
+      "required": [
+        "id",
+        "launch_command",
+        "launch_args",
+        "env",
+        "capabilities_max"
+      ]
+    },
+    "V2OpenAIConfig": {
+      "properties": {
+        "base_url": {
+          "type": "string"
+        },
+        "api_key": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "base_url",
+        "api_key",
+        "model"
+      ]
+    },
+    "V2ProfileConfig": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "actions_allowed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt_template": {
+          "type": "string"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "session": {
+          "$ref": "#/$defs/V2SessionConfig"
+        },
+        "mcp": {
+          "$ref": "#/$defs/MCPConfig"
+        }
+      },
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "driver",
+        "role",
+        "capabilities",
+        "actions_allowed",
+        "prompt_template",
+        "skills",
+        "session",
+        "mcp"
+      ]
+    },
+    "V2PromptsConfig": {
+      "properties": {
+        "rework_followup": {
+          "type": "string"
+        },
+        "continue_followup": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "rework_followup",
+        "continue_followup"
+      ]
+    },
+    "V2SessionConfig": {
+      "properties": {
+        "reuse": {
+          "type": "boolean"
+        },
+        "max_turns": {
+          "type": "integer"
+        },
+        "idle_ttl": {
+          "type": "string",
+          "examples": [
+            "2h",
+            "30m",
+            "10s",
+            "500ms"
+          ]
+        }
+      },
+      "type": "object",
+      "required": [
+        "reuse",
+        "max_turns",
+        "idle_ttl"
+      ]
+    },
+    "WatchdogConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string",
+          "examples": [
+            "2h",
+            "30m",
+            "10s",
+            "500ms"
+          ]
+        },
+        "stuck_run_ttl": {
+          "type": "string",
+          "examples": [
+            "2h",
+            "30m",
+            "10s",
+            "500ms"
+          ]
+        },
+        "stuck_merge_ttl": {
+          "type": "string",
+          "examples": [
+            "2h",
+            "30m",
+            "10s",
+            "500ms"
+          ]
+        },
+        "queue_stale_ttl": {
+          "type": "string",
+          "examples": [
+            "2h",
+            "30m",
+            "10s",
+            "500ms"
+          ]
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled",
+        "interval",
+        "stuck_run_ttl",
+        "stuck_merge_ttl",
+        "queue_stale_ttl"
       ]
     }
   },

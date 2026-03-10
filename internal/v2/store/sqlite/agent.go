@@ -137,7 +137,7 @@ func (s *Store) GetProfile(ctx context.Context, id string) (*core.AgentProfile, 
 	return s.scanProfile(s.db.QueryRowContext(ctx,
 		`SELECT id, name, driver_id, role, capabilities, actions_allowed,
 		        prompt_template, session_reuse, session_max_turns, session_idle_ttl_ms,
-		        mcp_enabled, mcp_tools
+		        mcp_enabled, mcp_tools, skills
 		 FROM agent_profiles WHERE id = ?`, id))
 }
 
@@ -145,7 +145,7 @@ func (s *Store) ListProfiles(ctx context.Context) ([]*core.AgentProfile, error) 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, driver_id, role, capabilities, actions_allowed,
 		        prompt_template, session_reuse, session_max_turns, session_idle_ttl_ms,
-		        mcp_enabled, mcp_tools
+		        mcp_enabled, mcp_tools, skills
 		 FROM agent_profiles ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list profiles: %w", err)
@@ -195,15 +195,18 @@ func (s *Store) UpdateProfile(ctx context.Context, p *core.AgentProfile) error {
 	caps, _ := marshalJSON(p.Capabilities)
 	actions, _ := marshalJSON(p.ActionsAllowed)
 	mcpTools, _ := marshalJSON(p.MCP.Tools)
+	skills, _ := marshalJSON(p.Skills)
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE agent_profiles SET name = ?, driver_id = ?, role = ?,
 		        capabilities = ?, actions_allowed = ?, prompt_template = ?,
+		        skills = ?,
 		        session_reuse = ?, session_max_turns = ?, session_idle_ttl_ms = ?,
 		        mcp_enabled = ?, mcp_tools = ?, updated_at = ?
 		 WHERE id = ?`,
 		p.Name, p.DriverID, string(p.Role),
 		caps, actions, p.PromptTemplate,
+		skills,
 		p.Session.Reuse, p.Session.MaxTurns, p.Session.IdleTTL.Milliseconds(),
 		p.MCP.Enabled, mcpTools, now,
 		p.ID)
@@ -277,14 +280,15 @@ func (s *Store) insertProfile(ctx context.Context, p *core.AgentProfile) error {
 	caps, _ := marshalJSON(p.Capabilities)
 	actions, _ := marshalJSON(p.ActionsAllowed)
 	mcpTools, _ := marshalJSON(p.MCP.Tools)
+	skills, _ := marshalJSON(p.Skills)
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO agent_profiles (id, name, driver_id, role, capabilities, actions_allowed,
-		        prompt_template, session_reuse, session_max_turns, session_idle_ttl_ms,
+		        prompt_template, skills, session_reuse, session_max_turns, session_idle_ttl_ms,
 		        mcp_enabled, mcp_tools, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.DriverID, string(p.Role),
-		caps, actions, p.PromptTemplate,
+		caps, actions, p.PromptTemplate, skills,
 		p.Session.Reuse, p.Session.MaxTurns, p.Session.IdleTTL.Milliseconds(),
 		p.MCP.Enabled, mcpTools, now, now)
 	if err != nil {
@@ -296,13 +300,13 @@ func (s *Store) insertProfile(ctx context.Context, p *core.AgentProfile) error {
 // scanProfile scans a single profile row from QueryRow.
 func (s *Store) scanProfile(row *sql.Row) (*core.AgentProfile, error) {
 	p := &core.AgentProfile{}
-	var caps, actions, mcpTools sql.NullString
+	var caps, actions, mcpTools, skills sql.NullString
 	var role string
 	var idleTTLMs int64
 	err := row.Scan(&p.ID, &p.Name, &p.DriverID, &role,
 		&caps, &actions, &p.PromptTemplate,
 		&p.Session.Reuse, &p.Session.MaxTurns, &idleTTLMs,
-		&p.MCP.Enabled, &mcpTools)
+		&p.MCP.Enabled, &mcpTools, &skills)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: scanned", core.ErrProfileNotFound)
 	}
@@ -314,19 +318,20 @@ func (s *Store) scanProfile(row *sql.Row) (*core.AgentProfile, error) {
 	unmarshalNullJSON(caps, &p.Capabilities)
 	unmarshalNullJSON(actions, &p.ActionsAllowed)
 	unmarshalNullJSON(mcpTools, &p.MCP.Tools)
+	unmarshalNullJSON(skills, &p.Skills)
 	return p, nil
 }
 
 // scanProfileRow scans a profile from Rows (used in ListProfiles).
 func (s *Store) scanProfileRow(rows *sql.Rows) (*core.AgentProfile, error) {
 	p := &core.AgentProfile{}
-	var caps, actions, mcpTools sql.NullString
+	var caps, actions, mcpTools, skills sql.NullString
 	var role string
 	var idleTTLMs int64
 	if err := rows.Scan(&p.ID, &p.Name, &p.DriverID, &role,
 		&caps, &actions, &p.PromptTemplate,
 		&p.Session.Reuse, &p.Session.MaxTurns, &idleTTLMs,
-		&p.MCP.Enabled, &mcpTools); err != nil {
+		&p.MCP.Enabled, &mcpTools, &skills); err != nil {
 		return nil, fmt.Errorf("scan profile row: %w", err)
 	}
 	p.Role = core.AgentRole(role)
@@ -334,6 +339,7 @@ func (s *Store) scanProfileRow(rows *sql.Rows) (*core.AgentProfile, error) {
 	unmarshalNullJSON(caps, &p.Capabilities)
 	unmarshalNullJSON(actions, &p.ActionsAllowed)
 	unmarshalNullJSON(mcpTools, &p.MCP.Tools)
+	unmarshalNullJSON(skills, &p.Skills)
 	return p, nil
 }
 
@@ -365,12 +371,13 @@ func (s *Store) UpsertProfile(ctx context.Context, p *core.AgentProfile) error {
 	caps, _ := marshalJSON(p.Capabilities)
 	actions, _ := marshalJSON(p.ActionsAllowed)
 	mcpTools, _ := marshalJSON(p.MCP.Tools)
+	skills, _ := marshalJSON(p.Skills)
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO agent_profiles (id, name, driver_id, role, capabilities, actions_allowed,
-		        prompt_template, session_reuse, session_max_turns, session_idle_ttl_ms,
+		        prompt_template, skills, session_reuse, session_max_turns, session_idle_ttl_ms,
 		        mcp_enabled, mcp_tools, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		    name = excluded.name,
 		    driver_id = excluded.driver_id,
@@ -378,6 +385,7 @@ func (s *Store) UpsertProfile(ctx context.Context, p *core.AgentProfile) error {
 		    capabilities = excluded.capabilities,
 		    actions_allowed = excluded.actions_allowed,
 		    prompt_template = excluded.prompt_template,
+		    skills = excluded.skills,
 		    session_reuse = excluded.session_reuse,
 		    session_max_turns = excluded.session_max_turns,
 		    session_idle_ttl_ms = excluded.session_idle_ttl_ms,
@@ -385,7 +393,7 @@ func (s *Store) UpsertProfile(ctx context.Context, p *core.AgentProfile) error {
 		    mcp_tools = excluded.mcp_tools,
 		    updated_at = excluded.updated_at`,
 		p.ID, p.Name, p.DriverID, string(p.Role),
-		caps, actions, p.PromptTemplate,
+		caps, actions, p.PromptTemplate, skills,
 		p.Session.Reuse, p.Session.MaxTurns, p.Session.IdleTTL.Milliseconds(),
 		p.MCP.Enabled, mcpTools, now, now)
 	return err

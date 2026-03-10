@@ -28,6 +28,7 @@ import (
 	v2core "github.com/yoke233/ai-workflow/internal/v2/core"
 	v2engine "github.com/yoke233/ai-workflow/internal/v2/engine"
 	v2llm "github.com/yoke233/ai-workflow/internal/v2/llm"
+	v2sandbox "github.com/yoke233/ai-workflow/internal/v2/sandbox"
 	v2sqlite "github.com/yoke233/ai-workflow/internal/v2/store/sqlite"
 	"github.com/yoke233/ai-workflow/internal/web"
 )
@@ -336,7 +337,10 @@ func runServer(ctx context.Context, args []string) error {
 		ServerAddr: "http://" + listenAddr,
 		AuthToken:  adminToken,
 	}
-	_, _, v2Cleanup, v2RouteRegistrar := bootstrapV2(expandStorePath(cfg.Store.Path), bootstrapSet.RoleResolver, cfg, v2MCPEnv)
+	_, _, v2Cleanup, v2RouteRegistrar := bootstrapV2(expandStorePath(cfg.Store.Path), bootstrapSet.RoleResolver, cfg, v2MCPEnv, v2GitHubTokens{
+		CommitPAT: strings.TrimSpace(secrets.CommitPAT),
+		MergePAT:  strings.TrimSpace(secrets.MergePAT),
+	})
 	if v2Cleanup != nil {
 		defer v2Cleanup()
 	}
@@ -543,6 +547,25 @@ func buildServerAddress(host string, port int) string {
 	return net.JoinHostPort(trimmedHost, strconv.Itoa(port))
 }
 
+func buildV2Sandbox(dataDir string) v2sandbox.Sandbox {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("AI_WORKFLOW_ACP_SANDBOX")))
+	if mode == "off" || mode == "0" || mode == "false" {
+		return v2sandbox.NoopSandbox{}
+	}
+
+	requireAuth := false
+	if raw := strings.ToLower(strings.TrimSpace(os.Getenv("AI_WORKFLOW_CODEX_REQUIRE_AUTH"))); raw != "" {
+		switch raw {
+		case "1", "true", "yes", "on":
+			requireAuth = true
+		}
+	}
+	return v2sandbox.HomeDirSandbox{
+		DataDir:          dataDir,
+		RequireCodexAuth: requireAuth,
+	}
+}
+
 func buildMCPDeps(issueManager serverIssueManager, exec *engine.Executor, store core.Store) web.MCPDeps {
 	var deps web.MCPDeps
 	if adapter, ok := issueManager.(*teamLeaderIssueManagerAdapter); ok {
@@ -635,6 +658,9 @@ func seedV2Registry(ctx context.Context, store *v2sqlite.Store, cfg *config.Conf
 		return
 	}
 
+	// Ensure PR automation reviewer profile exists (gate role + terminal capability) for v2 flows.
+	drivers, profiles = ensureV2PRReviewer(drivers, profiles)
+
 	// Upsert drivers first (profiles reference them).
 	for _, d := range drivers {
 		if err := store.UpsertDriver(ctx, d); err != nil {
@@ -647,6 +673,61 @@ func seedV2Registry(ctx context.Context, store *v2sqlite.Store, cfg *config.Conf
 		}
 	}
 	slog.Info("v2 registry: seeded from config", "drivers", len(drivers), "profiles", len(profiles))
+}
+
+func ensureV2PRReviewer(drivers []*v2core.AgentDriver, profiles []*v2core.AgentProfile) ([]*v2core.AgentDriver, []*v2core.AgentProfile) {
+	const reviewerID = "pr-reviewer"
+	for _, p := range profiles {
+		if p != nil && p.ID == reviewerID {
+			return drivers, profiles
+		}
+	}
+
+	// Prefer existing "codex" driver from v1-derived config; otherwise, seed a default codex driver.
+	hasCodex := false
+	for _, d := range drivers {
+		if d != nil && strings.TrimSpace(d.ID) == "codex" {
+			hasCodex = true
+			break
+		}
+	}
+	if !hasCodex {
+		drivers = append(drivers, &v2core.AgentDriver{
+			ID:            "codex",
+			LaunchCommand: "npx",
+			LaunchArgs:    []string{"-y", "@zed-industries/codex-acp"},
+			CapabilitiesMax: v2core.DriverCapabilities{
+				FSRead:   true,
+				FSWrite:  true,
+				Terminal: true,
+			},
+		})
+	}
+
+	profiles = append(profiles, &v2core.AgentProfile{
+		ID:       reviewerID,
+		Name:     "PR Reviewer (Codex)",
+		DriverID: "codex",
+		Role:     v2core.RoleGate,
+		// Used to ensure selection when RequiredCapabilities includes "pr.review".
+		Capabilities: []string{"pr.review"},
+		// Gate needs terminal to run git status/diff.
+		ActionsAllowed: []v2core.Action{
+			v2core.ActionReadContext,
+			v2core.ActionSearchFiles,
+			v2core.ActionTerminal,
+			v2core.ActionApprove,
+			v2core.ActionReject,
+			v2core.ActionSubmit,
+		},
+		PromptTemplate: "review",
+		Session: v2core.ProfileSession{
+			Reuse:    true,
+			MaxTurns: 12,
+		},
+	})
+
+	return drivers, profiles
 }
 
 // inferV2Role maps v1 role names to v2 AgentRole.
@@ -665,7 +746,12 @@ func inferV2Role(name string) v2core.AgentRole {
 
 // bootstrapV2 creates the v2 store, event bus, engine, event persister, and API handler.
 // Returns the v2 store (for lifecycle), the agent registry, a cleanup func, and a route registrar for mounting.
-func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, bootstrapCfg *config.Config, mcpEnv teamleader.MCPEnvConfig) (*v2sqlite.Store, v2core.AgentRegistry, func(), func(chi.Router)) {
+type v2GitHubTokens struct {
+	CommitPAT string
+	MergePAT  string
+}
+
+func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, bootstrapCfg *config.Config, mcpEnv teamleader.MCPEnvConfig, ghTokens v2GitHubTokens) (*v2sqlite.Store, v2core.AgentRegistry, func(), func(chi.Router)) {
 	v2DBPath := strings.TrimSuffix(v1StorePath, filepath.Ext(v1StorePath)) + "_v2.db"
 	v2Store, err := v2sqlite.New(v2DBPath)
 	if err != nil {
@@ -674,6 +760,7 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 	}
 
 	v2Bus := v2engine.NewMemBus()
+	acpPool := v2engine.NewACPSessionPool(v2Store, v2Bus)
 
 	// Event persister: subscribe to bus → write to store.
 	persister := v2engine.NewEventPersister(v2Store, v2Bus)
@@ -689,13 +776,52 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 	// The store itself implements AgentRegistry (SQLite-backed).
 	var registry v2core.AgentRegistry = v2Store
 
-	// Step executor: ACP agent process spawning.
-	executor := v2engine.NewACPStepExecutor(v2engine.ACPExecutorConfig{
-		Registry: registry,
-		Store:    v2Store,
-		Bus:      v2Bus,
-		MCPEnv:   mcpEnv,
-	})
+	dataDir := ""
+	if dd, err := resolveDataDir(); err == nil {
+		dataDir = dd
+	}
+	sb := buildV2Sandbox(dataDir)
+
+	// Step executor: by default spawns ACP agent processes. Optionally use a mock executor
+	// for environments without external agent credentials.
+	mockEnabled := false
+	if bootstrapCfg != nil && bootstrapCfg.V2.MockExecutor {
+		mockEnabled = true
+	} else if raw := strings.TrimSpace(os.Getenv("AI_WORKFLOW_V2_MOCK_EXECUTOR")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "1", "true", "yes", "on":
+			mockEnabled = true
+		}
+	}
+
+	// Builtin executors (git commit/push, open PR, etc.) are handled by a composite executor
+	// that can fall back to ACP for general steps.
+	var executor v2engine.StepExecutor
+	if mockEnabled {
+		slog.Warn("v2 bootstrap: using mock step executor (no ACP processes will be spawned)")
+		executor = v2engine.NewMockStepExecutor(v2Store, v2Bus)
+	} else {
+		executor = v2engine.NewACPStepExecutor(v2engine.ACPExecutorConfig{
+			Registry:    registry,
+			Store:       v2Store,
+			Bus:         v2Bus,
+			MCPEnv:      mcpEnv,
+			SessionPool: acpPool,
+			Sandbox:     sb,
+			ReworkFollowupTemplate: func() string {
+				if bootstrapCfg == nil {
+					return ""
+				}
+				return bootstrapCfg.V2.Prompts.ReworkFollowup
+			}(),
+			ContinueFollowupTemplate: func() string {
+				if bootstrapCfg == nil {
+					return ""
+				}
+				return bootstrapCfg.V2.Prompts.ContinueFollowup
+			}(),
+		})
+	}
 
 	wsProvider := v2engine.NewCompositeProvider()
 
@@ -703,6 +829,10 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 	var llmClient *v2llm.Client
 	var engOpts []v2engine.Option
 	engOpts = append(engOpts, v2engine.WithWorkspaceProvider(wsProvider))
+	engOpts = append(engOpts, v2engine.WithGitHubTokens(v2engine.GitHubTokens{
+		CommitPAT: strings.TrimSpace(ghTokens.CommitPAT),
+		MergePAT:  strings.TrimSpace(ghTokens.MergePAT),
+	}))
 	if bootstrapCfg != nil {
 		openaiCfg := bootstrapCfg.V2.Collector.OpenAI
 		if strings.TrimSpace(openaiCfg.APIKey) != "" && strings.TrimSpace(openaiCfg.Model) != "" {
@@ -722,6 +852,17 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 		}
 	}
 
+	executor = v2engine.NewCompositeStepExecutor(v2engine.CompositeStepExecutorConfig{
+		Store: v2Store,
+		Bus:   v2Bus,
+		GitHubTokens: v2engine.GitHubTokens{
+			CommitPAT: strings.TrimSpace(ghTokens.CommitPAT),
+			MergePAT:  strings.TrimSpace(ghTokens.MergePAT),
+		},
+		ACPExecutor: executor,
+	})
+
+	engOpts = append(engOpts, v2engine.WithBriefingBuilder(v2engine.NewBriefingBuilder(v2Store)))
 	eng := v2engine.New(v2Store, v2Bus, executor, engOpts...)
 
 	// Flow scheduler: queue + concurrency control.
@@ -742,6 +883,7 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 	leadAgent := v2engine.NewLeadAgent(v2engine.LeadAgentConfig{
 		Registry: registry,
 		Bus:      v2Bus,
+		Sandbox:  sb,
 	})
 
 	// DAG generator: AI-powered step decomposition.
@@ -755,12 +897,21 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 		v2api.WithScheduler(scheduler),
 		v2api.WithRegistry(registry),
 		v2api.WithDAGGenerator(dagGen),
+		func() v2api.HandlerOption {
+			if dataDir, err := resolveDataDir(); err == nil {
+				return v2api.WithSkillsRoot(filepath.Join(dataDir, "skills"))
+			}
+			return v2api.WithSkillsRoot("")
+		}(),
 	)
 	registrar := func(r chi.Router) {
 		handler.Register(r)
 	}
 
 	cleanup := func() {
+		if acpPool != nil {
+			acpPool.Close()
+		}
 		if leadAgent != nil {
 			leadAgent.Shutdown()
 		}

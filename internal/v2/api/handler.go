@@ -5,20 +5,21 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yoke233/ai-workflow/internal/web"
 	"github.com/yoke233/ai-workflow/internal/v2/core"
 	"github.com/yoke233/ai-workflow/internal/v2/engine"
+	"github.com/yoke233/ai-workflow/internal/web"
 )
 
 // Handler is the top-level HTTP handler for the v2 API.
 type Handler struct {
-	store     core.Store
-	bus       core.EventBus
-	engine    *engine.FlowEngine
-	lead      *engine.LeadAgent
-	scheduler *engine.FlowScheduler
-	registry  core.AgentRegistry
-	dagGen    *engine.DAGGenerator
+	store      core.Store
+	bus        core.EventBus
+	engine     *engine.FlowEngine
+	lead       *engine.LeadAgent
+	scheduler  *engine.FlowScheduler
+	registry   core.AgentRegistry
+	dagGen     *engine.DAGGenerator
+	skillsRoot string
 }
 
 // NewHandler creates the v2 API handler.
@@ -53,6 +54,12 @@ func WithDAGGenerator(g *engine.DAGGenerator) HandlerOption {
 	return func(h *Handler) { h.dagGen = g }
 }
 
+// WithSkillsRoot sets the filesystem root directory for managing ai-workflow skills.
+// If empty, the handler will fall back to $AI_WORKFLOW_DATA_DIR/skills or $CWD/.ai-workflow/skills.
+func WithSkillsRoot(root string) HandlerOption {
+	return func(h *Handler) { h.skillsRoot = root }
+}
+
 // Register mounts all v2 routes onto the given chi router.
 // Caller is responsible for mounting this under a prefix like /api/v2.
 func (h *Handler) Register(r chi.Router) {
@@ -77,6 +84,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/flows", h.createFlow)
 	r.Get("/flows", h.listFlows)
 	r.Get("/flows/{flowID}", h.getFlow)
+	r.Post("/flows/{flowID}/bootstrap-pr", h.bootstrapPRFlow)
 	r.Post("/flows/{flowID}/run", h.runFlow)
 	r.Post("/flows/{flowID}/cancel", h.cancelFlow)
 
@@ -120,6 +128,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(web.RequireScope(web.ScopeAdmin))
 		r.Post("/admin/system-event", h.sendSystemEvent)
+		registerSkillRoutes(r, h.skillsRoot)
 	})
 }
 

@@ -357,6 +357,14 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 				cfg.V2.Agents.Profiles = cloneV2Profiles(*agents.Profiles)
 			}
 		}
+		if prompts := v2.Prompts; prompts != nil {
+			if prompts.ReworkFollowup != nil {
+				cfg.V2.Prompts.ReworkFollowup = *prompts.ReworkFollowup
+			}
+			if prompts.ContinueFollowup != nil {
+				cfg.V2.Prompts.ContinueFollowup = *prompts.ContinueFollowup
+			}
+		}
 	}
 }
 
@@ -455,6 +463,9 @@ func cloneV2Profiles(in []V2ProfileConfig) []V2ProfileConfig {
 		}
 		if in[i].ActionsAllowed != nil {
 			out[i].ActionsAllowed = cloneStringSlice(in[i].ActionsAllowed)
+		}
+		if in[i].Skills != nil {
+			out[i].Skills = cloneStringSlice(in[i].Skills)
 		}
 		if in[i].MCP.Tools != nil {
 			out[i].MCP.Tools = cloneStringSlice(in[i].MCP.Tools)

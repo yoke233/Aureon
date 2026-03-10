@@ -133,21 +133,22 @@ CREATE TABLE IF NOT EXISTS agent_drivers (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS agent_profiles (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL DEFAULT '',
-    driver_id TEXT NOT NULL REFERENCES agent_drivers(id),
-    role TEXT NOT NULL,
-    capabilities TEXT,
-    actions_allowed TEXT,
-    prompt_template TEXT NOT NULL DEFAULT '',
-    session_reuse INTEGER NOT NULL DEFAULT 0,
-    session_max_turns INTEGER NOT NULL DEFAULT 0,
-    session_idle_ttl_ms INTEGER NOT NULL DEFAULT 0,
-    mcp_enabled INTEGER NOT NULL DEFAULT 0,
-    mcp_tools TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+ CREATE TABLE IF NOT EXISTS agent_profiles (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL DEFAULT '',
+     driver_id TEXT NOT NULL REFERENCES agent_drivers(id),
+     role TEXT NOT NULL,
+     capabilities TEXT,
+     actions_allowed TEXT,
+     prompt_template TEXT NOT NULL DEFAULT '',
+     skills TEXT,
+     session_reuse INTEGER NOT NULL DEFAULT 0,
+     session_max_turns INTEGER NOT NULL DEFAULT 0,
+     session_idle_ttl_ms INTEGER NOT NULL DEFAULT 0,
+     mcp_enabled INTEGER NOT NULL DEFAULT 0,
+     mcp_tools TEXT,
+     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_steps_flow ON steps(flow_id);
@@ -190,6 +191,8 @@ func runMigrations(db *sql.DB) error {
 		// resource_bindings table is handled by CREATE TABLE IF NOT EXISTS in schemaV1.
 		// Add description column to steps (v2 schema upgrade).
 		`ALTER TABLE steps ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
+		// Add skills column to agent_profiles (v2 profile skills).
+		`ALTER TABLE agent_profiles ADD COLUMN skills TEXT`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			if strings.Contains(err.Error(), "duplicate column name") {

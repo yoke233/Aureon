@@ -12,12 +12,13 @@ import (
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/yoke233/ai-workflow/internal/acpclient"
 	"github.com/yoke233/ai-workflow/internal/v2/core"
+	v2sandbox "github.com/yoke233/ai-workflow/internal/v2/sandbox"
 )
 
 const (
-	defaultLeadProfileID   = "lead"
-	defaultLeadTimeout     = 120 * time.Second
-	defaultSessionIdleTTL  = 30 * time.Minute
+	defaultLeadProfileID  = "lead"
+	defaultLeadTimeout    = 120 * time.Second
+	defaultSessionIdleTTL = 30 * time.Minute
 )
 
 // LeadAgentConfig configures the LeadAgent.
@@ -27,6 +28,7 @@ type LeadAgentConfig struct {
 	ProfileID string        // lead profile ID; defaults to "lead"
 	Timeout   time.Duration // per-prompt timeout; defaults to 120s
 	IdleTTL   time.Duration // session idle timeout; defaults to 30m
+	Sandbox   v2sandbox.Sandbox
 }
 
 // ChatRequest is the input for a chat message to the lead agent.
@@ -257,13 +259,27 @@ func (l *LeadAgent) getOrCreateSession(ctx context.Context, sessionID, workDir s
 		Command: driver.LaunchCommand,
 		Args:    driver.LaunchArgs,
 		WorkDir: workDir,
-		Env:     driver.Env,
+		Env:     cloneEnv(driver.Env),
 	}
 
 	bridge := NewEventBridge(l.cfg.Bus, core.EventChatOutput, EventBridgeScope{
 		SessionID: sessionID,
 	})
 
+	sb := l.cfg.Sandbox
+	if sb == nil {
+		sb = v2sandbox.NoopSandbox{}
+	}
+	sandboxedLaunch, sbErr := sb.Prepare(ctx, v2sandbox.PrepareInput{
+		Profile: profile,
+		Driver:  driver,
+		Launch:  launchCfg,
+		Scope:   "chat-" + sessionID,
+	})
+	if sbErr != nil {
+		return nil, fmt.Errorf("prepare sandbox: %w", sbErr)
+	}
+	launchCfg = sandboxedLaunch
 	client, err := acpclient.New(launchCfg, &acpclient.NopHandler{},
 		acpclient.WithEventHandler(bridge))
 	if err != nil {

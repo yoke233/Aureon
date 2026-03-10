@@ -42,6 +42,7 @@ func testProfile(id, driverID string, role core.AgentRole, caps ...string) *core
 		Capabilities:   caps,
 		ActionsAllowed: []core.Action{core.ActionReadContext, core.ActionFSWrite},
 		PromptTemplate: "test-tmpl",
+		Skills:         []string{"strict-review"},
 		Session: core.ProfileSession{
 			Reuse:    true,
 			MaxTurns: 10,
@@ -195,6 +196,9 @@ func TestProfileCRUD(t *testing.T) {
 	if len(got.ActionsAllowed) != 2 {
 		t.Fatalf("actions not preserved: %v", got.ActionsAllowed)
 	}
+	if len(got.Skills) != 1 || got.Skills[0] != "strict-review" {
+		t.Fatalf("skills not preserved: %v", got.Skills)
+	}
 
 	// List
 	list, _ := s.ListProfiles(ctx)
@@ -205,6 +209,7 @@ func TestProfileCRUD(t *testing.T) {
 	// Update
 	p.Capabilities = []string{"go", "backend", "api"}
 	p.Session.MaxTurns = 20
+	p.Skills = []string{"strict-review", "writing-wave-plans"}
 	if err := s.UpdateProfile(ctx, p); err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
@@ -214,6 +219,9 @@ func TestProfileCRUD(t *testing.T) {
 	}
 	if got.Session.MaxTurns != 20 {
 		t.Fatalf("expected max_turns=20, got %d", got.Session.MaxTurns)
+	}
+	if len(got.Skills) != 2 {
+		t.Fatalf("expected 2 skills after update, got %d", len(got.Skills))
 	}
 
 	// Update nonexistent
@@ -361,15 +369,22 @@ func TestUpsertProfile(t *testing.T) {
 	if len(got.Capabilities) != 1 {
 		t.Fatalf("expected 1 cap, got %d", len(got.Capabilities))
 	}
+	if len(got.Skills) != 1 || got.Skills[0] != "strict-review" {
+		t.Fatalf("expected skills preserved, got %v", got.Skills)
+	}
 
 	// Second upsert = update
 	p.Capabilities = []string{"go", "backend"}
+	p.Skills = []string{"writing-wave-plans"}
 	if err := s.UpsertProfile(ctx, p); err != nil {
 		t.Fatalf("UpsertProfile (update): %v", err)
 	}
 	got, _ = s.GetProfile(ctx, "worker")
 	if len(got.Capabilities) != 2 {
 		t.Fatalf("expected 2 caps after upsert, got %d", len(got.Capabilities))
+	}
+	if len(got.Skills) != 1 || got.Skills[0] != "writing-wave-plans" {
+		t.Fatalf("expected skills updated after upsert, got %v", got.Skills)
 	}
 }
 

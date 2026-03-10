@@ -46,6 +46,7 @@ func convertProfiles(cfgs []config.V2ProfileConfig) []*core.AgentProfile {
 			Capabilities:   c.Capabilities,
 			ActionsAllowed: actions,
 			PromptTemplate: c.PromptTemplate,
+			Skills:         c.Skills,
 			Session: core.ProfileSession{
 				Reuse:    c.Session.Reuse,
 				MaxTurns: c.Session.MaxTurns,

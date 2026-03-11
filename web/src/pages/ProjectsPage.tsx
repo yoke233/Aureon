@@ -151,8 +151,8 @@ export function ProjectsPage() {
 
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   <Badge variant="outline" className="text-xs">{project.kind}</Badge>
-                  {(projectMetrics?.resources ?? []).map((resourceKind) => (
-                    <Badge key={resourceKind} variant="secondary" className="text-xs">{resourceKind}</Badge>
+                  {(projectMetrics?.resources ?? []).map((resource) => (
+                    <Badge key={resource} variant="secondary" className="text-xs">{resource}</Badge>
                   ))}
                 </div>
 
@@ -189,5 +189,3 @@ export function ProjectsPage() {
     </div>
   );
 }
-
-

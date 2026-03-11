@@ -12,9 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
+import { getScmFlowProviderFromBindings } from "@/lib/scm";
 import { getErrorMessage, normalizeStepTypeLabel } from "@/lib/v2Workbench";
 import { cn } from "@/lib/utils";
-import type { Step, DAGTemplate } from "@/types/apiV2";
+import type { Step, DAGTemplate, ResourceBinding } from "@/types/apiV2";
 
 const stepColors: Record<string, { bg: string; text: string }> = {
   exec: { bg: "bg-blue-50", text: "text-blue-600" },
@@ -34,14 +35,18 @@ export function CreateFlowPage() {
   const [busy, setBusy] = useState<"idle" | "generating" | "saving" | "running" | "from_template">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  // Template selection state
   const [templates, setTemplates] = useState<DAGTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [projectResources, setProjectResources] = useState<ResourceBinding[]>([]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === projectId) ?? null,
     [projectId, projects],
+  );
+  const scmFlowProvider = useMemo(
+    () => getScmFlowProviderFromBindings(projectResources),
+    [projectResources],
   );
 
   const selectedTemplate = useMemo(
@@ -49,7 +54,6 @@ export function CreateFlowPage() {
     [templates, selectedTemplateId],
   );
 
-  // Load available templates
   const loadTemplates = useCallback(async () => {
     setTemplatesLoading(true);
     try {
@@ -66,6 +70,37 @@ export function CreateFlowPage() {
     void loadTemplates();
   }, [loadTemplates]);
 
+  useEffect(() => {
+    if (scmFlowProvider) {
+      setSelectedTemplateId(null);
+      setPreviewSteps([]);
+    }
+  }, [scmFlowProvider]);
+
+  useEffect(() => {
+    if (projectId == null) {
+      setProjectResources([]);
+      return;
+    }
+    let cancelled = false;
+    const loadResources = async () => {
+      try {
+        const resources = await apiClient.listProjectResources(projectId);
+        if (!cancelled) {
+          setProjectResources(resources);
+        }
+      } catch {
+        if (!cancelled) {
+          setProjectResources([]);
+        }
+      }
+    };
+    void loadResources();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, projectId]);
+
   const ensureDraftFlow = async (): Promise<number> => {
     if (draftFlowId != null) {
       return draftFlowId;
@@ -80,6 +115,10 @@ export function CreateFlowPage() {
   };
 
   const generateSteps = async () => {
+    if (scmFlowProvider) {
+      setError("当前项目已启用 PR/CR 流程，请直接创建 flow。");
+      return;
+    }
     if (!name.trim()) {
       setError("生成步骤前请先填写流程名称。");
       return;
@@ -121,7 +160,6 @@ export function CreateFlowPage() {
   };
 
   const finalizeFlow = async (runImmediately: boolean) => {
-    // If a template is selected, use the template flow path
     if (selectedTemplate) {
       return createFromTemplate(runImmediately);
     }
@@ -134,7 +172,7 @@ export function CreateFlowPage() {
     setError(null);
     try {
       const flowId = await ensureDraftFlow();
-      if (previewSteps.length === 0 && (aiPrompt.trim() || description.trim())) {
+      if (!scmFlowProvider && previewSteps.length === 0 && (aiPrompt.trim() || description.trim())) {
         const steps = await apiClient.generateSteps(flowId, {
           description: aiPrompt.trim() || description.trim(),
         });
@@ -178,8 +216,7 @@ export function CreateFlowPage() {
 
       {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
-      {/* Template selector */}
-      {templates.length > 0 ? (
+      {templates.length > 0 && !scmFlowProvider ? (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -229,7 +266,7 @@ export function CreateFlowPage() {
             ) : null}
           </CardContent>
         </Card>
-      ) : templatesLoading ? (
+      ) : templatesLoading && !scmFlowProvider ? (
         <div className="text-sm text-muted-foreground">正在加载模板...</div>
       ) : null}
 
@@ -290,7 +327,16 @@ export function CreateFlowPage() {
             </CardContent>
           </Card>
 
-          {!selectedTemplate ? (
+          {scmFlowProvider ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">自动 PR/CR 流程</CardTitle>
+                <CardDescription>
+                  当前项目已启用 {scmFlowProvider === "codeup" ? "Codeup CR" : "GitHub PR"} 流程。创建 flow 后，系统会自动注入 implement / commit_push / open_pr / review_merge_gate 四个步骤。
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          ) : !selectedTemplate ? (
             <Card>
               <CardHeader>
                 <div className="flex items-center gap-3">
@@ -340,7 +386,6 @@ export function CreateFlowPage() {
             </div>
             <div>
               {selectedTemplate ? (
-                // Show template steps preview
                 selectedTemplate.steps.map((step, index) => {
                   const color = stepColors[step.type] ?? stepColors.exec;
                   return (
@@ -365,6 +410,10 @@ export function CreateFlowPage() {
                     </div>
                   );
                 })
+              ) : scmFlowProvider ? (
+                <div className="px-5 py-6 text-sm text-muted-foreground">
+                  当前项目启用了资源级 PR/CR 流程，步骤会在创建 flow 时由后端自动生成。
+                </div>
               ) : previewSteps.length === 0 ? (
                 <div className="px-5 py-6 text-sm text-muted-foreground">
                   还没有生成步骤。可以先选择模板、填写描述再调用后端生成。
@@ -401,6 +450,9 @@ export function CreateFlowPage() {
           <Card className="p-4">
             <div className="space-y-2 text-sm text-muted-foreground">
               <div>项目：{selectedProject?.name ?? "未指定"}</div>
+              {scmFlowProvider ? (
+                <div>SCM 流程：{scmFlowProvider === "codeup" ? "Codeup CR 自动注入" : "GitHub PR 自动注入"}</div>
+              ) : null}
               <div>
                 来源：{selectedTemplate
                   ? `模板「${selectedTemplate.name}」`

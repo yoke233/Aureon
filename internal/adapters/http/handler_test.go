@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -55,9 +56,53 @@ func get(ts *httptest.Server, path string) (*http.Response, error) {
 	return http.Get(ts.URL + path)
 }
 
+func put(ts *httptest.Server, path string, body any) (*http.Response, error) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPut, ts.URL+path, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return http.DefaultClient.Do(req)
+}
+
 func decodeJSON(resp *http.Response, v any) error {
 	defer resp.Body.Close()
 	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+type stubSandboxController struct {
+	report    v2sandbox.SupportReport
+	updateErr error
+	lastReq   v2sandbox.UpdateRequest
+}
+
+func (s *stubSandboxController) Inspect(context.Context) v2sandbox.SupportReport {
+	return s.report
+}
+
+func (s *stubSandboxController) Update(_ context.Context, req v2sandbox.UpdateRequest) (v2sandbox.SupportReport, error) {
+	s.lastReq = req
+	if s.updateErr != nil {
+		return s.report, s.updateErr
+	}
+	if req.Enabled != nil {
+		s.report.Enabled = *req.Enabled
+		if !s.report.Enabled {
+			s.report.CurrentProvider = "noop"
+			s.report.CurrentSupported = false
+		}
+	}
+	if req.Provider != nil {
+		s.report.ConfiguredProvider = *req.Provider
+		if s.report.Enabled {
+			s.report.CurrentProvider = *req.Provider
+			if support, ok := s.report.Providers[*req.Provider]; ok {
+				s.report.CurrentSupported = support.Supported && support.Implemented
+			}
+		}
+	}
+	return s.report, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +135,155 @@ func TestAPI_CreateFlow(t *testing.T) {
 	}
 	if flow.Status != core.FlowPending {
 		t.Fatalf("expected pending, got %s", flow.Status)
+	}
+}
+
+func TestAPI_CreateFlow_AutoBootstrapsSCMFlow(t *testing.T) {
+	_, ts := setupAPI(t)
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "branch", "-M", "main")
+	runGit(t, repoDir, "remote", "add", "origin", "https://github.com/acme/demo.git")
+
+	projectResp, err := post(ts, "/projects", map[string]any{
+		"name": "auto-pr-project",
+	})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if projectResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating project, got %d", projectResp.StatusCode)
+	}
+	var project core.Project
+	if err := decodeJSON(projectResp, &project); err != nil {
+		t.Fatalf("decode project: %v", err)
+	}
+
+	resourceResp, err := post(ts, fmt.Sprintf("/projects/%d/resources", project.ID), map[string]any{
+		"kind":  "git",
+		"uri":   repoDir,
+		"label": "repo",
+		"config": map[string]any{
+			"provider":        "github",
+			"enable_scm_flow": true,
+			"base_branch":     "main",
+			"merge_method":    "squash",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if resourceResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating resource, got %d", resourceResp.StatusCode)
+	}
+	resourceResp.Body.Close()
+
+	flowResp, err := post(ts, "/flows", map[string]any{
+		"name":       "auto-flow",
+		"project_id": project.ID,
+	})
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	if flowResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating flow, got %d", flowResp.StatusCode)
+	}
+	var flow core.Flow
+	if err := decodeJSON(flowResp, &flow); err != nil {
+		t.Fatalf("decode flow: %v", err)
+	}
+
+	stepsResp, err := get(ts, fmt.Sprintf("/flows/%d/steps", flow.ID))
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if stepsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 listing steps, got %d", stepsResp.StatusCode)
+	}
+	var steps []*core.Step
+	if err := decodeJSON(stepsResp, &steps); err != nil {
+		t.Fatalf("decode steps: %v", err)
+	}
+	if len(steps) != 4 {
+		t.Fatalf("expected 4 auto-bootstrapped steps, got %d", len(steps))
+	}
+	if steps[2].Config["builtin"] != "scm_open_pr" {
+		t.Fatalf("expected open_pr builtin=scm_open_pr, got %#v", steps[2].Config["builtin"])
+	}
+	if steps[3].Config["merge_method"] != "squash" {
+		t.Fatalf("expected merge_method=squash, got %#v", steps[3].Config["merge_method"])
+	}
+}
+
+func TestAPI_CreateFlow_DoesNotAutoBootstrapWithoutEnabledSCMFlow(t *testing.T) {
+	_, ts := setupAPI(t)
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "branch", "-M", "main")
+	runGit(t, repoDir, "remote", "add", "origin", "https://github.com/acme/demo.git")
+
+	projectResp, err := post(ts, "/projects", map[string]any{
+		"name": "manual-pr-project",
+	})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if projectResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating project, got %d", projectResp.StatusCode)
+	}
+	var project core.Project
+	if err := decodeJSON(projectResp, &project); err != nil {
+		t.Fatalf("decode project: %v", err)
+	}
+
+	resourceResp, err := post(ts, fmt.Sprintf("/projects/%d/resources", project.ID), map[string]any{
+		"kind":  "git",
+		"uri":   repoDir,
+		"label": "repo",
+		"config": map[string]any{
+			"provider":     "github",
+			"base_branch":  "main",
+			"merge_method": "squash",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if resourceResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating resource, got %d", resourceResp.StatusCode)
+	}
+	resourceResp.Body.Close()
+
+	flowResp, err := post(ts, "/flows", map[string]any{
+		"name":       "manual-flow",
+		"project_id": project.ID,
+	})
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	if flowResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating flow, got %d", flowResp.StatusCode)
+	}
+	var flow core.Flow
+	if err := decodeJSON(flowResp, &flow); err != nil {
+		t.Fatalf("decode flow: %v", err)
+	}
+
+	stepsResp, err := get(ts, fmt.Sprintf("/flows/%d/steps", flow.ID))
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if stepsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 listing steps, got %d", stepsResp.StatusCode)
+	}
+	var steps []*core.Step
+	if err := decodeJSON(stepsResp, &steps); err != nil {
+		t.Fatalf("decode steps: %v", err)
+	}
+	if len(steps) != 0 {
+		t.Fatalf("expected 0 auto-bootstrapped steps, got %d", len(steps))
 	}
 }
 
@@ -647,12 +841,13 @@ func TestAPI_GetSandboxSupport(t *testing.T) {
 	}
 
 	var got struct {
-		OS               string `json:"os"`
-		Arch             string `json:"arch"`
-		Enabled          bool   `json:"enabled"`
-		CurrentProvider  string `json:"current_provider"`
-		CurrentSupported bool   `json:"current_supported"`
-		Providers        map[string]struct {
+		OS                 string `json:"os"`
+		Arch               string `json:"arch"`
+		Enabled            bool   `json:"enabled"`
+		ConfiguredProvider string `json:"configured_provider"`
+		CurrentProvider    string `json:"current_provider"`
+		CurrentSupported   bool   `json:"current_supported"`
+		Providers          map[string]struct {
 			Supported bool   `json:"supported"`
 			Reason    string `json:"reason"`
 		} `json:"providers"`
@@ -666,11 +861,120 @@ func TestAPI_GetSandboxSupport(t *testing.T) {
 	if got.CurrentProvider != "noop" {
 		t.Fatalf("current_provider = %q, want noop", got.CurrentProvider)
 	}
+	if got.ConfiguredProvider != "home_dir" {
+		t.Fatalf("configured_provider = %q, want home_dir", got.ConfiguredProvider)
+	}
 	if got.CurrentSupported {
 		t.Fatal("current_supported = true, want false for disabled sandbox")
 	}
 	if !got.Providers["home_dir"].Supported {
 		t.Fatal("home_dir should be reported as supported")
+	}
+	if _, ok := got.Providers["docker"]; !ok {
+		t.Fatal("docker provider should be present in API response")
+	}
+	if _, ok := got.Providers["boxlite"]; !ok {
+		t.Fatal("boxlite provider should be present in API response")
+	}
+}
+
+func TestAPI_UpdateSandboxSupport(t *testing.T) {
+	h, ts := setupAPI(t)
+	ctrl := &stubSandboxController{
+		report: v2sandbox.SupportReport{
+			OS:                 "darwin",
+			Arch:               "arm64",
+			Enabled:            false,
+			ConfiguredProvider: "home_dir",
+			CurrentProvider:    "noop",
+			CurrentSupported:   false,
+			Providers: map[string]v2sandbox.ProviderSupport{
+				"home_dir": {Supported: true, Implemented: true, Reason: "ok"},
+				"litebox":  {Supported: false, Implemented: true, Reason: "windows only"},
+			},
+		},
+	}
+	h.sandbox = ctrl
+
+	resp, err := put(ts, "/admin/system/sandbox-support", map[string]any{
+		"enabled":  true,
+		"provider": "home_dir",
+	})
+	if err != nil {
+		t.Fatalf("update sandbox support: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var got v2sandbox.SupportReport
+	if err := decodeJSON(resp, &got); err != nil {
+		t.Fatalf("decode sandbox update: %v", err)
+	}
+	if !got.Enabled || got.CurrentProvider != "home_dir" || !got.CurrentSupported {
+		t.Fatalf("unexpected sandbox update response: %#v", got)
+	}
+	if ctrl.lastReq.Enabled == nil || !*ctrl.lastReq.Enabled {
+		t.Fatalf("enabled request not passed through: %#v", ctrl.lastReq)
+	}
+	if ctrl.lastReq.Provider == nil || *ctrl.lastReq.Provider != "home_dir" {
+		t.Fatalf("provider request not passed through: %#v", ctrl.lastReq)
+	}
+}
+
+func TestAPI_UpdateSandboxSupport_ConfigUnavailable(t *testing.T) {
+	h, ts := setupAPI(t)
+	h.sandbox = &stubSandboxController{
+		report: v2sandbox.SupportReport{
+			OS:                 "windows",
+			Arch:               "amd64",
+			Enabled:            false,
+			ConfiguredProvider: "home_dir",
+			CurrentProvider:    "noop",
+			CurrentSupported:   false,
+			Providers: map[string]v2sandbox.ProviderSupport{
+				"home_dir": {Supported: true, Implemented: true},
+			},
+		},
+		updateErr: v2sandbox.ErrSandboxConfigUnavailable,
+	}
+
+	resp, err := put(ts, "/admin/system/sandbox-support", map[string]any{
+		"enabled": true,
+	})
+	if err != nil {
+		t.Fatalf("update sandbox support unavailable: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestAPI_UpdateSandboxSupport_BadRequest(t *testing.T) {
+	h, ts := setupAPI(t)
+	h.sandbox = &stubSandboxController{
+		report: v2sandbox.SupportReport{
+			OS:                 "windows",
+			Arch:               "amd64",
+			Enabled:            false,
+			ConfiguredProvider: "home_dir",
+			CurrentProvider:    "noop",
+			CurrentSupported:   false,
+			Providers: map[string]v2sandbox.ProviderSupport{
+				"home_dir": {Supported: true, Implemented: true},
+			},
+		},
+		updateErr: errors.New("bad provider"),
+	}
+
+	resp, err := put(ts, "/admin/system/sandbox-support", map[string]any{
+		"provider": "bad",
+	})
+	if err != nil {
+		t.Fatalf("update sandbox support bad request: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 

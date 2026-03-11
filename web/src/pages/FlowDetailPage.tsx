@@ -18,6 +18,7 @@ import {
   Square,
   Clock,
   Bot,
+  GitBranch,
   CheckCircle2,
   Loader2,
   Pause,
@@ -28,9 +29,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
+import { getScmFlowProviderFromBindings, type SupportedScmProvider } from "@/lib/scm";
 import { cn } from "@/lib/utils";
 import { formatFlowDuration, getErrorMessage, normalizeStepTypeLabel } from "@/lib/v2Workbench";
-import type { Execution, Flow, Step } from "@/types/apiV2";
+import type { Execution, Flow, ResourceBinding, Step } from "@/types/apiV2";
 
 interface StepNodeData extends Record<string, unknown> {
   label: string;
@@ -158,8 +160,27 @@ export function FlowDetailPage() {
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [loading, setLoading] = useState(false);
   const [runningAction, setRunningAction] = useState<"idle" | "run" | "cancel" | "save_template">("idle");
+  const [bootstrapingPRFlow, setBootstrapingPRFlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templateSaved, setTemplateSaved] = useState(false);
+  const [projectResources, setProjectResources] = useState<ResourceBinding[]>([]);
+
+  const fetchFlowData = useCallback(async (targetFlowId: number) => {
+    return Promise.all([
+      apiClient.getFlow(targetFlowId),
+      apiClient.listSteps(targetFlowId),
+    ]);
+  }, [apiClient]);
+
+  const applyFlowData = useCallback((flowResp: Flow, stepsResp: Step[]) => {
+    setFlow(flowResp);
+    setSteps(stepsResp);
+    setSelectedStepId((current) => (
+      current != null && stepsResp.some((step) => step.id === current)
+        ? current
+        : stepsResp[0]?.id ?? null
+    ));
+  }, []);
 
   useEffect(() => {
     if (!Number.isFinite(numericFlowId)) {
@@ -171,16 +192,10 @@ export function FlowDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const [flowResp, stepsResp] = await Promise.all([
-          apiClient.getFlow(numericFlowId),
-          apiClient.listSteps(numericFlowId),
-        ]);
-        if (cancelled) {
-          return;
+        const [flowResp, stepsResp] = await fetchFlowData(numericFlowId);
+        if (!cancelled) {
+          applyFlowData(flowResp, stepsResp);
         }
-        setFlow(flowResp);
-        setSteps(stepsResp);
-        setSelectedStepId((current) => current ?? stepsResp[0]?.id ?? null);
       } catch (loadError) {
         if (!cancelled) {
           setError(getErrorMessage(loadError));
@@ -196,7 +211,31 @@ export function FlowDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [apiClient, numericFlowId]);
+  }, [applyFlowData, fetchFlowData, numericFlowId]);
+
+  useEffect(() => {
+    if (flow?.project_id == null) {
+      setProjectResources([]);
+      return;
+    }
+    let cancelled = false;
+    const loadResources = async () => {
+      try {
+        const resources = await apiClient.listProjectResources(flow.project_id!);
+        if (!cancelled) {
+          setProjectResources(resources);
+        }
+      } catch {
+        if (!cancelled) {
+          setProjectResources([]);
+        }
+      }
+    };
+    void loadResources();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, flow?.project_id]);
 
   useEffect(() => {
     if (selectedStepId == null) {
@@ -228,6 +267,19 @@ export function FlowDetailPage() {
   const selectedProject = flow?.project_id == null
     ? null
     : projects.find((project) => project.id === flow.project_id) ?? null;
+  const scmProvider = useMemo<SupportedScmProvider | null>(
+    () => getScmFlowProviderFromBindings(projectResources),
+    [projectResources],
+  );
+  const prFlowDisabledReason = useMemo(() => {
+    if (!scmProvider) {
+      return "当前项目没有启用 GitHub / Codeup 的 PR/CR 流程资源";
+    }
+    if (steps.length > 0) {
+      return "当前流程已经存在步骤，不能再注入 PR/CR 模板步骤";
+    }
+    return "";
+  }, [scmProvider, steps.length]);
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     const nextStepId = Number.parseInt(node.id, 10);
@@ -274,6 +326,23 @@ export function FlowDetailPage() {
     }
   };
 
+  const bootstrapPRFlow = async () => {
+    if (!flow || !scmProvider) {
+      return;
+    }
+    setBootstrapingPRFlow(true);
+    setError(null);
+    try {
+      await apiClient.bootstrapPRFlow(flow.id);
+      const [flowResp, stepsResp] = await fetchFlowData(flow.id);
+      applyFlowData(flowResp, stepsResp);
+    } catch (bootstrapError) {
+      setError(getErrorMessage(bootstrapError));
+    } finally {
+      setBootstrapingPRFlow(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b px-8 py-4">
@@ -294,6 +363,23 @@ export function FlowDetailPage() {
             <span className="text-sm text-muted-foreground">Flow #{flow?.id ?? flowId}</span>
             <span className="text-sm text-muted-foreground">· {steps.length} 步骤</span>
             {flow ? <span className="text-sm text-muted-foreground">· {formatFlowDuration(flow)}</span> : null}
+            {scmProvider ? (
+              <>
+                <Badge variant="outline" className="text-xs">
+                  {scmProvider === "codeup" ? "Codeup CR" : "GitHub PR"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={runningAction !== "idle" || bootstrapingPRFlow || !!prFlowDisabledReason}
+                  onClick={() => void bootstrapPRFlow()}
+                  title={prFlowDisabledReason || "为当前流程注入 PR/CR 自动化步骤"}
+                >
+                  <GitBranch className="mr-2 h-3 w-3" />
+                  {bootstrapingPRFlow ? "创建中..." : "创建 PR/CR 流程"}
+                </Button>
+              </>
+            ) : null}
             <Button
               variant="outline"
               size="sm"
@@ -437,4 +523,3 @@ export function FlowDetailPage() {
     </div>
   );
 }
-

@@ -10,12 +10,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
+import { detectScmProviderFromBinding } from "@/lib/scm";
 import { getErrorMessage } from "@/lib/v2Workbench";
+
+interface GitResourceDraftConfig {
+  provider: "" | "github" | "codeup";
+  enableScmFlow: boolean;
+  baseBranch: string;
+  mergeMethod: string;
+}
 
 interface ResourceDraft {
   kind: string;
   uri: string;
   label: string;
+  git: GitResourceDraftConfig;
 }
 
 export function CreateProjectPage() {
@@ -25,7 +34,12 @@ export function CreateProjectPage() {
   const [kind, setKind] = useState<"dev" | "general">("dev");
   const [description, setDescription] = useState("");
   const [resources, setResources] = useState<ResourceDraft[]>([
-    { kind: "local_fs", uri: "", label: "工作目录" },
+    {
+      kind: "local_fs",
+      uri: "",
+      label: "工作目录",
+      git: { provider: "", enableScmFlow: false, baseBranch: "main", mergeMethod: "squash" },
+    },
   ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,8 +57,27 @@ export function CreateProjectPage() {
     );
   };
 
+  const updateGitResource = (index: number, patch: Partial<GitResourceDraftConfig>) => {
+    setResources((current) =>
+      current.map((resource, currentIndex) => {
+        if (currentIndex === index) {
+          return { ...resource, git: { ...resource.git, ...patch } };
+        }
+        if (patch.enableScmFlow && resource.kind === "git") {
+          return { ...resource, git: { ...resource.git, enableScmFlow: false } };
+        }
+        return resource;
+      }),
+    );
+  };
+
   const addResource = () => {
-    setResources((current) => [...current, { kind: "git", uri: "", label: "" }]);
+    setResources((current) => [...current, {
+      kind: "git",
+      uri: "",
+      label: "",
+      git: { provider: "", enableScmFlow: false, baseBranch: "main", mergeMethod: "squash" },
+    }]);
   };
 
   const removeResource = (index: number) => {
@@ -68,9 +101,25 @@ export function CreateProjectPage() {
 
       const nextResources = resources.filter((resource) => resource.kind.trim() && resource.uri.trim());
       for (const resource of nextResources) {
+        const scmProvider = resource.kind.trim() === "git"
+          ? detectScmProviderFromBinding({
+              kind: resource.kind,
+              uri: resource.uri,
+              config: resource.git.provider ? { provider: resource.git.provider } : {},
+            })
+          : null;
+        const config = resource.kind.trim() === "git"
+          ? {
+              ...(scmProvider ? { provider: scmProvider } : {}),
+              ...(scmProvider ? { enable_scm_flow: resource.git.enableScmFlow } : {}),
+              ...(scmProvider && resource.git.baseBranch.trim() ? { base_branch: resource.git.baseBranch.trim() } : {}),
+              ...(scmProvider && resource.git.mergeMethod.trim() ? { merge_method: resource.git.mergeMethod.trim() } : {}),
+            }
+          : undefined;
         await apiClient.createProjectResource(project.id, {
           kind: resource.kind.trim(),
           uri: resource.uri.trim(),
+          config: config && Object.keys(config).length > 0 ? config : undefined,
           label: resource.label.trim() || undefined,
         });
       }
@@ -136,6 +185,7 @@ export function CreateProjectPage() {
                   onChange={(event) => setDescription(event.target.value)}
                 />
               </div>
+
             </CardContent>
           </Card>
 
@@ -166,7 +216,18 @@ export function CreateProjectPage() {
                     <Input
                       placeholder="URI / 路径 / 仓库地址"
                       value={resource.uri}
-                      onChange={(event) => updateResource(index, { uri: event.target.value })}
+                      onChange={(event) => {
+                        const uri = event.target.value;
+                        const detected = detectScmProviderFromBinding({
+                          kind: resource.kind,
+                          uri,
+                          config: {},
+                        });
+                        updateResource(index, { uri });
+                        if (resource.kind === "git" && detected) {
+                          updateGitResource(index, { provider: detected });
+                        }
+                      }}
                     />
                     <Input
                       placeholder="标签"
@@ -183,6 +244,83 @@ export function CreateProjectPage() {
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+                  {resource.kind === "git" ? (
+                    (() => {
+                      const scmProvider = detectScmProviderFromBinding({
+                        kind: "git",
+                        uri: resource.uri,
+                        config: resource.git.provider ? { provider: resource.git.provider } : {},
+                      });
+                      return (
+                        <div className="mt-3 space-y-3">
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-medium text-muted-foreground">Provider</label>
+                              <select
+                                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                                value={resource.git.provider}
+                                onChange={(event) => updateGitResource(index, {
+                                  provider: event.target.value as GitResourceDraftConfig["provider"],
+                                })}
+                              >
+                                <option value="">自动识别/未指定</option>
+                                <option value="github">github</option>
+                                <option value="codeup">codeup</option>
+                              </select>
+                            </div>
+                            {scmProvider ? (
+                              <>
+                                <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm md:col-span-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={resource.git.enableScmFlow}
+                                    onChange={(event) => updateGitResource(index, { enableScmFlow: event.target.checked })}
+                                  />
+                                  <span>启用 PR/CR 流程</span>
+                                </label>
+                                <div className="flex items-center text-xs text-muted-foreground">
+                                  当前识别：{scmProvider === "codeup" ? "Codeup CR" : "GitHub PR"}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="md:col-span-2 flex items-center text-xs text-muted-foreground">
+                                仅 GitHub / Codeup 仓库支持 PR/CR 流程开关。
+                              </div>
+                            )}
+                          </div>
+                          {scmProvider ? (
+                            <div className="space-y-2">
+                              <div className="text-[11px] text-muted-foreground">
+                                同一个项目当前只建议启用一个 GitHub / Codeup PR/CR 资源。
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <div className="space-y-1.5">
+                                  <label className="text-xs font-medium text-muted-foreground">Base Branch</label>
+                                  <Input
+                                    placeholder="main / master"
+                                    value={resource.git.baseBranch}
+                                    onChange={(event) => updateGitResource(index, { baseBranch: event.target.value })}
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="text-xs font-medium text-muted-foreground">Merge Method</label>
+                                  <select
+                                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                                    value={resource.git.mergeMethod}
+                                    onChange={(event) => updateGitResource(index, { mergeMethod: event.target.value })}
+                                  >
+                                    <option value="squash">squash</option>
+                                    <option value="merge">merge</option>
+                                    <option value="rebase">rebase</option>
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })()
+                  ) : null}
                 </div>
               ))}
             </div>

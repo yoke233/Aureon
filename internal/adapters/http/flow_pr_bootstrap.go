@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
 	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
 	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
 )
 
 type bootstrapPRFlowRequest struct {
@@ -25,6 +26,7 @@ type scmBindingInfo struct {
 	Provider      string
 	RepoPath      string
 	DefaultBranch string
+	MergeMethod   string
 	RemoteHost    string
 	RemoteOwner   string
 	RemoteRepo    string
@@ -38,12 +40,18 @@ type bootstrapPRFlowResponse struct {
 	GateID       int64 `json:"gate_step_id"`
 }
 
+var (
+	errBootstrapPRFlowMissingProject = errors.New("flow must belong to a project")
+	errBootstrapPRFlowMissingBinding = errors.New("project does not have an enabled supported SCM git binding")
+	errBootstrapPRFlowHasSteps       = errors.New("flow already has steps")
+)
+
 // bootstrapPRFlow creates a standard PR automation flow:
 // implement(exec) → commit_push(exec,builtin) → open_pr(exec,builtin) → review_merge_gate(gate).
 //
 // Requirements:
 // - Flow must belong to a project
-// - Project must have a supported SCM git resource binding (GitHub / Codeup)
+// - Project must have an enabled supported SCM git resource binding (GitHub / Codeup)
 func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 	flowID, ok := urlParamInt64(r, "flowID")
 	if !ok {
@@ -51,40 +59,55 @@ func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flow, err := h.store.GetFlow(r.Context(), flowID)
-	if err == core.ErrNotFound {
-		writeError(w, http.StatusNotFound, "flow not found", "NOT_FOUND")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
-	}
-	if flow.ProjectID == nil {
-		writeError(w, http.StatusBadRequest, "flow must belong to a project", "MISSING_PROJECT")
-		return
-	}
-
-	projectID := *flow.ProjectID
-	bindings, err := h.store.ListResourceBindings(r.Context(), projectID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
-	}
-	bindingInfo, ok := resolveSCMRepoFromBindings(r.Context(), bindings)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "project does not have a supported SCM git binding", "MISSING_SCM_BINDING")
-		return
-	}
-	_ = bindingInfo.RepoPath // used by builtin steps via workspace provider; keep here for validation side-effects.
-
 	var req bootstrapPRFlowRequest
+	var err error
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != context.Canceled {
 		// Allow empty body.
 		if strings.TrimSpace(err.Error()) != "EOF" {
 			writeError(w, http.StatusBadRequest, "invalid JSON body", "BAD_REQUEST")
 			return
 		}
+	}
+
+	resp, err := h.bootstrapPRFlowForFlow(r.Context(), flowID, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, errBootstrapPRFlowMissingProject), errors.Is(err, errBootstrapPRFlowMissingBinding):
+			writeError(w, http.StatusBadRequest, err.Error(), "MISSING_SCM_BINDING")
+		case errors.Is(err, errBootstrapPRFlowHasSteps):
+			writeError(w, http.StatusConflict, err.Error(), "FLOW_HAS_STEPS")
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		}
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) bootstrapPRFlowForFlow(ctx context.Context, flowID int64, req bootstrapPRFlowRequest) (bootstrapPRFlowResponse, error) {
+	flow, err := h.store.GetFlow(ctx, flowID)
+	if err != nil {
+		return bootstrapPRFlowResponse{}, err
+	}
+	if flow.ProjectID == nil {
+		return bootstrapPRFlowResponse{}, errBootstrapPRFlowMissingProject
+	}
+
+	bindings, err := h.store.ListResourceBindings(ctx, *flow.ProjectID)
+	if err != nil {
+		return bootstrapPRFlowResponse{}, err
+	}
+	bindingInfo, ok := resolveEnabledSCMRepoFromBindings(ctx, bindings)
+	if !ok {
+		return bootstrapPRFlowResponse{}, errBootstrapPRFlowMissingBinding
+	}
+
+	steps, err := h.store.ListStepsByFlow(ctx, flowID)
+	if err != nil {
+		return bootstrapPRFlowResponse{}, err
+	}
+	if len(steps) > 0 {
+		return bootstrapPRFlowResponse{}, errBootstrapPRFlowHasSteps
 	}
 
 	baseBranch := bindingInfo.DefaultBranch
@@ -99,16 +122,6 @@ func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Body != nil && strings.TrimSpace(*req.Body) != "" {
 		body = strings.TrimSpace(*req.Body)
-	}
-
-	steps, err := h.store.ListStepsByFlow(r.Context(), flowID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
-	}
-	if len(steps) > 0 {
-		writeError(w, http.StatusConflict, "flow already has steps", "FLOW_HAS_STEPS")
-		return
 	}
 
 	providerPrompts := h.currentPRFlowPrompts().Provider(bindingInfo.Provider)
@@ -128,10 +141,9 @@ func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 			"objective": implementObjective,
 		},
 	}
-	implementID, err := h.store.CreateStep(r.Context(), implement)
+	implementID, err := h.store.CreateStep(ctx, implement)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
+		return bootstrapPRFlowResponse{}, err
 	}
 
 	commitPush := &core.Step{
@@ -148,10 +160,9 @@ func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 			"commit_message": commitMessage,
 		},
 	}
-	commitPushID, err := h.store.CreateStep(r.Context(), commitPush)
+	commitPushID, err := h.store.CreateStep(ctx, commitPush)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
+		return bootstrapPRFlowResponse{}, err
 	}
 
 	openPR := &core.Step{
@@ -170,10 +181,9 @@ func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 			"body":    body,
 		},
 	}
-	openPRID, err := h.store.CreateStep(r.Context(), openPR)
+	openPRID, err := h.store.CreateStep(ctx, openPR)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
+		return bootstrapPRFlowResponse{}, err
 	}
 
 	gate := &core.Step{
@@ -190,24 +200,23 @@ func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 		},
 		Config: map[string]any{
 			"merge_on_pass":          true,
-			"merge_method":           mergeMethodFromBindings(bindings),
+			"merge_method":           bindingInfo.MergeMethod,
 			"reset_upstream_closure": true,
 			"objective":              gateObjective,
 		},
 	}
-	gateID, err := h.store.CreateStep(r.Context(), gate)
+	gateID, err := h.store.CreateStep(ctx, gate)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
-		return
+		return bootstrapPRFlowResponse{}, err
 	}
 
-	writeJSON(w, http.StatusCreated, bootstrapPRFlowResponse{
+	return bootstrapPRFlowResponse{
 		FlowID:       flowID,
 		ImplementID:  implementID,
 		CommitPushID: commitPushID,
 		OpenPRID:     openPRID,
 		GateID:       gateID,
-	})
+	}, nil
 }
 
 func (h *Handler) currentPRFlowPrompts() flowapp.PRFlowPrompts {
@@ -221,9 +230,9 @@ func defaultPRCommitMessage(flowID int64) string {
 	return fmt.Sprintf("chore(pr-flow): apply flow %d updates", flowID)
 }
 
-func resolveSCMRepoFromBindings(ctx context.Context, bindings []*core.ResourceBinding) (scmBindingInfo, bool) {
+func resolveEnabledSCMRepoFromBindings(ctx context.Context, bindings []*core.ResourceBinding) (scmBindingInfo, bool) {
 	for _, b := range bindings {
-		if b == nil || strings.TrimSpace(b.Kind) != "git" {
+		if !bindingSCMFlowEnabled(b) {
 			continue
 		}
 		repoPath := strings.TrimSpace(b.URI)
@@ -247,6 +256,7 @@ func resolveSCMRepoFromBindings(ctx context.Context, bindings []*core.ResourceBi
 			Provider:      provider,
 			RepoPath:      repoPath,
 			DefaultBranch: defaultBranch,
+			MergeMethod:   bindingMergeMethod(b),
 			RemoteHost:    strings.TrimSpace(remote.Host),
 			RemoteOwner:   strings.TrimSpace(remote.Owner),
 			RemoteRepo:    strings.TrimSpace(remote.Repo),
@@ -272,6 +282,29 @@ func bindingProvider(b *core.ResourceBinding, host string) string {
 	}
 }
 
+func bindingSCMFlowEnabled(b *core.ResourceBinding) bool {
+	if b == nil || strings.TrimSpace(strings.ToLower(b.Kind)) != "git" || b.Config == nil {
+		return false
+	}
+	return bindingConfigBool(b.Config["enable_scm_flow"])
+}
+
+func bindingConfigBool(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
 func bindingDefaultBranch(b *core.ResourceBinding) string {
 	if b != nil && b.Config != nil {
 		for _, key := range []string{"base_branch", "default_branch"} {
@@ -283,11 +316,8 @@ func bindingDefaultBranch(b *core.ResourceBinding) string {
 	return "main"
 }
 
-func mergeMethodFromBindings(bindings []*core.ResourceBinding) string {
-	for _, b := range bindings {
-		if b == nil || strings.TrimSpace(b.Kind) != "git" || b.Config == nil {
-			continue
-		}
+func bindingMergeMethod(b *core.ResourceBinding) string {
+	if b != nil && b.Config != nil {
 		if v, ok := b.Config["merge_method"].(string); ok && strings.TrimSpace(v) != "" {
 			return strings.TrimSpace(v)
 		}

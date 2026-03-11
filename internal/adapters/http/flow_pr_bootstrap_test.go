@@ -81,16 +81,33 @@ func TestBindingProvider_DetectsCodeup(t *testing.T) {
 	}
 }
 
-func TestResolveSCMRepoFromBindings_GitHub(t *testing.T) {
+func TestBindingSCMFlowEnabled_RequiresExplicitOptIn(t *testing.T) {
+	binding := &core.ResourceBinding{
+		Kind: "git",
+		Config: map[string]any{
+			"provider": "github",
+		},
+	}
+	if bindingSCMFlowEnabled(binding) {
+		t.Fatal("expected binding without enable_scm_flow to be disabled")
+	}
+	binding.Config["enable_scm_flow"] = true
+	if !bindingSCMFlowEnabled(binding) {
+		t.Fatal("expected binding with enable_scm_flow to be enabled")
+	}
+}
+
+func TestResolveEnabledSCMRepoFromBindings_GitHub(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme/demo.git")
 
-	info, ok := resolveSCMRepoFromBindings(context.Background(), []*core.ResourceBinding{{
+	info, ok := resolveEnabledSCMRepoFromBindings(context.Background(), []*core.ResourceBinding{{
 		Kind: "git",
 		URI:  dir,
 		Config: map[string]any{
-			"default_branch": "main",
+			"default_branch":  "main",
+			"enable_scm_flow": true,
 		},
 	}})
 	if !ok {
@@ -101,6 +118,22 @@ func TestResolveSCMRepoFromBindings_GitHub(t *testing.T) {
 	}
 	if info.DefaultBranch != "main" {
 		t.Fatalf("default branch = %q", info.DefaultBranch)
+	}
+}
+
+func TestResolveEnabledSCMRepoFromBindings_RequiresEnabledFlow(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme/demo.git")
+
+	if _, ok := resolveEnabledSCMRepoFromBindings(context.Background(), []*core.ResourceBinding{{
+		Kind: "git",
+		URI:  dir,
+		Config: map[string]any{
+			"default_branch": "main",
+		},
+	}}); ok {
+		t.Fatal("expected binding resolution to skip disabled scm flow binding")
 	}
 }
 

@@ -29,8 +29,11 @@ func (h *Handler) createFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var project *core.Project
 	if req.ProjectID != nil {
-		if _, err := h.store.GetProject(r.Context(), *req.ProjectID); err != nil {
+		var err error
+		project, err = h.store.GetProject(r.Context(), *req.ProjectID)
+		if err != nil {
 			if err == core.ErrNotFound {
 				writeError(w, http.StatusNotFound, "project not found", "PROJECT_NOT_FOUND")
 				return
@@ -52,6 +55,26 @@ func (h *Handler) createFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.ID = id
+
+	if project != nil {
+		bindings, err := h.store.ListResourceBindings(r.Context(), project.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+			return
+		}
+		if _, ok := resolveEnabledSCMRepoFromBindings(r.Context(), bindings); ok {
+			if _, err := h.bootstrapPRFlowForFlow(r.Context(), id, bootstrapPRFlowRequest{}); err != nil {
+				switch {
+				case errors.Is(err, errBootstrapPRFlowMissingProject), errors.Is(err, errBootstrapPRFlowMissingBinding):
+					// Ignore when the project does not have an enabled SCM flow binding.
+				default:
+					writeError(w, http.StatusInternalServerError, err.Error(), "AUTO_SCM_FLOW_BOOTSTRAP_FAILED")
+					return
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, f)
 }
 
@@ -280,4 +303,3 @@ func (h *Handler) cancelFlow(w http.ResponseWriter, r *http.Request) {
 		"status":  "cancelled",
 	})
 }
-

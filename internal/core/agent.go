@@ -36,7 +36,7 @@ type AgentProfile struct {
 	Name           string    `json:"name,omitempty"`
 	DriverID       string    `json:"driver_id"`
 	Role           AgentRole `json:"role"`
-	Capabilities   []string  `json:"capabilities,omitempty"`    // capability tags (dev.backend, test.qa, ...)
+	Capabilities   []string  `json:"capabilities,omitempty"`    // capability tags (backend, qa, review, ...)
 	ActionsAllowed []Action  `json:"actions_allowed,omitempty"` // permitted actions
 	PromptTemplate string    `json:"prompt_template,omitempty"`
 	Skills         []string  `json:"skills,omitempty"` // skill folder names to enable for this profile

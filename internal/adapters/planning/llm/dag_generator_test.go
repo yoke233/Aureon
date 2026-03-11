@@ -96,12 +96,12 @@ func TestValidateGeneratedDAG_BackwardReference(t *testing.T) {
 func TestValidateCapabilityFit_Pass(t *testing.T) {
 	profiles := []*core.AgentProfile{
 		{ID: "be", Role: core.RoleWorker, Capabilities: []string{"go", "backend"}},
-		{ID: "gater", Role: core.RoleGate, Capabilities: []string{"code-review"}},
+		{ID: "gater", Role: core.RoleGate, Capabilities: []string{"review"}},
 	}
 	dag := &GeneratedDAG{
 		Steps: []GeneratedStep{
 			{Name: "code", Type: "exec", AgentRole: "worker", RequiredCapabilities: []string{"go"}},
-			{Name: "review", Type: "gate", AgentRole: "gate", RequiredCapabilities: []string{"code-review"}},
+			{Name: "review", Type: "gate", AgentRole: "gate", RequiredCapabilities: []string{"review"}},
 		},
 	}
 	if err := validateCapabilityFit(dag, profiles); err != nil {
@@ -180,7 +180,7 @@ func TestDAGGenerator_Materialize(t *testing.T) {
 			{Name: "code-review", Type: "gate", AgentRole: "gate",
 				Description:          "Review the implementation for quality",
 				DependsOn:            []string{"implement-api"},
-				RequiredCapabilities: []string{"code-review"},
+				RequiredCapabilities: []string{"review"},
 				AcceptanceCriteria:   []string{"code quality approved"}},
 			{Name: "deploy", Type: "exec", AgentRole: "worker",
 				Description:          "Deploy to staging environment",
@@ -290,7 +290,7 @@ func TestDAGGenerator_Materialize_BadReference(t *testing.T) {
 func TestBuildDAGGenPrompt_WithProfiles(t *testing.T) {
 	profiles := []*core.AgentProfile{
 		{ID: "be-worker", Role: core.RoleWorker, Capabilities: []string{"go", "backend"}},
-		{ID: "reviewer", Role: core.RoleGate, Capabilities: []string{"code-review"}},
+		{ID: "reviewer", Role: core.RoleGate, Capabilities: []string{"review"}},
 	}
 	prompt := buildDAGGenPrompt("build an API", profiles)
 

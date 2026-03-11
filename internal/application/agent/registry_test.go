@@ -225,7 +225,7 @@ func TestConfigRegistry_ResolveForStep(t *testing.T) {
 		testProfile("lead", "claude-acp", core.RoleLead, "planning"),
 		testProfile("worker-be", "codex-acp", core.RoleWorker, "backend"),
 		testProfile("worker-fe", "claude-acp", core.RoleWorker, "frontend"),
-		testProfile("gate", "claude-acp", core.RoleGate, "code.review"),
+		testProfile("gate", "claude-acp", core.RoleGate, "review"),
 	})
 
 	tests := []struct {

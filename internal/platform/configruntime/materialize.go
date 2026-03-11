@@ -98,7 +98,7 @@ func ensurePRReviewer(drivers []*core.AgentDriver, profiles []*core.AgentProfile
 		Name:         "PR Reviewer (Codex)",
 		DriverID:     "codex",
 		Role:         core.RoleGate,
-		Capabilities: []string{"pr.review"},
+		Capabilities: []string{"prreview"},
 		ActionsAllowed: []core.Action{
 			core.ActionReadContext,
 			core.ActionSearchFiles,

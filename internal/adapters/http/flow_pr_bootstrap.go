@@ -186,7 +186,7 @@ func (h *Handler) bootstrapPRFlow(w http.ResponseWriter, r *http.Request) {
 		Timeout:    10 * time.Minute,
 		MaxRetries: 0,
 		RequiredCapabilities: []string{
-			"pr.review",
+			"prreview",
 		},
 		Config: map[string]any{
 			"merge_on_pass":          true,

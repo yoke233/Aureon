@@ -133,7 +133,7 @@ id = "lead"
 name = "Lead Agent"
 driver = "claude-acp"
 role = "lead"
-capabilities = ["planning", "code.review", "dev.fullstack"]
+capabilities = ["planning", "review", "fullstack"]
 skills = ["writing-wave-plans", "executing-wave-plans"]
 actions_allowed = ["read_context", "search_files", "fs_write", "terminal", "create_step", "expand_flow", "submit"]
 prompt_template = "team_leader"
@@ -149,7 +149,7 @@ id = "worker"
 name = "Worker (Codex)"
 driver = "codex-acp"
 role = "worker"
-capabilities = ["dev.backend", "dev.frontend", "test"]
+capabilities = ["backend", "frontend", "test"]
 actions_allowed = ["read_context", "search_files", "fs_write", "terminal", "submit"]
 prompt_template = "implement"
   [runtime.agents.profiles.session]
@@ -162,7 +162,7 @@ id = "reviewer"
 name = "Reviewer (Claude)"
 driver = "claude-acp"
 role = "gate"
-capabilities = ["code.review", "security.review"]
+capabilities = ["review"]
 actions_allowed = ["read_context", "search_files", "approve", "reject", "submit"]
 prompt_template = "review"
   [runtime.agents.profiles.session]

@@ -1,19 +1,21 @@
 # AI Workflow
 
-本项目为 Go 后端 + React 前端协作系统。
+AI Workflow 是一个面向多 Agent 编排的本地开发与执行系统，后端使用 Go，前端使用 React + Vite。
 
-当前主线已经收敛到单一路径：
+当前仓库的主线结构已经稳定在以下模块：
 
-- 后端 API 基线：`/api/*`
-- 后端主实现：`internal/backend`、`internal/engine`、`internal/core`、`internal/support`
-- 历史设计与旧实现：统一归档在 `archive-src/` 与 `docs/archive/`
+- `cmd/ai-flow`：主程序入口，提供 `server` 和 `executor` 命令。
+- `internal/application`：流程编排、调度、规则与业务服务。
+- `internal/adapters`：HTTP、存储、执行器等外部适配层。
+- `internal/core`：领域模型与核心接口。
+- `internal/platform`：配置、启动、运行时管理。
+- `internal/runtime`：Agent 运行时与会话管理。
+- `web/`：前端控制台。
+- `configs/`：提示词、配置模板、技能相关配置。
+- `scripts/test/`：后端、前端、集成与 smoke 脚本。
+- `docs/`：计划、规格、学习资料与归档文档。
 
-## 核心术语
-
-- `issue`：最小交付单元，包含目标、上下文、约束与验收标准。
-- `profile`：Agent 执行画像（角色与能力组合）。
-- `run`：一次执行实例，输入为 `issue + profile`，输出为事件与结果。
-- `Team Leader`：统一编排入口，负责 issue 拆分、profile 选择、run 启停与 review 汇总。
+历史方案和旧实现保留在 `archive-src/` 与 `docs/archive/`，不属于当前主线。
 
 ## 环境要求
 
@@ -21,60 +23,120 @@
 - Node.js 20+
 - Git
 
-## 本地启动
+## 快速开始
 
-### 0) 初始化配置（推荐）
-
-首次进入仓库目录后，先生成项目内配置文件：
-
-```powershell
-go run ./cmd/ai-flow config init
-```
-
-这会创建 `./.ai-workflow/config.toml`，后续按需修改该文件即可。
-
-如需覆盖已存在配置：
-
-```powershell
-go run ./cmd/ai-flow config init --force
-```
-
-> 如果不执行这一步，程序也能启动，会自动使用内置默认配置。
-
-### 1) 启动后端
-
-```powershell
-go run ./cmd/ai-flow server --port 8080
-```
-
-### 2) 启动前端
-
-首次安装依赖：
+### 1. 安装前端依赖
 
 ```powershell
 npm --prefix web install
 ```
 
-启动开发服务器：
+### 2. 启动后端
+
+```powershell
+go run ./cmd/ai-flow server --port 8080
+```
+
+服务启动后会自动：
+
+- 读取运行时数据目录下的配置文件 `config.toml`
+- 如果配置文件不存在，则写入一份默认配置
+- 暴露健康检查 `/health`
+- 在 `/api` 前缀下提供后端接口
+
+默认运行时数据目录：
+
+- 优先使用环境变量 `AI_WORKFLOW_DATA_DIR`
+- 未设置时使用仓库根目录下的 `.ai-workflow/`
+
+因此当前项目默认的运行时配置文件通常是：
+
+```text
+.\.ai-workflow\config.toml
+```
+
+### 3. 启动前端
 
 ```powershell
 npm --prefix web run dev -- --strictPort
 ```
 
-### 3) 访问地址
+### 4. 访问地址
 
-- 前端：`http://localhost:5173`
+- 前端开发环境：`http://127.0.0.1:5173`
 - 后端健康检查：`http://127.0.0.1:8080/health`
+- 后端 API 前缀：`http://127.0.0.1:8080/api`
 
-## 桌面版（Tauri）
+## 配置说明
 
-已提供 **Tauri + Go sidecar + React** 的桌面打包骨架：
+运行时配置以数据目录中的 `config.toml` 为准，而不是源码中的内嵌默认文件。
 
-- 前端：仍使用 `web/`（Vite 构建 `web/dist`）
-- 后端：`cmd/ai-flow` 作为 **sidecar** 随桌面应用发布，并在启动时自动拉起
-- Token：桌面版会通过 Tauri bridge 自动读取应用数据目录下的 `secrets.toml` 并注入到前端（首次启动不需要手动 `?token=...`）
+- 源码里的默认模板：`internal/platform/config/defaults.toml`
+- 运行时实际加载文件：`.ai-workflow/config.toml`
 
-开发运行（Windows）：
+后端启动后会监听运行时配置文件变更；直接修改 `.ai-workflow/config.toml` 会触发热重载并同步更新运行时 agent registry。
+
+敏感信息与 token 独立存放在 secrets 文件中，不应提交到仓库。
+
+## CLI
+
+查看版本：
+
+```powershell
+go run ./cmd/ai-flow version
+```
+
+启动服务：
+
+```powershell
+go run ./cmd/ai-flow server --port 8080
+```
+
+启动执行器：
+
+```powershell
+go run ./cmd/ai-flow executor --nats-url nats://127.0.0.1:4222 --agents claude,codex --max-concurrent 2
+```
+
+## 测试
+
+常用测试脚本位于 `scripts/test/`。
+
+后端全量测试：
+
+```powershell
+pwsh -NoProfile -File .\scripts\test\backend-all.ps1
+```
+
+前端单测：
+
+```powershell
+pwsh -NoProfile -File .\scripts\test\frontend-unit.ps1
+```
+
+前端构建验证：
+
+```powershell
+pwsh -NoProfile -File .\scripts\test\frontend-build.ps1
+```
+
+端到端集成回归：
+
+```powershell
+pwsh -NoProfile -File .\scripts\test\p3-integration.ps1
+```
+
+浏览器 E2E：
+
+```powershell
+pwsh -NoProfile -File .\scripts\test\project-admin-e2e.ps1
+```
+
+更多脚本说明见 `scripts/test/README.md`。
+
+## 桌面版
+
+仓库保留了 Tauri 桌面打包入口，根目录 `package.json` 提供：
 
 ```powershell
 npm install
@@ -82,36 +144,18 @@ npm run tauri:icons
 npm run tauri:dev
 ```
 
-构建打包（Windows）：
+构建桌面包：
 
 ```powershell
 npm install
 npm run tauri:build
 ```
 
-更多说明见：`docs/spec/tauri-desktop.md`。
-
-## 当前接口状态
-
-当前后端统一使用 `/api/*`，以 Flow / Step / Execution 为核心模型。
-
-## 测试与 Smoke
-
-基线脚本：
-
-```powershell
-pwsh -NoProfile -File .\scripts\test\smoke.ps1
-```
-
-聚合入口：
-
-```powershell
-pwsh -NoProfile -File .\scripts\test\p3-integration.ps1
-```
+更多说明见 `docs/spec/tauri-desktop.md`。
 
 ## 文档入口
 
-- 当前计划入口：`docs/plans/README.md`
-- 历史计划归档：`docs/archive/plans/README.md`
-- 历史 `v3` 设计归档：`docs/archive/v3/README.md`
-- 规格与学习资料：`docs/spec/`、`docs/thinking/`、`docs/learning/`
+- 当前计划：`docs/plans/README.md`
+- 测试脚本说明：`scripts/test/README.md`
+- 规格与学习资料：`docs/spec/`、`docs/learning/`
+- 历史归档：`docs/archive/`

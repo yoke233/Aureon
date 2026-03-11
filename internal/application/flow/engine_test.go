@@ -349,7 +349,7 @@ func TestErrorKindPermanent(t *testing.T) {
 func TestProfileRegistry(t *testing.T) {
 	profiles := []*core.AgentProfile{
 		{ID: "claude-worker", Role: core.RoleWorker, Capabilities: []string{"backend", "frontend"}},
-		{ID: "claude-gate", Role: core.RoleGate, Capabilities: []string{"code-review"}},
+		{ID: "claude-gate", Role: core.RoleGate, Capabilities: []string{"review"}},
 		{ID: "codex-worker", Role: core.RoleWorker, Capabilities: []string{"backend", "qa"}},
 	}
 	reg := NewProfileRegistry(profiles)
@@ -1163,7 +1163,7 @@ func TestFlowE2E_FullOrchestration(t *testing.T) {
 	profiles := []*core.AgentProfile{
 		{ID: "architect", Role: core.RoleWorker, Capabilities: []string{"design"}},
 		{ID: "coder", Role: core.RoleWorker, Capabilities: []string{"go"}},
-		{ID: "reviewer", Role: core.RoleGate, Capabilities: []string{"code-review"}},
+		{ID: "reviewer", Role: core.RoleGate, Capabilities: []string{"review"}},
 		{ID: "deployer", Role: core.RoleWorker, Capabilities: []string{"deploy"}},
 	}
 
@@ -1250,7 +1250,7 @@ func TestFlowE2E_FullOrchestration(t *testing.T) {
 		Status:               core.StepPending,
 		DependsOn:            []int64{implID},
 		AgentRole:            "gate",
-		RequiredCapabilities: []string{"code-review"},
+		RequiredCapabilities: []string{"review"},
 	})
 	deployID, _ := store.CreateStep(ctx, &core.Step{
 		FlowID:               fID,

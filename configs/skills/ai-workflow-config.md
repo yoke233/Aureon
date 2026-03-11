@@ -51,7 +51,7 @@ id = "worker"
 name = "Worker (Codex)"
 driver = "codex-acp"
 role = "worker"
-capabilities = ["dev.backend", "dev.frontend", "test"]
+capabilities = ["backend", "frontend", "test"]
 actions_allowed = ["read_context", "search_files", "fs_write", "terminal", "submit"]
 prompt_template = "implement"
   [runtime.agents.profiles.session]

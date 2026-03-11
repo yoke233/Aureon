@@ -252,7 +252,7 @@ func TestResolveForStep(t *testing.T) {
 
 	s.CreateProfile(ctx, testProfile("be-worker", "claude-acp", core.RoleWorker, "go", "backend"))
 	s.CreateProfile(ctx, testProfile("fe-worker", "codex-acp", core.RoleWorker, "react", "frontend"))
-	s.CreateProfile(ctx, testProfile("reviewer", "claude-acp", core.RoleGate, "code-review"))
+	s.CreateProfile(ctx, testProfile("reviewer", "claude-acp", core.RoleGate, "review"))
 
 	tests := []struct {
 		name    string

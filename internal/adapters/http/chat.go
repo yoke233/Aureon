@@ -1,12 +1,12 @@
 package api
 
 import (
-	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
+	"github.com/yoke233/ai-workflow/internal/core"
 )
 
 // chatHandlers holds the lead agent chat endpoint handlers.
@@ -19,23 +19,44 @@ func registerChatRoutes(r chi.Router, lead LeadChatService) {
 		return
 	}
 	h := &chatHandlers{lead: lead}
+	r.Get("/chat/sessions", h.listSessions)
 	r.Post("/chat", h.sendMessage)
+	r.Get("/chat/{sessionID}", h.getSession)
 	r.Post("/chat/{sessionID}/cancel", h.cancelChat)
 	r.Delete("/chat/{sessionID}", h.closeSession)
 	r.Get("/chat/{sessionID}/status", h.getStatus)
 }
 
-// POST /chat — send a message to the lead agent.
+// GET /chat/sessions — list persisted lead chat sessions.
+func (h *chatHandlers) listSessions(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.lead.ListSessions(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "LIST_CHAT_SESSIONS_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// POST /chat — deprecated, use WebSocket chat.send instead.
 func (h *chatHandlers) sendMessage(w http.ResponseWriter, r *http.Request) {
-	var req chatapp.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error(), "BAD_REQUEST")
+	writeError(w, http.StatusGone, "POST /api/chat is deprecated; use websocket message type chat.send", "CHAT_HTTP_DEPRECATED")
+}
+
+// GET /chat/{sessionID} — load one persisted session including message history.
+func (h *chatHandlers) getSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(chi.URLParam(r, "sessionID"))
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required", "BAD_REQUEST")
 		return
 	}
 
-	resp, err := h.lead.Chat(r.Context(), req)
+	resp, err := h.lead.GetSession(r.Context(), sessionID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error(), "CHAT_FAILED")
+		if errors.Is(err, core.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error(), "GET_CHAT_SESSION_FAILED")
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)

@@ -252,11 +252,40 @@ export interface ChatRequest {
   session_id?: string;
   message: string;
   work_dir?: string;
+  project_id?: number;
+  project_name?: string;
+  profile_id?: string;
 }
 
 export interface ChatResponse {
   session_id: string;
   reply: string;
+  ws_path?: string;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant" | string;
+  content: string;
+  time: string;
+}
+
+export interface ChatSessionSummary {
+  session_id: string;
+  title?: string;
+  work_dir?: string;
+  ws_path?: string;
+  project_id?: number;
+  project_name?: string;
+  profile_id?: string;
+  profile_name?: string;
+  created_at: string;
+  updated_at: string;
+  status: "running" | "alive" | "closed" | string;
+  message_count: number;
+}
+
+export interface ChatSessionDetail extends ChatSessionSummary {
+  messages: ChatMessage[];
 }
 
 export interface ChatStatusResponse {

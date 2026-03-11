@@ -16,6 +16,7 @@ import (
 	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
 	v2sandbox "github.com/yoke233/ai-workflow/internal/adapters/sandbox"
 	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
+	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
 	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
 	"github.com/yoke233/ai-workflow/internal/core"
 )
@@ -469,6 +470,45 @@ func TestAPI_ListEvents(t *testing.T) {
 	}
 }
 
+func TestAPI_ListEvents_FilterSessionID(t *testing.T) {
+	h, ts := setupAPI(t)
+
+	now := time.Now().UTC()
+	if _, err := h.store.CreateEvent(context.Background(), &core.Event{
+		Type:      core.EventChatOutput,
+		Data:      map[string]any{"session_id": "session-a", "type": "agent_message", "content": "hello"},
+		Timestamp: now,
+	}); err != nil {
+		t.Fatalf("create event a: %v", err)
+	}
+	if _, err := h.store.CreateEvent(context.Background(), &core.Event{
+		Type:      core.EventChatOutput,
+		Data:      map[string]any{"session_id": "session-b", "type": "agent_message", "content": "world"},
+		Timestamp: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create event b: %v", err)
+	}
+
+	resp, err := get(ts, "/events?types=chat.output&session_id=session-a")
+	if err != nil {
+		t.Fatalf("get events: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var events []core.Event
+	if err := decodeJSON(resp, &events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if got, _ := events[0].Data["session_id"].(string); got != "session-a" {
+		t.Fatalf("expected session-a, got %q", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // WebSocket Test
 // ---------------------------------------------------------------------------
@@ -505,6 +545,93 @@ func TestAPI_WebSocket(t *testing.T) {
 	}
 	if ev.FlowID != 42 {
 		t.Fatalf("expected flow_id=42, got %d", ev.FlowID)
+	}
+}
+
+func TestAPI_WebSocket_FilterSessionID(t *testing.T) {
+	h, ts := setupAPI(t)
+
+	wsURL := "ws" + ts.URL[4:] + "/ws?types=chat.output&session_id=s-1"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	h.bus.Publish(context.Background(), core.Event{
+		Type:      core.EventChatOutput,
+		Data:      map[string]any{"session_id": "s-2", "type": "agent_message_chunk", "content": "ignored"},
+		Timestamp: time.Now().UTC(),
+	})
+	h.bus.Publish(context.Background(), core.Event{
+		Type:      core.EventChatOutput,
+		Data:      map[string]any{"session_id": "s-1", "type": "agent_message_chunk", "content": "wanted"},
+		Timestamp: time.Now().UTC(),
+	})
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var ev core.Event
+	if err := conn.ReadJSON(&ev); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if ev.Type != core.EventChatOutput {
+		t.Fatalf("expected chat.output, got %s", ev.Type)
+	}
+	if got, _ := ev.Data["session_id"].(string); got != "s-1" {
+		t.Fatalf("expected session_id=s-1, got %q", got)
+	}
+}
+
+func TestAPI_WebSocket_ChatSend(t *testing.T) {
+	h, ts := setupAPI(t)
+	lead := &stubLeadChatService{
+		startResp: &chatapp.AcceptedResponse{
+			SessionID: "session-ws",
+			WSPath:    "/api/ws?session_id=session-ws&types=chat.output",
+		},
+	}
+	h.lead = lead
+
+	wsURL := "ws" + ts.URL[4:] + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"type": "chat.send",
+		"data": map[string]any{
+			"request_id": "req-1",
+			"message":    "你好",
+		},
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var ack struct {
+		Type string `json:"type"`
+		Data struct {
+			RequestID string `json:"request_id"`
+			SessionID string `json:"session_id"`
+			WSPath    string `json:"ws_path"`
+			Status    string `json:"status"`
+		} `json:"data"`
+	}
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if ack.Type != "chat.ack" {
+		t.Fatalf("ack type = %q, want chat.ack", ack.Type)
+	}
+	if ack.Data.RequestID != "req-1" || ack.Data.SessionID != "session-ws" {
+		t.Fatalf("unexpected ack data: %+v", ack.Data)
+	}
+	if lead.lastStartReq.Message != "你好" {
+		t.Fatalf("message = %q, want 你好", lead.lastStartReq.Message)
 	}
 }
 

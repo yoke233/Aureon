@@ -130,15 +130,22 @@ export interface SystemEventEnvelope extends WsEnvelope<SystemEventPayload> {
 
 export interface WsClientMessage {
   type:
+    | "chat.send"
     | "subscribe_run"
     | "unsubscribe_run"
     | "subscribe_issue"
     | "unsubscribe_issue"
     | "subscribe_chat_session"
     | "unsubscribe_chat_session";
+  request_id?: string;
   run_id?: string;
   issue_id?: string;
   session_id?: string;
+  message?: string;
+  work_dir?: string;
+  project_id?: number;
+  project_name?: string;
+  profile_id?: string;
 }
 
 export type WsEventHandler<TPayload = unknown> = (

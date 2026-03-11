@@ -12,6 +12,7 @@ import (
 type Store interface {
 	core.ProjectStore
 	core.ResourceBindingStore
+	core.IssueStore
 	core.FlowStore
 	core.StepStore
 	core.ExecutionStore
@@ -32,6 +33,9 @@ type EventBus interface {
 // LeadChatService is the chat contract required by the HTTP adapter.
 type LeadChatService interface {
 	Chat(ctx context.Context, req chatapp.Request) (*chatapp.Response, error)
+	StartChat(ctx context.Context, req chatapp.Request) (*chatapp.AcceptedResponse, error)
+	ListSessions(ctx context.Context) ([]chatapp.SessionSummary, error)
+	GetSession(ctx context.Context, sessionID string) (*chatapp.SessionDetail, error)
 	CancelChat(sessionID string) error
 	CloseSession(sessionID string)
 	IsSessionAlive(sessionID string) bool

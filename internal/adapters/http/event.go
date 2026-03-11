@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
 	"github.com/yoke233/ai-workflow/internal/core"
 )
 
@@ -73,6 +76,7 @@ func buildEventFilter(r *http.Request) core.EventFilter {
 			}
 		}
 	}
+	filter.SessionID = strings.TrimSpace(r.URL.Query().Get("session_id"))
 	return filter
 }
 
@@ -86,6 +90,14 @@ func (h *Handler) wsEvents(w http.ResponseWriter, r *http.Request) {
 		return // Upgrade writes its own error
 	}
 	defer conn.Close()
+
+	var writeMu sync.Mutex
+	writeJSON := func(v any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		return conn.WriteJSON(v)
+	}
 
 	// Parse subscribe options from query params.
 	var types []core.EventType
@@ -101,6 +113,7 @@ func (h *Handler) wsEvents(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("flow_id"); s != "" {
 		flowFilter, _ = strconv.ParseInt(s, 10, 64)
 	}
+	sessionFilter := strings.TrimSpace(r.URL.Query().Get("session_id"))
 
 	sub := h.bus.Subscribe(core.SubscribeOpts{
 		Types:      types,
@@ -113,9 +126,11 @@ func (h *Handler) wsEvents(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer close(done)
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			var msg wsMessage
+			if err := conn.ReadJSON(&msg); err != nil {
 				return
 			}
+			h.handleWSClientMessage(msg, writeJSON)
 		}
 	}()
 
@@ -131,13 +146,93 @@ func (h *Handler) wsEvents(w http.ResponseWriter, r *http.Request) {
 			if flowFilter != 0 && ev.FlowID != flowFilter {
 				continue
 			}
+			if sessionFilter != "" {
+				eventSessionID, _ := ev.Data["session_id"].(string)
+				if strings.TrimSpace(eventSessionID) != sessionFilter {
+					continue
+				}
+			}
 
-			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := conn.WriteJSON(ev); err != nil {
+			if err := writeJSON(ev); err != nil {
 				return
 			}
 		}
 	}
+}
+
+func (h *Handler) handleWSClientMessage(msg wsMessage, writeJSON func(v any) error) {
+	msgType := strings.TrimSpace(msg.Type)
+	switch msgType {
+	case "chat.send":
+		h.handleWSChatSend(msg, writeJSON)
+	default:
+		_ = writeJSON(wsOutboundMessage{
+			Type: "chat.error",
+			Data: wsErrorPayload{
+				Code:  "UNSUPPORTED_MESSAGE_TYPE",
+				Error: "unsupported websocket message type",
+			},
+		})
+	}
+}
+
+func (h *Handler) handleWSChatSend(msg wsMessage, writeJSON func(v any) error) {
+	if h.lead == nil {
+		_ = writeJSON(wsOutboundMessage{
+			Type: "chat.error",
+			Data: wsErrorPayload{
+				Code:  "CHAT_DISABLED",
+				Error: "lead chat service is not configured",
+			},
+		})
+		return
+	}
+
+	var req wsChatSendRequest
+	if len(msg.Data) > 0 {
+		if err := json.Unmarshal(msg.Data, &req); err != nil {
+			_ = writeJSON(wsOutboundMessage{
+				Type: "chat.error",
+				Data: wsErrorPayload{
+					Code:      "BAD_REQUEST",
+					RequestID: strings.TrimSpace(req.RequestID),
+					Error:     "invalid chat.send payload",
+				},
+			})
+			return
+		}
+	}
+
+	accepted, err := h.lead.StartChat(context.Background(), chatapp.Request{
+		SessionID:   strings.TrimSpace(req.SessionID),
+		Message:     req.Message,
+		WorkDir:     req.WorkDir,
+		ProjectID:   req.ProjectID,
+		ProjectName: strings.TrimSpace(req.ProjectName),
+		ProfileID:   strings.TrimSpace(req.ProfileID),
+	})
+	if err != nil {
+		_ = writeJSON(wsOutboundMessage{
+			Type: "chat.error",
+			Data: wsErrorPayload{
+				Code:      "CHAT_FAILED",
+				RequestID: strings.TrimSpace(req.RequestID),
+				SessionID: strings.TrimSpace(req.SessionID),
+				Error:     err.Error(),
+			},
+		})
+		return
+	}
+
+	_ = writeJSON(wsOutboundMessage{
+		Type: "chat.ack",
+		Data: wsChatAckPayload{
+			RequestID: strings.TrimSpace(req.RequestID),
+			SessionID: accepted.SessionID,
+			WSPath:    accepted.WSPath,
+			Status:    "accepted",
+		},
+	})
 }
 
 // wsMessage is the WebSocket message envelope (for potential future use).
@@ -146,3 +241,31 @@ type wsMessage struct {
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
+type wsOutboundMessage struct {
+	Type string `json:"type"`
+	Data any    `json:"data,omitempty"`
+}
+
+type wsChatSendRequest struct {
+	RequestID   string `json:"request_id,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	Message     string `json:"message"`
+	WorkDir     string `json:"work_dir,omitempty"`
+	ProjectID   int64  `json:"project_id,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
+	ProfileID   string `json:"profile_id,omitempty"`
+}
+
+type wsChatAckPayload struct {
+	RequestID string `json:"request_id,omitempty"`
+	SessionID string `json:"session_id"`
+	WSPath    string `json:"ws_path,omitempty"`
+	Status    string `json:"status"`
+}
+
+type wsErrorPayload struct {
+	RequestID string `json:"request_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Error     string `json:"error"`
+}

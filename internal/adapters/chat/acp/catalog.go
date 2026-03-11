@@ -1,0 +1,109 @@
+package acp
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
+)
+
+const leadSessionCatalogFileName = "lead-chat-sessions.json"
+
+type persistedLeadCatalog struct {
+	Sessions []*persistedLeadSession `json:"sessions"`
+}
+
+type persistedLeadSession struct {
+	SessionID   string            `json:"session_id"`
+	Scope       string            `json:"scope"`
+	WorkDir     string            `json:"work_dir,omitempty"`
+	Title       string            `json:"title,omitempty"`
+	ProjectID   int64             `json:"project_id,omitempty"`
+	ProjectName string            `json:"project_name,omitempty"`
+	ProfileID   string            `json:"profile_id,omitempty"`
+	ProfileName string            `json:"profile_name,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+	Messages    []chatapp.Message `json:"messages,omitempty"`
+}
+
+func loadLeadCatalog(path string) (map[string]*persistedLeadSession, error) {
+	if strings.TrimSpace(path) == "" {
+		return map[string]*persistedLeadSession{}, nil
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]*persistedLeadSession{}, nil
+		}
+		return nil, fmt.Errorf("read lead session catalog: %w", err)
+	}
+
+	var payload persistedLeadCatalog
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("decode lead session catalog: %w", err)
+	}
+
+	out := make(map[string]*persistedLeadSession, len(payload.Sessions))
+	for _, item := range payload.Sessions {
+		if item == nil {
+			continue
+		}
+		id := strings.TrimSpace(item.SessionID)
+		if id == "" {
+			continue
+		}
+		cloned := *item
+		cloned.Messages = append([]chatapp.Message(nil), item.Messages...)
+		out[id] = &cloned
+	}
+	return out, nil
+}
+
+func saveLeadCatalog(path string, sessions map[string]*persistedLeadSession) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create lead catalog dir: %w", err)
+	}
+
+	items := make([]*persistedLeadSession, 0, len(sessions))
+	for _, item := range sessions {
+		if item == nil || strings.TrimSpace(item.SessionID) == "" {
+			continue
+		}
+		cloned := *item
+		cloned.Messages = append([]chatapp.Message(nil), item.Messages...)
+		items = append(items, &cloned)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].SessionID < items[j].SessionID
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+
+	payload := persistedLeadCatalog{Sessions: items}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode lead session catalog: %w", err)
+	}
+
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return fmt.Errorf("write lead session catalog temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace lead session catalog: %w", err)
+	}
+	return nil
+}

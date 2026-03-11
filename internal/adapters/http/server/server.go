@@ -47,14 +47,19 @@ func NewServer(cfg Config) *Server {
 	r := chi.NewRouter()
 	r.Use(RecoveryMiddleware(logger))
 	r.Use(LoggingMiddleware(logger))
+	r.Use(SecurityHeadersMiddleware())
+	r.Use(HSTSMiddleware(0))
 	r.Use(CORSMiddleware(cfg.AllowedOrigins))
+	r.Use(MaxBodySizeMiddleware(0))
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	if cfg.RouteRegistrar != nil {
 		r.Route("/api", func(r chi.Router) {
 			if cfg.Auth != nil && !cfg.Auth.IsEmpty() {
-				r.Use(TokenAuthMiddleware(cfg.Auth))
+				rl := NewRateLimiter()
+				r.Use(RateLimitMiddleware(rl))
+				r.Use(TokenAuthMiddleware(cfg.Auth, WithRateLimiter(rl), WithAuthLogger(logger)))
 			}
 			cfg.RouteRegistrar(r)
 		})

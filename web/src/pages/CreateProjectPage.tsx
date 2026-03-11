@@ -173,7 +173,13 @@ export function CreateProjectPage() {
                       value={resource.label}
                       onChange={(event) => updateResource(index, { label: event.target.value })}
                     />
-                    <Button variant="ghost" size="icon" onClick={() => removeResource(index)}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10"
+                      aria-label={`删除第 ${index + 1} 个资源`}
+                      onClick={() => removeResource(index)}
+                    >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>

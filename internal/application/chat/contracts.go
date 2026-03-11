@@ -2,6 +2,34 @@ package chat
 
 import "time"
 
+type AvailableCommandInput struct {
+	Hint string `json:"hint,omitempty"`
+}
+
+type AvailableCommand struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Input       *AvailableCommandInput `json:"input,omitempty"`
+}
+
+type ConfigOptionValue struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	GroupID     string `json:"group_id,omitempty"`
+	GroupName   string `json:"group_name,omitempty"`
+}
+
+type ConfigOption struct {
+	ID           string              `json:"id"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description,omitempty"`
+	Category     string              `json:"category,omitempty"`
+	Type         string              `json:"type"`
+	CurrentValue string              `json:"current_value"`
+	Options      []ConfigOptionValue `json:"options,omitempty"`
+}
+
 // Request is the input for a direct chat message.
 type Request struct {
 	SessionID   string `json:"session_id"`
@@ -10,6 +38,7 @@ type Request struct {
 	ProjectID   int64  `json:"project_id,omitempty"`
 	ProjectName string `json:"project_name,omitempty"`
 	ProfileID   string `json:"profile_id,omitempty"`
+	DriverID    string `json:"driver_id,omitempty"`
 }
 
 // Response is the output from a direct chat message.
@@ -42,6 +71,7 @@ type SessionSummary struct {
 	ProjectName  string    `json:"project_name,omitempty"`
 	ProfileID    string    `json:"profile_id,omitempty"`
 	ProfileName  string    `json:"profile_name,omitempty"`
+	DriverID     string    `json:"driver_id,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	Status       string    `json:"status"`
@@ -51,5 +81,7 @@ type SessionSummary struct {
 // SessionDetail is a session summary plus the stored conversation history.
 type SessionDetail struct {
 	SessionSummary
-	Messages []Message `json:"messages"`
+	Messages          []Message          `json:"messages"`
+	AvailableCommands []AvailableCommand `json:"available_commands,omitempty"`
+	ConfigOptions     []ConfigOption     `json:"config_options,omitempty"`
 }

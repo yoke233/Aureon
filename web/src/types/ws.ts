@@ -146,6 +146,7 @@ export interface WsClientMessage {
   project_id?: number;
   project_name?: string;
   profile_id?: string;
+  driver_id?: string;
 }
 
 export type WsEventHandler<TPayload = unknown> = (

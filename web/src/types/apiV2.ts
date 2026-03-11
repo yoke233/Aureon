@@ -242,6 +242,34 @@ export interface AgentProfile {
   mcp?: AgentProfileMCP;
 }
 
+export interface ConfigOptionValue {
+  value: string;
+  name: string;
+  description?: string;
+  group_id?: string;
+  group_name?: string;
+}
+
+export interface ConfigOption {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  type: "select" | string;
+  current_value: string;
+  options: ConfigOptionValue[];
+}
+
+export interface SlashCommandInput {
+  hint?: string;
+}
+
+export interface SlashCommand {
+  name: string;
+  description?: string;
+  input?: SlashCommandInput;
+}
+
 export interface SkillMetadata {
   name: string;
   description: string;
@@ -318,6 +346,8 @@ export interface ChatSessionSummary {
 
 export interface ChatSessionDetail extends ChatSessionSummary {
   messages: ChatMessage[];
+  available_commands?: SlashCommand[];
+  config_options?: ConfigOption[];
 }
 
 export interface ChatStatusResponse {

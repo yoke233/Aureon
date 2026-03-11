@@ -26,13 +26,18 @@ export function Dialog({ open, onClose, children, className }: DialogProps) {
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-[2px]"
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
     >
-      <div className={cn("relative w-full max-w-lg rounded-lg border bg-card shadow-lg", className)}>
+      <div
+        className={cn(
+          "relative w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-card shadow-[0_24px_80px_rgba(15,23,42,0.24)]",
+          className,
+        )}
+      >
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-sm text-muted-foreground opacity-70 hover:opacity-100 transition-opacity"
+          className="absolute right-4 top-4 z-10 rounded-sm text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
         >
           <X className="h-4 w-4" />
         </button>

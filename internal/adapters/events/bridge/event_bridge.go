@@ -45,6 +45,10 @@ func (b *EventBridge) LastActivity() time.Time {
 	return time.Unix(0, b.lastActivity.Load())
 }
 
+func (b *EventBridge) SetSessionID(sessionID string) {
+	b.scope.SessionID = strings.TrimSpace(sessionID)
+}
+
 func (b *EventBridge) HandleSessionUpdate(ctx context.Context, update acpclient.SessionUpdate) error {
 	b.lastActivity.Store(time.Now().UnixNano())
 

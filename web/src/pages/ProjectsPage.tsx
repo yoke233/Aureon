@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Search, FolderOpen, GitBranch } from "lucide-react";
+import { Plus, Search, FolderOpen, GitBranch, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -92,7 +92,10 @@ export function ProjectsPage() {
     <div className="flex-1 space-y-6 p-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">项目</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">项目</h1>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+          </div>
           <p className="text-sm text-muted-foreground">真实读取项目与资源绑定，支持切换当前工作区。</p>
         </div>
         <div className="flex items-center gap-3">
@@ -117,7 +120,6 @@ export function ProjectsPage() {
         </div>
       </div>
 
-      {loading ? <p className="text-sm text-muted-foreground">加载项目统计中...</p> : null}
       {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">

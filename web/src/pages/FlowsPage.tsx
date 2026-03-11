@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Search, GitBranch } from "lucide-react";
+import { Plus, Search, GitBranch, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,7 +68,10 @@ export function FlowsPage() {
     <div className="flex-1 space-y-6 p-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">流程</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">流程</h1>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+          </div>
           <p className="text-sm text-muted-foreground">
             {selectedProject ? `当前项目：${selectedProject.name}` : "当前展示全部项目的 flow"}
           </p>
@@ -81,7 +84,6 @@ export function FlowsPage() {
         </Link>
       </div>
 
-      {loading ? <p className="text-sm text-muted-foreground">加载 flow 列表中...</p> : null}
       {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <Card>

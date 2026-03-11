@@ -445,6 +445,50 @@ func TestEventCRUD(t *testing.T) {
 	}
 }
 
+func TestEventListFiltersBySessionID(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	fID, _ := s.CreateFlow(ctx, &core.Flow{Name: "f", Status: core.FlowPending})
+
+	if _, err := s.CreateEvent(ctx, &core.Event{
+		Type:   core.EventChatOutput,
+		FlowID: fID,
+		Data: map[string]any{
+			"session_id": "session-a",
+			"type":       "agent_message",
+			"content":    "hello",
+		},
+	}); err != nil {
+		t.Fatalf("create chat event a: %v", err)
+	}
+	if _, err := s.CreateEvent(ctx, &core.Event{
+		Type:   core.EventChatOutput,
+		FlowID: fID,
+		Data: map[string]any{
+			"session_id": "session-b",
+			"type":       "agent_message",
+			"content":    "world",
+		},
+	}); err != nil {
+		t.Fatalf("create chat event b: %v", err)
+	}
+
+	events, err := s.ListEvents(ctx, core.EventFilter{
+		SessionID: "session-a",
+		Types:     []core.EventType{core.EventChatOutput},
+	})
+	if err != nil {
+		t.Fatalf("list events by session: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if got, _ := events[0].Data["session_id"].(string); got != "session-a" {
+		t.Fatalf("expected session-a, got %q", got)
+	}
+}
+
 func TestProjectCRUD_NewFields(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -49,6 +49,10 @@ func (s *Store) ListEvents(ctx context.Context, filter core.EventFilter) ([]*cor
 		conditions = append(conditions, "exec_id = ?")
 		args = append(args, *filter.ExecID)
 	}
+	if strings.TrimSpace(filter.SessionID) != "" {
+		conditions = append(conditions, "json_extract(data, '$.session_id') = ?")
+		args = append(args, strings.TrimSpace(filter.SessionID))
+	}
 	if len(filter.Types) > 0 {
 		placeholders := make([]string, len(filter.Types))
 		for i, t := range filter.Types {

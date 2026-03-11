@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Clock,
   GitBranch,
+  Loader2,
   Play,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -156,7 +157,10 @@ export function DashboardPage() {
     <div className="flex-1 space-y-6 p-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">仪表盘</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">仪表盘</h1>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+          </div>
           <p className="text-sm text-muted-foreground">
             {selectedProject ? `当前项目：${selectedProject.name}` : "跨项目总览"}
             {stats ? ` / 总计 ${stats.total_flows} 个流程` : ""}
@@ -194,7 +198,6 @@ export function DashboardPage() {
         ))}
       </div>
 
-      {loading ? <p className="text-sm text-muted-foreground">加载仪表盘数据中...</p> : null}
       {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <div className="grid gap-6 lg:grid-cols-3">

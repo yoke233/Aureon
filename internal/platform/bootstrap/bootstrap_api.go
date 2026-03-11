@@ -25,6 +25,7 @@ func buildAPIStack(
 		Registry: base.registry,
 		Bus:      base.bus,
 		Sandbox:  sb,
+		DataDir:  base.dataDir,
 	})
 
 	var dagGen api.DAGGenerator

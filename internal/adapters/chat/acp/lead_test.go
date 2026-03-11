@@ -214,3 +214,110 @@ func TestLeadAgentPersistsProjectAndProfileSelection(t *testing.T) {
 		t.Fatalf("unexpected profile info: %+v", detail.SessionSummary)
 	}
 }
+
+func TestLeadAgentPersistsSessionStateMetadata(t *testing.T) {
+	registry := &fakeLeadRegistry{
+		profile: &core.AgentProfile{
+			ID:   "lead",
+			Name: "Claude Lead",
+			Role: core.RoleLead,
+		},
+		driver: &core.AgentDriver{
+			ID:            "claude-acp",
+			LaunchCommand: "fake",
+		},
+	}
+	client := &fakeChatACPClient{
+		newSessionID: "acp-session-3",
+		promptReply:  "reply",
+	}
+
+	agent := NewLeadAgent(LeadAgentConfig{
+		Registry: registry,
+		Bus:      membus.NewBus(),
+		Sandbox:  v2sandbox.NoopSandbox{},
+		DataDir:  t.TempDir(),
+		NewClient: func(_ acpclient.LaunchConfig, _ acpproto.Client, _opts ...acpclient.Option) (ChatACPClient, error) {
+			return client, nil
+		},
+	})
+
+	resp, err := agent.Chat(context.Background(), chatapp.Request{Message: "hello"})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+
+	agent.captureSessionState(resp.SessionID, acpclient.SessionUpdate{
+		Type: "available_commands_update",
+		Commands: []acpproto.AvailableCommand{
+			{
+				Name:        "review",
+				Description: "Review current changes",
+				Input: &acpproto.AvailableCommandInput{
+					Unstructured: &acpproto.UnstructuredCommandInput{Hint: "optional instructions"},
+				},
+			},
+		},
+	})
+	agent.captureSessionState(resp.SessionID, acpclient.SessionUpdate{
+		Type: "config_option_update",
+		ConfigOptions: []acpproto.SessionConfigOptionSelect{
+			{
+				Type:         "select",
+				Id:           acpproto.SessionConfigId("model"),
+				Name:         "Model",
+				CurrentValue: acpproto.SessionConfigValueId("model-1"),
+				Options: acpproto.SessionConfigSelectOptions{
+					Ungrouped: &acpproto.SessionConfigSelectOptionsUngrouped{
+						{
+							Value: acpproto.SessionConfigValueId("model-1"),
+							Name:  "Model 1",
+						},
+						{
+							Value: acpproto.SessionConfigValueId("model-2"),
+							Name:  "Model 2",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	detail, err := agent.GetSession(context.Background(), resp.SessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if len(detail.AvailableCommands) != 1 || detail.AvailableCommands[0].Name != "review" {
+		t.Fatalf("unexpected available commands: %+v", detail.AvailableCommands)
+	}
+	if detail.AvailableCommands[0].Input == nil || detail.AvailableCommands[0].Input.Hint != "optional instructions" {
+		t.Fatalf("unexpected command input: %+v", detail.AvailableCommands[0].Input)
+	}
+	if len(detail.ConfigOptions) != 1 {
+		t.Fatalf("unexpected config options: %+v", detail.ConfigOptions)
+	}
+	if detail.ConfigOptions[0].ID != "model" || detail.ConfigOptions[0].CurrentValue != "model-1" {
+		t.Fatalf("unexpected config option payload: %+v", detail.ConfigOptions[0])
+	}
+	if len(detail.ConfigOptions[0].Options) != 2 {
+		t.Fatalf("unexpected config option values: %+v", detail.ConfigOptions[0].Options)
+	}
+
+	agent.Shutdown()
+	reloaded := NewLeadAgent(LeadAgentConfig{
+		Registry: registry,
+		Bus:      membus.NewBus(),
+		Sandbox:  v2sandbox.NoopSandbox{},
+		DataDir:  agent.cfg.DataDir,
+		NewClient: func(_ acpclient.LaunchConfig, _ acpproto.Client, _opts ...acpclient.Option) (ChatACPClient, error) {
+			return client, nil
+		},
+	})
+	reloadedDetail, err := reloaded.GetSession(context.Background(), resp.SessionID)
+	if err != nil {
+		t.Fatalf("get reloaded session: %v", err)
+	}
+	if len(reloadedDetail.AvailableCommands) != 1 || len(reloadedDetail.ConfigOptions) != 1 {
+		t.Fatalf("expected persisted session state, got commands=%+v config=%+v", reloadedDetail.AvailableCommands, reloadedDetail.ConfigOptions)
+	}
+}

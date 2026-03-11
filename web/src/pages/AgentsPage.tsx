@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Settings2, Bot } from "lucide-react";
+import { Plus, Settings2, Bot, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -122,7 +122,10 @@ export function AgentsPage() {
     <div className="flex-1 space-y-6 p-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">代理管理</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">代理管理</h1>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+          </div>
           <p className="text-sm text-muted-foreground">读取和写入 runtime registry 中的 drivers 与 profiles。</p>
         </div>
         <div className="flex gap-2">
@@ -137,7 +140,6 @@ export function AgentsPage() {
         </div>
       </div>
 
-      {loading ? <p className="text-sm text-muted-foreground">加载代理配置中...</p> : null}
       {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <Card>

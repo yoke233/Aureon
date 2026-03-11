@@ -269,6 +269,7 @@ export function FlowDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold">{flow?.name ?? `Flow #${flowId}`}</h1>
             {flow ? <StatusBadge status={flow.status} /> : null}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Flow #{flow?.id ?? flowId}</span>
@@ -286,7 +287,6 @@ export function FlowDetailPage() {
         </div>
       </div>
 
-      {loading ? <p className="px-8 py-4 text-sm text-muted-foreground">加载 flow 详情中...</p> : null}
       {error ? <p className="mx-8 mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <div className="flex flex-1 overflow-hidden">

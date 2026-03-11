@@ -16,6 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type {
+  AgentDriver,
   AgentProfile,
   ChatMessage,
   ChatSessionDetail,
@@ -24,16 +25,9 @@ import type {
 } from "@/types/apiV2";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
 import { cn } from "@/lib/utils";
 import { getErrorMessage } from "@/lib/v2Workbench";
@@ -86,25 +80,29 @@ interface ChatActivityView {
   usageUsed?: number;
 }
 
-type ChatTimelineItem =
-  | {
-      kind: "message";
-      id: string;
-      at: string;
-      message: ChatMessageView;
-    }
-  | {
-      kind: "activity";
-      id: string;
-      at: string;
-      activity: ChatActivityView;
-    };
+interface ChatEventListItem {
+  id: string;
+  at: string;
+  time: string;
+  label: string;
+  rawType: string;
+  summary?: string;
+  detail?: string;
+  raw?: string;
+  tone: "default" | "success" | "warning" | "danger";
+}
 
 interface SessionGroup {
   key: string;
   label: string;
   updatedAt: string;
   sessions: SessionRecord[];
+}
+
+interface LeadDriverOption {
+  key: string;
+  label: string;
+  driverId: string;
 }
 
 const UNKNOWN_PROJECT_GROUP = "project:unknown";
@@ -160,6 +158,31 @@ const toProjectGroupKey = (projectId?: number | null): string => (
   projectId == null ? UNKNOWN_PROJECT_GROUP : `project:${projectId}`
 );
 
+const normalizeDriverKey = (driverId?: string): string => {
+  const normalized = driverId?.trim().toLowerCase() ?? "";
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.includes("codex")) {
+    return "codex";
+  }
+  if (normalized.includes("claude")) {
+    return "claude";
+  }
+  return normalized;
+};
+
+const driverLabelForId = (driverId?: string): string => {
+  switch (normalizeDriverKey(driverId)) {
+    case "codex":
+      return "Codex";
+    case "claude":
+      return "Claude";
+    default:
+      return fallbackLabel(driverId, "未指定 Driver");
+  }
+};
+
 const badgeVariantForStatus = (status?: string): "success" | "warning" | "secondary" => {
   switch (status) {
     case "running":
@@ -199,6 +222,59 @@ const toNumberValue = (value: unknown): number | undefined => {
   return undefined;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+);
+
+const compactText = (value: string, maxLength = 160): string => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength)}...`;
+};
+
+const stringifyJSON = (value: unknown): string | undefined => {
+  if (value == null) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return undefined;
+  }
+};
+
+const extractTextPreview = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractTextPreview(item))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+  if (!isRecord(value)) {
+    return "";
+  }
+  return [
+    toStringValue(value.text),
+    toStringValue(value.content),
+    toStringValue(value.newText),
+    toStringValue(value.path),
+    toStringValue(value.name),
+    toStringValue(value.title),
+  ]
+    .filter((item) => item.trim())
+    .join("\n")
+    .trim();
+};
+
 const formatUsageValue = (value?: number): string => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "--";
@@ -217,6 +293,157 @@ const formatUsagePercent = (used?: number, size?: number): number | null => {
     return null;
   }
   return Math.max(0, Math.min(100, (used / size) * 100));
+};
+
+const eventToneForType = (rawType: string): ChatEventListItem["tone"] => {
+  switch (rawType) {
+    case "error":
+      return "danger";
+    case "tool_call":
+    case "tool_call_update":
+      return "warning";
+    case "tool_call_completed":
+    case "done":
+      return "success";
+    default:
+      return "default";
+  }
+};
+
+const labelForEventType = (rawType: string): string => {
+  switch (rawType) {
+    case "agent_message_chunk":
+      return "增量输出";
+    case "agent_message":
+      return "回复完成";
+    case "agent_thought":
+      return "思考";
+    case "tool_call":
+      return "工具调用";
+    case "tool_call_update":
+      return "工具更新";
+    case "tool_call_completed":
+      return "工具完成";
+    case "usage_update":
+      return "上下文用量";
+    case "available_commands_update":
+      return "命令列表更新";
+    case "config_option_update":
+    case "config_options_update":
+      return "会话配置更新";
+    case "done":
+      return "会话完成";
+    case "error":
+      return "会话错误";
+    default:
+      return rawType || "事件";
+  }
+};
+
+const buildEventSummary = (event: ApiEvent): { rawType: string; summary?: string; detail?: string } => {
+  const data = isRecord(event.data) ? event.data : {};
+  const payload = toRealtimePayload(event);
+  const acp = isRecord(data.acp) ? data.acp : {};
+  const rawType = toStringValue(acp.sessionUpdate) || payload.type?.trim() || event.type;
+  const status = toStringValue(data.status) || toStringValue(acp.status);
+  const title = toStringValue(acp.title);
+  const text = toStringValue(data.text);
+  const contentPreview = extractTextPreview(acp.content);
+  const content = payload.content?.trim() || text.trim() || contentPreview || title.trim();
+  const details: string[] = [];
+
+  if (status) {
+    details.push(`status: ${status}`);
+  }
+  if (payload.tool_call_id?.trim()) {
+    details.push(`tool_call_id: ${payload.tool_call_id.trim()}`);
+  }
+  if (rawType === "usage_update") {
+    const usageSize = toNumberValue(data.usage_size) ?? payload.usage_size;
+    const usageUsed = toNumberValue(data.usage_used) ?? payload.usage_used;
+    return {
+      rawType,
+      summary: `已用 ${formatUsageValue(usageUsed)} / ${formatUsageValue(usageSize)}`,
+      detail: details.length > 0 ? details.join("\n") : undefined,
+    };
+  }
+  if (rawType === "available_commands_update") {
+    const commands = Array.isArray(acp.availableCommands) ? acp.availableCommands : [];
+    const names = commands
+      .map((item) => (isRecord(item) ? toStringValue(item.name).trim() : ""))
+      .filter(Boolean)
+      .slice(0, 6);
+    return {
+      rawType,
+      summary: names.length > 0 ? `${commands.length} 个命令: ${names.join(", ")}` : `${commands.length} 个命令`,
+      detail: details.length > 0 ? details.join("\n") : undefined,
+    };
+  }
+  if (rawType === "config_option_update" || rawType === "config_options_update") {
+    const options = Array.isArray(acp.configOptions) ? acp.configOptions : [];
+    const names = options
+      .map((item) => {
+        if (!isRecord(item)) {
+          return "";
+        }
+        const id = toStringValue(item.id).trim();
+        const currentValue = toStringValue(item.currentValue).trim();
+        return [id, currentValue].filter(Boolean).join("=");
+      })
+      .filter(Boolean)
+      .slice(0, 6);
+    return {
+      rawType,
+      summary: names.length > 0 ? `${options.length} 项: ${names.join(", ")}` : `${options.length} 项配置`,
+      detail: details.length > 0 ? details.join("\n") : undefined,
+    };
+  }
+
+  const summary = compactText(content || title || status || rawType, rawType === "agent_message_chunk" ? 120 : 180);
+  if (title.trim() && title.trim() !== summary) {
+    details.unshift(`title: ${title.trim()}`);
+  }
+  const keepFullContentInDetail = (
+    rawType === "tool_call"
+    || rawType === "tool_call_update"
+    || rawType === "tool_call_completed"
+  );
+  if (keepFullContentInDetail && content.trim() && content.trim() !== summary) {
+    details.push(content.trim());
+  }
+  return {
+    rawType,
+    summary: summary || undefined,
+    detail: details.length > 0 ? details.join("\n\n") : undefined,
+  };
+};
+
+const toEventListItem = (event: ApiEvent): ChatEventListItem => {
+  const { rawType, summary, detail } = buildEventSummary(event);
+  const data = isRecord(event.data) ? event.data : {};
+  const shouldShowRaw = (
+    isRecord(data.acp)
+    || !!toStringValue(data.tool_call_id).trim()
+    || typeof data.exit_code === "number"
+    || !!toStringValue(data.stderr).trim()
+    || rawType === "tool_call"
+    || rawType === "tool_call_update"
+    || rawType === "tool_call_completed"
+    || rawType === "available_commands_update"
+    || rawType === "config_option_update"
+    || rawType === "config_options_update"
+  );
+  return {
+    id: `event-${event.id}`,
+    at: event.timestamp,
+    time: formatActivityTime(event.timestamp),
+    label: labelForEventType(rawType),
+    rawType,
+    summary,
+    detail,
+    raw: shouldShowRaw ? stringifyJSON(event.data) : undefined,
+    tone: eventToneForType(rawType),
+  };
 };
 
 const buildToolResultDetail = (payload: RealtimeChatOutputPayload): string => {
@@ -379,6 +606,22 @@ const toRealtimePayload = (event: ApiEvent): RealtimeChatOutputPayload => ({
   usage_used: toNumberValue(event.data?.usage_used),
 });
 
+const buildRealtimeEvent = (id: number, at: string, payload: RealtimeChatOutputPayload): ApiEvent => ({
+  id,
+  type: "chat.output",
+  timestamp: at,
+  data: {
+    session_id: payload.session_id,
+    type: payload.type,
+    content: payload.content,
+    tool_call_id: payload.tool_call_id,
+    stderr: payload.stderr,
+    exit_code: payload.exit_code,
+    usage_size: payload.usage_size,
+    usage_used: payload.usage_used,
+  },
+});
+
 const buildActivityHistory = (
   sessionId: string,
   events: ApiEvent[],
@@ -398,106 +641,80 @@ const buildActivityHistory = (
   }, []);
 };
 
-function ActivityBlock({ activity }: { activity: ChatActivityView }) {
-  const isCollapsible = activity.type === "tool_call";
-  const [expanded, setExpanded] = useState(!isCollapsible);
-  const usagePercent = formatUsagePercent(activity.usageUsed, activity.usageSize);
+function EventLogRow({ item }: { item: ChatEventListItem }) {
+  const hasExpandedContent = Boolean(item.detail || item.raw);
+  const shouldCollapseByDefault = hasExpandedContent && (
+    item.rawType.includes("tool")
+    || item.rawType === "available_commands_update"
+    || item.rawType === "config_option_update"
+    || item.rawType === "config_options_update"
+    || (item.raw?.length ?? 0) > 320
+  );
+  const [expanded, setExpanded] = useState(!shouldCollapseByDefault);
 
   const icon = (() => {
-    switch (activity.type) {
-      case "agent_thought":
-        return <Brain className="h-4 w-4 text-sky-600" />;
-      case "tool_call":
-        if (activity.status === "failed") {
-          return <AlertTriangle className="h-4 w-4 text-rose-600" />;
-        }
-        if (activity.status === "completed") {
-          return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
-        }
+    switch (item.tone) {
+      case "danger":
+        return <AlertTriangle className="h-4 w-4 text-rose-600" />;
+      case "success":
+        return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
+      case "warning":
         return <Wrench className="h-4 w-4 text-amber-600" />;
-      case "usage_update":
-        return <Gauge className="h-4 w-4 text-violet-600" />;
       default:
-        return <Bot className="h-4 w-4 text-muted-foreground" />;
+        if (item.rawType === "agent_thought") {
+          return <Brain className="h-4 w-4 text-sky-600" />;
+        }
+        if (item.rawType === "usage_update") {
+          return <Gauge className="h-4 w-4 text-violet-600" />;
+        }
+        return <Bot className="h-4 w-4 text-slate-500" />;
     }
-  })();
-
-  const statusLabel = (() => {
-    if (activity.type !== "tool_call") {
-      return null;
-    }
-    if (activity.status === "failed") {
-      return "失败";
-    }
-    if (activity.status === "completed") {
-      return "完成";
-    }
-    return "执行中";
   })();
 
   return (
-    <div className="max-w-[720px] pl-11">
-      <div className="rounded-lg border bg-background/80 px-4 py-3 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 shrink-0">{icon}</div>
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-sm font-medium">{activity.title}</span>
-              {statusLabel ? (
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-[10px] font-medium",
-                    activity.status === "failed"
-                      ? "bg-rose-100 text-rose-700"
-                      : activity.status === "completed"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-amber-100 text-amber-700",
-                  )}
-                >
-                  {statusLabel}
-                </span>
-              ) : null}
-              <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{activity.time}</span>
-              {isCollapsible && activity.detail ? (
-                <button
-                  type="button"
-                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => setExpanded((current) => !current)}
-                  aria-label={expanded ? "收起" : "展开"}
-                >
-                  {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                </button>
-              ) : null}
-            </div>
-
-            {activity.type === "usage_update" ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{activity.detail}</span>
-                  <span>{usagePercent != null ? `${usagePercent.toFixed(1)}%` : "--"}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-[width] duration-300",
-                      usagePercent != null && usagePercent >= 85
-                        ? "bg-rose-500"
-                        : usagePercent != null && usagePercent >= 60
-                          ? "bg-amber-500"
-                          : "bg-emerald-500",
-                    )}
-                    style={{ width: `${Math.max(usagePercent ?? 0, usagePercent == null ? 0 : 4)}%` }}
-                  />
-                </div>
+    <div className="rounded-xl border bg-background/90 px-4 py-3 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 shrink-0">{icon}</div>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="w-24 shrink-0 font-mono text-[11px] text-muted-foreground">{item.time}</div>
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="text-[10px]">
+                  {item.label}
+                </Badge>
+                <span className="font-mono text-[10px] text-muted-foreground">{item.rawType}</span>
               </div>
-            ) : null}
-
-            {activity.type !== "usage_update" && (!isCollapsible || expanded) && activity.detail ? (
-              <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 px-3 py-2 text-xs leading-6 text-foreground">
-                {activity.detail}
-              </pre>
+              {item.summary ? (
+                <p className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground">
+                  {item.summary}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">无摘要</p>
+              )}
+            </div>
+            {hasExpandedContent ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onClick={() => setExpanded((current) => !current)}
+              >
+                {expanded ? "收起" : "展开"}
+              </button>
             ) : null}
           </div>
+
+          {expanded && item.detail ? (
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[11px] leading-6 text-foreground">
+              {item.detail}
+            </pre>
+          ) : null}
+
+          {expanded && item.raw ? (
+            <pre className="max-h-[360px] overflow-auto rounded-lg border bg-slate-950 px-3 py-3 font-mono text-[11px] leading-6 text-slate-100">
+              {item.raw}
+            </pre>
+          ) : null}
         </div>
       </div>
     </div>
@@ -515,16 +732,19 @@ export function ChatPage() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [messagesBySession, setMessagesBySession] = useState<Record<string, ChatMessageView[]>>({});
+  const [eventsBySession, setEventsBySession] = useState<Record<string, ApiEvent[]>>({});
   const [activitiesBySession, setActivitiesBySession] = useState<Record<string, ChatActivityView[]>>({});
   const [draftMessages, setDraftMessages] = useState<ChatMessageView[]>([]);
   const [loadedSessions, setLoadedSessions] = useState<Record<string, boolean>>({});
   const [sessionSearch, setSessionSearch] = useState("");
   const [messageInput, setMessageInput] = useState("");
+  const [drivers, setDrivers] = useState<AgentDriver[]>([]);
   const [leadProfiles, setLeadProfiles] = useState<AgentProfile[]>([]);
   const [draftProjectId, setDraftProjectId] = useState<number | null>(selectedProjectId);
   const [draftProfileId, setDraftProfileId] = useState("");
+  const [draftDriverId, setDraftDriverId] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [newSessionDialogOpen, setNewSessionDialogOpen] = useState(false);
+  const [detailView, setDetailView] = useState<"chat" | "events">("chat");
   const [submitting, setSubmitting] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -532,6 +752,7 @@ export function ChatPage() {
   const pendingChunkBuffersRef = useRef<Record<string, string>>({});
   const chunkFlushFrameRef = useRef<number | null>(null);
   const pendingRequestIdRef = useRef<string | null>(null);
+  const syntheticEventIdRef = useRef(-1);
 
   const syncSessionDetail = (detail: ChatSessionDetail) => {
     const record = toDetailRecord(detail);
@@ -555,11 +776,26 @@ export function ChatPage() {
     }));
   };
 
-  const syncSessionActivities = (sessionId: string, events: ApiEvent[]) => {
-    setActivitiesBySession((current) => ({
-      ...current,
-      [sessionId]: buildActivityHistory(sessionId, events),
-    }));
+  const syncSessionEvents = (sessionId: string, events: ApiEvent[]) => {
+    setEventsBySession((current) => {
+      const latestLoadedAt = events.reduce((maxTime, event) => (
+        Math.max(maxTime, new Date(event.timestamp).getTime())
+      ), 0);
+      const pendingRealtime = (current[sessionId] ?? []).filter((event) => (
+        event.id < 0 && new Date(event.timestamp).getTime() > latestLoadedAt
+      ));
+      const merged = [...events, ...pendingRealtime].sort((left, right) => (
+        new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+      ));
+      setActivitiesBySession((activityCurrent) => ({
+        ...activityCurrent,
+        [sessionId]: buildActivityHistory(sessionId, merged),
+      }));
+      return {
+        ...current,
+        [sessionId]: merged,
+      };
+    });
   };
 
   const loadSessionState = async (sessionId: string) => {
@@ -573,7 +809,7 @@ export function ChatPage() {
       }),
     ]);
     syncSessionDetail(detail);
-    syncSessionActivities(sessionId, events);
+    syncSessionEvents(sessionId, events);
   };
 
   const refreshSessions = async (preferredSessionId?: string | null) => {
@@ -608,17 +844,27 @@ export function ChatPage() {
     let cancelled = false;
     (async () => {
       try {
-        const profiles = await apiClient.listProfiles();
+        const [profiles, driverList] = await Promise.all([
+          apiClient.listProfiles(),
+          apiClient.listDrivers(),
+        ]);
         if (cancelled) {
           return;
         }
         const leads = profiles.filter((profile) => profile.role === "lead");
+        setDrivers(driverList);
         setLeadProfiles(leads);
         setDraftProfileId((current) => {
           if (current && leads.some((profile) => profile.id === current)) {
             return current;
           }
           return leads[0]?.id ?? "";
+        });
+        setDraftDriverId((current) => {
+          if (current && driverList.some((driver) => driver.id === current)) {
+            return current;
+          }
+          return driverList[0]?.id ?? "";
         });
       } catch (loadError) {
         if (!cancelled) {
@@ -723,30 +969,53 @@ export function ChatPage() {
     () => new Map(projects.map((project) => [project.id, project.name])),
     [projects],
   );
-  const leadProfileMap = useMemo(
-    () => new Map(leadProfiles.map((profile) => [profile.id, profile])),
-    [leadProfiles],
+  const leadDriverOptions = useMemo<LeadDriverOption[]>(() => {
+    const grouped = new Map<string, LeadDriverOption>();
+    for (const driver of drivers) {
+      const key = normalizeDriverKey(driver.id);
+      if (!key) {
+        continue;
+      }
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          key,
+          label: driverLabelForId(driver.id),
+          driverId: driver.id,
+        });
+      }
+    }
+    const rank = (key: string): number => {
+      if (key === "codex") {
+        return 0;
+      }
+      if (key === "claude") {
+        return 1;
+      }
+      return 9;
+    };
+    return Array.from(grouped.values()).sort((left, right) => {
+      const rankDiff = rank(left.key) - rank(right.key);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      return left.label.localeCompare(right.label, "zh-CN");
+    });
+  }, [drivers]);
+  const leadDriverMap = useMemo(
+    () => new Map(leadDriverOptions.map((option) => [option.driverId, option])),
+    [leadDriverOptions],
   );
 
   const currentProjectId = currentSession?.project_id ?? draftProjectId ?? null;
-  const draftProjectLabel = fallbackLabel(
-    draftProjectId != null ? projectNameMap.get(draftProjectId) : undefined,
-    "未指定项目",
-  );
   const currentProjectLabel = fallbackLabel(
     currentSession?.project_name ?? (currentProjectId != null ? projectNameMap.get(currentProjectId) : undefined),
     "未指定项目",
   );
-  const currentProfileId = currentSession?.profile_id ?? draftProfileId;
-  const draftProfileLabel = fallbackLabel(
-    draftProfileId ? leadProfileMap.get(draftProfileId)?.name ?? draftProfileId : undefined,
-    "未指定 ACP 实现",
-  );
-  const currentProfileLabel = fallbackLabel(
-    currentSession?.profile_name
-      ?? (currentProfileId ? leadProfileMap.get(currentProfileId)?.name ?? currentProfileId : undefined),
-    "未指定 ACP 实现",
-  );
+  const currentDriverId = currentSession?.driver_id ?? draftDriverId;
+  const draftSessionReady = Boolean(draftProfileId && draftDriverId);
+  const currentDriverLabel = currentDriverId
+    ? leadDriverMap.get(currentDriverId)?.label ?? driverLabelForId(currentDriverId)
+    : "未指定 Driver";
 
   const filteredSessions = useMemo(
     () =>
@@ -759,6 +1028,7 @@ export function ChatPage() {
           session.title,
           session.project_name,
           session.profile_name,
+          session.driver_id ? driverLabelForId(session.driver_id).toLowerCase() : "",
         ].some((value) => (value ?? "").toLowerCase().includes(query));
       }),
     [sessionSearch, sessions],
@@ -800,32 +1070,22 @@ export function ChatPage() {
   }, [filteredSessions]);
 
   const currentMessages = currentSession ? (messagesBySession[currentSession.session_id] ?? []) : draftMessages;
+  const currentEvents = currentSession ? (eventsBySession[currentSession.session_id] ?? []) : [];
   const currentActivities = currentSession ? (activitiesBySession[currentSession.session_id] ?? []) : [];
-
-  const currentTimeline = useMemo<ChatTimelineItem[]>(() => {
-    const messageItems: ChatTimelineItem[] = currentMessages.map((message) => ({
-      kind: "message",
-      id: message.id,
-      at: message.at,
-      message,
-    }));
-    const activityItems: ChatTimelineItem[] = currentActivities.map((activity) => ({
-      kind: "activity",
-      id: activity.id,
-      at: activity.at,
-      activity,
-    }));
-    return [...messageItems, ...activityItems].sort((left, right) => {
-      const timeDiff = new Date(left.at).getTime() - new Date(right.at).getTime();
-      if (timeDiff !== 0) {
-        return timeDiff;
-      }
-      if (left.kind === right.kind) {
-        return left.id.localeCompare(right.id);
-      }
-      return left.kind === "message" ? -1 : 1;
-    });
-  }, [currentActivities, currentMessages]);
+  const isDraftSessionView = !currentSession && currentMessages.length === 0;
+  const currentEventItems = useMemo(
+    () =>
+      [...currentEvents]
+        .sort((left, right) => {
+          const timeDiff = new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
+          if (timeDiff !== 0) {
+            return timeDiff;
+          }
+          return left.id - right.id;
+        })
+        .map((event) => toEventListItem(event)),
+    [currentEvents],
+  );
 
   const currentUsage = useMemo(
     () =>
@@ -840,7 +1100,7 @@ export function ChatPage() {
   useEffect(() => {
     const isStreaming = currentMessages.at(-1)?.id.endsWith("stream-assistant");
     messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? "auto" : "smooth" });
-  }, [currentMessages, currentTimeline]);
+  }, [currentEventItems, currentMessages, detailView]);
 
   useEffect(() => {
     const unsubscribeOutput = wsClient.subscribe<RealtimeChatOutputPayload>(
@@ -854,6 +1114,14 @@ export function ChatPage() {
         const updateType = payload.type?.trim();
         const now = new Date();
         const nowISO = now.toISOString();
+        if (updateType) {
+          const event = buildRealtimeEvent(syntheticEventIdRef.current, nowISO, payload);
+          syntheticEventIdRef.current -= 1;
+          setEventsBySession((current) => ({
+            ...current,
+            [sessionId]: [...(current[sessionId] ?? []), event],
+          }));
+        }
         if (updateType === "agent_message_chunk" && payload.content) {
           pendingChunkBuffersRef.current[sessionId] = `${pendingChunkBuffersRef.current[sessionId] ?? ""}${payload.content}`;
           scheduleChunkFlush();
@@ -1002,16 +1270,16 @@ export function ChatPage() {
       }
       return leadProfiles[0]?.id ?? "";
     });
-    setNewSessionDialogOpen(true);
-  };
-
-  const startDraftSession = () => {
-    setSelectedProjectId(draftProjectId);
+    setDraftDriverId((current) => {
+      if (current && drivers.some((driver) => driver.id === current)) {
+        return current;
+      }
+      return leadDriverOptions[0]?.driverId ?? drivers[0]?.id ?? "";
+    });
     setActiveSession(null);
     setDraftMessages([]);
     setMessageInput("");
     setError(null);
-    setNewSessionDialogOpen(false);
   };
 
   const appendMessage = (sessionId: string | null, role: "user" | "assistant", content: string) => {
@@ -1062,10 +1330,14 @@ export function ChatPage() {
     const resolvedProjectName = currentSession?.project_name
       ?? (resolvedProjectId != null ? projectNameMap.get(resolvedProjectId) : undefined);
     const resolvedProfileId = currentSession?.profile_id ?? draftProfileId;
+    const resolvedDriverId = currentSession?.driver_id ?? draftDriverId;
 
     if (!resolvedProfileId) {
-      setError("请先选择 ACP 实现后再开始会话。");
-      setNewSessionDialogOpen(true);
+      setError("请先选择 Driver 后再开始会话。");
+      return;
+    }
+    if (!resolvedDriverId) {
+      setError("请先选择 Driver 后再开始会话。");
       return;
     }
 
@@ -1086,6 +1358,7 @@ export function ChatPage() {
           project_id: resolvedProjectId,
           project_name: resolvedProjectName,
           profile_id: resolvedProfileId,
+          driver_id: resolvedDriverId,
         },
       });
     } catch (sendError) {
@@ -1125,8 +1398,9 @@ export function ChatPage() {
         <div className="border-b p-3">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold">会话列表</h2>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={createSession}>
-              <Plus className="h-4 w-4" />
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-xs" onClick={createSession}>
+              <Plus className="h-3.5 w-3.5" />
+              新建
             </Button>
           </div>
           <div className="relative">
@@ -1199,9 +1473,9 @@ export function ChatPage() {
                       <p className="truncate text-xs text-muted-foreground">{preview}</p>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      {session.profile_name ? (
+                      {session.driver_id ? (
                         <Badge variant="outline" className="text-[10px]">
-                          ACP · {session.profile_name}
+                          Lead · {driverLabelForId(session.driver_id)}
                         </Badge>
                       ) : null}
                     </div>
@@ -1219,7 +1493,8 @@ export function ChatPage() {
       </div>
 
       <div className="flex flex-1 flex-col">
-        <div className="border-b px-5 py-3">
+        {!isDraftSessionView ? (
+          <div className="border-b px-5 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -1241,84 +1516,174 @@ export function ChatPage() {
                     项目 · {currentProjectLabel}
                   </Badge>
                   <Badge variant="secondary" className="text-[10px]">
-                    ACP · {currentProfileLabel}
+                    Lead · {currentDriverLabel}
                   </Badge>
-                  {currentSession?.project_id != null ? (
-                    <span className="text-[10px] text-muted-foreground">project_id={currentSession.project_id}</span>
-                  ) : null}
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {currentSession ? "当前会话已锁定项目和 ACP 实现。" : "通过“新建会话”切换项目和 ACP 实现。"}
-                </p>
-                {currentSession?.ws_path ? (
-                  <p className="truncate text-[10px] text-muted-foreground">
-                    WS：{currentSession.ws_path}
-                  </p>
-                ) : null}
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {currentUsage ? (
+                <div className="flex items-center gap-2 rounded-full border bg-background px-2.5 py-1 text-[11px] text-muted-foreground">
+                  <span className="shrink-0 whitespace-nowrap">上下文</span>
+                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-[width] duration-300",
+                        currentUsagePercent != null && currentUsagePercent >= 85
+                          ? "bg-rose-500"
+                          : currentUsagePercent != null && currentUsagePercent >= 60
+                            ? "bg-amber-500"
+                            : "bg-emerald-500",
+                      )}
+                      style={{ width: `${Math.max(currentUsagePercent ?? 0, currentUsagePercent == null ? 0 : 4)}%` }}
+                    />
+                  </div>
+                  <span className="shrink-0 whitespace-nowrap">
+                    {formatUsageValue(currentUsage.usageUsed)} / {formatUsageValue(currentUsage.usageSize)}
+                    {currentUsagePercent != null ? ` · ${currentUsagePercent.toFixed(1)}%` : ""}
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex items-center rounded-md border bg-background p-0.5">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    detailView === "chat" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => setDetailView("chat")}
+                >
+                  对话
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    detailView === "events" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => setDetailView("events")}
+                >
+                  事件
+                </button>
+              </div>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => void closeSession()}>
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </div>
           </div>
-
-          {currentUsage ? (
-            <div className="mt-3 rounded-lg border bg-background/70 px-3 py-2">
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span>上下文进度</span>
-                <span>
-                  {formatUsageValue(currentUsage.usageUsed)} / {formatUsageValue(currentUsage.usageSize)}
-                  {currentUsagePercent != null ? ` · ${currentUsagePercent.toFixed(1)}%` : ""}
-                </span>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-[width] duration-300",
-                    currentUsagePercent != null && currentUsagePercent >= 85
-                      ? "bg-rose-500"
-                      : currentUsagePercent != null && currentUsagePercent >= 60
-                        ? "bg-amber-500"
-                        : "bg-emerald-500",
-                  )}
-                  style={{ width: `${Math.max(currentUsagePercent ?? 0, currentUsagePercent == null ? 0 : 4)}%` }}
-                />
-              </div>
-            </div>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         {error ? <p className="mx-5 mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {currentTimeline.length === 0 ? (
-            <div className="rounded-2xl border border-dashed bg-gradient-to-br from-white via-slate-50 to-slate-100 p-6 text-sm text-muted-foreground shadow-sm">
-              <div className="max-w-xl space-y-3">
-                <p className="text-base font-semibold text-foreground">准备开始新的 ACP 对话</p>
-                <p>
-                  先确认本次会话绑定的项目和 ACP 实现，开始后会固定在当前会话里。
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary" className="text-[10px]">
-                    项目 · {currentProjectLabel}
-                  </Badge>
-                  <Badge variant="secondary" className="text-[10px]">
-                    ACP · {currentProfileLabel}
-                  </Badge>
+        <div className="flex-1 overflow-y-auto px-5 py-4 [scrollbar-gutter:stable]">
+          {detailView === "events" ? (
+            currentEventItems.length === 0 ? (
+              <div className="mx-auto w-full max-w-[920px] rounded-2xl border border-dashed bg-muted/20 px-5 py-6 text-sm text-muted-foreground">
+                这个会话还没有可显示的事件。
+              </div>
+            ) : (
+              <div className="mx-auto w-full max-w-[920px] space-y-3">
+                {currentEventItems.map((item) => <EventLogRow key={item.id} item={item} />)}
+              </div>
+            )
+          ) : isDraftSessionView ? (
+            <div className="flex min-h-full items-center justify-center">
+              <div className="w-full max-w-[860px] rounded-[28px] border bg-gradient-to-br from-white via-slate-50 to-slate-100 p-7 shadow-sm">
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <p className="text-2xl font-semibold tracking-tight text-foreground">新会话</p>
+                    <p className="text-sm text-muted-foreground">先选择项目和 Driver，然后直接在这里输入第一条消息。</p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">项目</label>
+                    <Select
+                      value={draftProjectId == null ? "" : String(draftProjectId)}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        const nextProjectId = next ? Number(next) : null;
+                        setDraftProjectId(nextProjectId);
+                        setSelectedProjectId(nextProjectId);
+                      }}
+                    >
+                      <option value="">未指定项目</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>{project.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Driver</label>
+                    <Select
+                      value={draftDriverId || EMPTY_PROFILE_VALUE}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setDraftDriverId(next === EMPTY_PROFILE_VALUE ? "" : next);
+                      }}
+                    >
+                      <option value={EMPTY_PROFILE_VALUE}>请选择 Driver</option>
+                      {leadDriverOptions.map((option) => (
+                        <option key={option.driverId} value={option.driverId}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  </div>
+                  <div className="space-y-3">
+                    <Textarea
+                      placeholder={`输入消息，使用 Lead · ${currentDriverLabel} 在 ${currentProjectLabel} 下开始会话...`}
+                      className="min-h-[180px] resize-none bg-white/90"
+                      value={messageInput}
+                      disabled={submitting || !draftSessionReady}
+                      onChange={(event) => setMessageInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey) {
+                          event.preventDefault();
+                          void sendMessage();
+                        }
+                      }}
+                    />
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary" className="text-[10px]">
+                          项目 · {currentProjectLabel}
+                        </Badge>
+                        <Badge variant="secondary" className="text-[10px]">
+                          Lead · {currentDriverLabel}
+                        </Badge>
+                      </div>
+                      <Button
+                        className="h-10 gap-2 px-4"
+                        disabled={submitting || !draftSessionReady}
+                        onClick={() => void sendMessage()}
+                      >
+                        <Send className="h-4 w-4" />
+                        发送
+                      </Button>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">Enter 发送 · Shift+Enter 换行</div>
+                  </div>
+                  {leadProfiles.length === 0 ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      还没有可用的 lead driver，请先到代理页面配置。
+                    </div>
+                  ) : drivers.length === 0 ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      还没有可用的 Driver，请先到代理页面配置。
+                    </div>
+                  ) : null}
                 </div>
-                <Button onClick={createSession}>新建会话</Button>
               </div>
             </div>
+          ) : currentMessages.length === 0 ? (
+            <div className="mx-auto w-full max-w-[920px] rounded-2xl border border-dashed bg-muted/20 px-5 py-6 text-sm text-muted-foreground">
+              这个会话还没有消息。
+            </div>
           ) : (
-            currentTimeline.map((item) => {
-              if (item.kind === "activity") {
-                return <ActivityBlock key={item.id} activity={item.activity} />;
-              }
-
-              const message = item.message;
-              return (
+            <div className="mx-auto w-full max-w-[920px] space-y-4">
+              {currentMessages.map((message) => (
                 <div
                   key={message.id}
                   className={cn(
@@ -1348,32 +1713,25 @@ export function ChatPage() {
                     <span className="text-[10px] text-muted-foreground">{message.time}</span>
                   </div>
                 </div>
-              );
-            })
+              ))}
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="text-[10px]">
-              项目 · {currentProjectLabel}
-            </Badge>
-            <Badge variant="outline" className="text-[10px]">
-              ACP · {currentProfileLabel}
-            </Badge>
-          </div>
+        {!isDraftSessionView ? (
+          <div className="border-t p-4">
           <div className="flex items-end gap-3">
             <div className="relative flex-1">
               <Input
                 placeholder={
                   currentSession
                     ? "输入消息，与 Lead Agent 对话..."
-                    : `输入消息，使用 ${currentProfileLabel} 在 ${currentProjectLabel} 下开始会话...`
+                    : `输入消息，使用 Lead · ${currentDriverLabel} 在 ${currentProjectLabel} 下开始会话...`
                 }
                 className="pr-10"
                 value={messageInput}
-                disabled={submitting || currentSession?.status === "running" || (!currentSession && !draftProfileId)}
+                disabled={submitting || currentSession?.status === "running" || (!currentSession && !draftSessionReady)}
                 onChange={(event) => setMessageInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
@@ -1386,97 +1744,16 @@ export function ChatPage() {
             <Button
               size="icon"
               className="h-10 w-10 shrink-0"
-              disabled={submitting || currentSession?.status === "running" || (!currentSession && !draftProfileId)}
+              disabled={submitting || currentSession?.status === "running" || (!currentSession && !draftSessionReady)}
               onClick={() => void sendMessage()}
             >
               <Send className="h-4 w-4" />
             </Button>
           </div>
           <div className="mt-2 text-[10px] text-muted-foreground">Enter 发送 · Shift+Enter 换行</div>
-        </div>
+          </div>
+        ) : null}
       </div>
-
-      <Dialog open={newSessionDialogOpen} onClose={() => setNewSessionDialogOpen(false)} className="max-w-3xl overflow-hidden border-0 bg-transparent shadow-none">
-        <div className="rounded-[28px] border bg-card shadow-2xl">
-          <DialogHeader className="border-b bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 pb-6 text-white">
-            <DialogTitle className="text-2xl font-semibold tracking-tight">新建会话</DialogTitle>
-            <DialogDescription className="max-w-2xl text-slate-300">
-              先固定项目和 ACP 实现，再回到当前聊天框继续输入。会话开始后，这两个维度会跟着 session 一起持久化。
-            </DialogDescription>
-          </DialogHeader>
-
-          <DialogBody className="bg-[radial-gradient(circle_at_top,_rgba(15,23,42,0.06),_transparent_55%)] pt-6">
-            <div className="rounded-[24px] border bg-white p-6 shadow-sm">
-              <div className="space-y-3">
-                <div className="text-sm font-medium text-slate-950">会话上下文</div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                  <p className="text-[15px] leading-7 text-slate-700">
-                    新消息将直接通过 WebSocket 发送到 ACP，并在同一条链路里接收工具事件、思考过程和最终回复。
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">项目</label>
-                  <Select
-                    value={draftProjectId == null ? "" : String(draftProjectId)}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setDraftProjectId(next ? Number(next) : null);
-                    }}
-                  >
-                    <option value="">未指定项目</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>{project.name}</option>
-                    ))}
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">ACP 实现</label>
-                  <Select
-                    value={draftProfileId || EMPTY_PROFILE_VALUE}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setDraftProfileId(next === EMPTY_PROFILE_VALUE ? "" : next);
-                    }}
-                  >
-                    <option value={EMPTY_PROFILE_VALUE}>请选择 ACP 实现</option>
-                    {leadProfiles.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {profile.name?.trim() || profile.id}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-
-              <div className="mt-6 flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">
-                  项目 · {draftProjectLabel}
-                </Badge>
-                <Badge variant="secondary" className="text-[10px]">
-                  ACP · {draftProfileLabel}
-                </Badge>
-              </div>
-
-              {leadProfiles.length === 0 ? (
-                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  还没有可用的 lead profile，请先到代理页面配置 ACP 实现。
-                </div>
-              ) : null}
-            </div>
-          </DialogBody>
-
-          <DialogFooter className="border-t bg-slate-50/80">
-            <Button variant="outline" onClick={() => setNewSessionDialogOpen(false)}>取消</Button>
-            <Button onClick={startDraftSession} disabled={!draftProfileId}>
-              开始新会话
-            </Button>
-          </DialogFooter>
-        </div>
-      </Dialog>
     </div>
   );
 }

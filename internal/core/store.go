@@ -123,6 +123,7 @@ type EventFilter struct {
 	FlowID *int64
 	StepID *int64
 	ExecID *int64
+	SessionID string
 	Types  []EventType
 	Limit  int
 	Offset int

@@ -76,6 +76,7 @@ type suppressibleEventHandler struct {
 	mu       sync.RWMutex
 	suppress bool
 	inner    acpclient.EventHandler
+	onUpdate func(acpclient.SessionUpdate)
 }
 
 func (h *suppressibleEventHandler) SetSuppress(v bool) {
@@ -84,11 +85,21 @@ func (h *suppressibleEventHandler) SetSuppress(v bool) {
 	h.mu.Unlock()
 }
 
+func (h *suppressibleEventHandler) SetUpdateCallback(cb func(acpclient.SessionUpdate)) {
+	h.mu.Lock()
+	h.onUpdate = cb
+	h.mu.Unlock()
+}
+
 func (h *suppressibleEventHandler) HandleSessionUpdate(ctx context.Context, update acpclient.SessionUpdate) error {
 	h.mu.RLock()
 	suppress := h.suppress
 	inner := h.inner
+	onUpdate := h.onUpdate
 	h.mu.RUnlock()
+	if onUpdate != nil {
+		onUpdate(update)
+	}
 	if suppress || inner == nil {
 		return nil
 	}
@@ -311,8 +322,10 @@ func (l *LeadAgent) GetSession(_ context.Context, sessionID string) (*chatapp.Se
 	}
 
 	detail := &chatapp.SessionDetail{
-		SessionSummary: buildSessionSummary(record, live, running[id]),
-		Messages:       append([]chatapp.Message(nil), record.Messages...),
+		SessionSummary:    buildSessionSummary(record, live, running[id]),
+		Messages:          append([]chatapp.Message(nil), record.Messages...),
+		AvailableCommands: cloneAvailableCommands(record.AvailableCommands),
+		ConfigOptions:     cloneConfigOptions(record.ConfigOptions),
 	}
 	return detail, nil
 }
@@ -398,17 +411,17 @@ func (l *LeadAgent) getOrCreateSession(ctx context.Context, req chatapp.Request,
 		return sess, requestedSessionID, nil
 	}
 
-	sess, sessionID, err := l.createSession(ctx, workDir, req.ProjectID, req.ProjectName, req.ProfileID)
+	sess, sessionID, err := l.createSession(ctx, workDir, req.ProjectID, req.ProjectName, req.ProfileID, req.DriverID)
 	if err != nil {
 		return nil, "", err
 	}
 	return sess, sessionID, nil
 }
 
-func (l *LeadAgent) createSession(ctx context.Context, workDir string, projectID int64, projectName, profileID string) (*leadSession, string, error) {
+func (l *LeadAgent) createSession(ctx context.Context, workDir string, projectID int64, projectName, profileID, driverID string) (*leadSession, string, error) {
 	scope := fmt.Sprintf("lead-chat-%d", time.Now().UnixNano())
 
-	client, bridge, events, profile, driver, err := l.launchClient(ctx, workDir, scope, "", profileID)
+	client, bridge, events, profile, driver, err := l.launchClient(ctx, workDir, scope, "", profileID, driverID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -461,9 +474,15 @@ func (l *LeadAgent) createSession(ctx context.Context, workDir string, projectID
 	record.ProjectName = strings.TrimSpace(projectName)
 	record.ProfileID = profile.ID
 	record.ProfileName = strings.TrimSpace(profile.Name)
+	record.DriverID = strings.TrimSpace(driver.ID)
+	record.AvailableCommands = nil
+	record.ConfigOptions = nil
 	record.UpdatedAt = now
 	_ = l.saveCatalogLocked()
 	l.mu.Unlock()
+	events.SetUpdateCallback(func(update acpclient.SessionUpdate) {
+		l.captureSessionState(publicID, update)
+	})
 
 	slog.Info("runtime lead session created", "session_id", publicID, "profile", profile.ID, "driver", driver.ID)
 	return sess, publicID, nil
@@ -487,10 +506,13 @@ func (l *LeadAgent) loadSession(ctx context.Context, record *persistedLeadSessio
 		}
 	}
 
-	client, bridge, events, _, _, err := l.launchClient(ctx, workDir, record.Scope, record.SessionID, record.ProfileID)
+	client, bridge, events, _, _, err := l.launchClient(ctx, workDir, record.Scope, record.SessionID, record.ProfileID, record.DriverID)
 	if err != nil {
 		return nil, err
 	}
+	events.SetUpdateCallback(func(update acpclient.SessionUpdate) {
+		l.captureSessionState(record.SessionID, update)
+	})
 
 	events.SetSuppress(true)
 	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -536,7 +558,7 @@ func (l *LeadAgent) loadSession(ctx context.Context, record *persistedLeadSessio
 	return sess, nil
 }
 
-func (l *LeadAgent) launchClient(ctx context.Context, workDir, scope, publicSessionID, requestedProfileID string) (ChatACPClient, *eventbridge.EventBridge, *suppressibleEventHandler, *core.AgentProfile, *core.AgentDriver, error) {
+func (l *LeadAgent) launchClient(ctx context.Context, workDir, scope, publicSessionID, requestedProfileID, requestedDriverID string) (ChatACPClient, *eventbridge.EventBridge, *suppressibleEventHandler, *core.AgentProfile, *core.AgentDriver, error) {
 	if l.cfg.Registry == nil {
 		return nil, nil, nil, nil, nil, errors.New("agent registry is not configured")
 	}
@@ -548,6 +570,17 @@ func (l *LeadAgent) launchClient(ctx context.Context, workDir, scope, publicSess
 	profile, driver, err := l.cfg.Registry.ResolveByID(ctx, profileID)
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("resolve lead profile %q: %w", profileID, err)
+	}
+	driverID := strings.TrimSpace(requestedDriverID)
+	if driverID != "" && !strings.EqualFold(driver.ID, driverID) {
+		overrideDriver, driverErr := l.cfg.Registry.GetDriver(ctx, driverID)
+		if driverErr != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("resolve lead driver %q: %w", driverID, driverErr)
+		}
+		clonedProfile := *profile
+		clonedProfile.DriverID = overrideDriver.ID
+		profile = &clonedProfile
+		driver = overrideDriver
 	}
 
 	launchCfg := acpclient.LaunchConfig{
@@ -778,11 +811,121 @@ func buildSessionSummary(record *persistedLeadSession, live, running bool) chata
 		ProjectName:  record.ProjectName,
 		ProfileID:    record.ProfileID,
 		ProfileName:  record.ProfileName,
+		DriverID:     record.DriverID,
 		CreatedAt:    record.CreatedAt,
 		UpdatedAt:    record.UpdatedAt,
 		Status:       status,
 		MessageCount: len(record.Messages),
 	}
+}
+
+func (l *LeadAgent) captureSessionState(sessionID string, update acpclient.SessionUpdate) {
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	record := l.catalog[id]
+	if record == nil {
+		return
+	}
+
+	changed := false
+	switch strings.TrimSpace(update.Type) {
+	case "available_commands_update":
+		record.AvailableCommands = toChatAvailableCommands(update.Commands)
+		changed = true
+	case "config_option_update", "config_options_update":
+		record.ConfigOptions = toChatConfigOptions(update.ConfigOptions)
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	record.UpdatedAt = time.Now().UTC()
+	_ = l.saveCatalogLocked()
+}
+
+func toChatAvailableCommands(items []acpproto.AvailableCommand) []chatapp.AvailableCommand {
+	if items == nil {
+		return nil
+	}
+	out := make([]chatapp.AvailableCommand, 0, len(items))
+	for _, item := range items {
+		cmd := chatapp.AvailableCommand{
+			Name:        strings.TrimSpace(item.Name),
+			Description: strings.TrimSpace(item.Description),
+		}
+		if item.Input != nil && item.Input.Unstructured != nil {
+			cmd.Input = &chatapp.AvailableCommandInput{
+				Hint: strings.TrimSpace(item.Input.Unstructured.Hint),
+			}
+		}
+		out = append(out, cmd)
+	}
+	return out
+}
+
+func toChatConfigOptions(items []acpproto.SessionConfigOptionSelect) []chatapp.ConfigOption {
+	if items == nil {
+		return nil
+	}
+	out := make([]chatapp.ConfigOption, 0, len(items))
+	for _, item := range items {
+		option := chatapp.ConfigOption{
+			ID:           strings.TrimSpace(string(item.Id)),
+			Name:         strings.TrimSpace(item.Name),
+			Type:         strings.TrimSpace(item.Type),
+			CurrentValue: strings.TrimSpace(string(item.CurrentValue)),
+		}
+		if item.Description != nil {
+			option.Description = strings.TrimSpace(*item.Description)
+		}
+		if item.Category != nil {
+			option.Category = normalizeConfigCategory(item.Category)
+		}
+		if item.Options.Ungrouped != nil {
+			for _, value := range *item.Options.Ungrouped {
+				option.Options = append(option.Options, chatapp.ConfigOptionValue{
+					Value:       strings.TrimSpace(string(value.Value)),
+					Name:        strings.TrimSpace(value.Name),
+					Description: derefTrim(value.Description),
+				})
+			}
+		}
+		if item.Options.Grouped != nil {
+			for _, group := range *item.Options.Grouped {
+				for _, value := range group.Options {
+					option.Options = append(option.Options, chatapp.ConfigOptionValue{
+						Value:       strings.TrimSpace(string(value.Value)),
+						Name:        strings.TrimSpace(value.Name),
+						Description: derefTrim(value.Description),
+						GroupID:     strings.TrimSpace(string(group.Group)),
+						GroupName:   strings.TrimSpace(group.Name),
+					})
+				}
+			}
+		}
+		out = append(out, option)
+	}
+	return out
+}
+
+func derefTrim(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func normalizeConfigCategory(category *acpproto.SessionConfigOptionCategory) string {
+	if category == nil || category.Other == nil {
+		return ""
+	}
+	return strings.TrimSpace(string(*category.Other))
 }
 
 func buildChatWSPath(sessionID string) string {

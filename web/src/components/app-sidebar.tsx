@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
 
-const navItems = [
+const baseNavItems = [
   { to: "/", icon: LayoutDashboard, label: "仪表盘" },
   { to: "/chat", icon: MessageSquare, label: "对话" },
   { to: "/flows", icon: GitBranch, label: "流程" },
@@ -25,13 +25,43 @@ const navItems = [
   { to: "/templates", icon: FileStack, label: "模板" },
   { to: "/agents", icon: Bot, label: "代理" },
   { to: "/skills", icon: Sparkles, label: "技能" },
-  { to: "/git-tags", icon: Tag, label: "版本标签" },
   { to: "/projects", icon: FolderOpen, label: "项目" },
 ];
 
+const gitTagNavItem = { to: "/git-tags", icon: Tag, label: "版本标签" };
+
 export function AppSidebar() {
-  const { projects, selectedProjectId, setSelectedProjectId } = useWorkbench();
+  const { apiClient, projects, selectedProjectId, setSelectedProjectId } = useWorkbench();
   const [showPicker, setShowPicker] = useState(false);
+  const [hasGitBinding, setHasGitBinding] = useState(false);
+
+  const checkGitBinding = useCallback(async () => {
+    if (!selectedProjectId) {
+      setHasGitBinding(false);
+      return;
+    }
+    try {
+      const bindings = await apiClient.listProjectResources(selectedProjectId);
+      const found = bindings.some(
+        (b) => b.kind.trim().toLowerCase() === "git",
+      );
+      setHasGitBinding(found);
+    } catch {
+      setHasGitBinding(false);
+    }
+  }, [apiClient, selectedProjectId]);
+
+  useEffect(() => {
+    void checkGitBinding();
+  }, [checkGitBinding]);
+
+  const navItems = useMemo(() => {
+    if (!hasGitBinding) return baseNavItems;
+    // Insert git-tags before "项目" (last item)
+    const items = [...baseNavItems];
+    items.splice(items.length - 1, 0, gitTagNavItem);
+    return items;
+  }, [hasGitBinding]);
   const currentProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? projects[0] ?? null,
     [projects, selectedProjectId],

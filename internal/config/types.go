@@ -50,12 +50,42 @@ type LLMFilterConfig struct {
 type V2Config struct {
 	// MockExecutor makes v2 step execution use an in-process stub instead of ACP agents.
 	// Useful for smoke tests and environments without LLM credentials.
-	MockExecutor bool              `toml:"mock_executor" yaml:"mock_executor" json:"mock_executor"`
-	Collector    V2CollectorConfig `toml:"collector" yaml:"collector" json:"collector"`
-	Sandbox      V2SandboxConfig   `toml:"sandbox"   yaml:"sandbox" json:"sandbox"`
-	Agents       V2AgentsConfig    `toml:"agents"    yaml:"agents" json:"agents"`
-	MCP          V2MCPConfig       `toml:"mcp"       yaml:"mcp" json:"mcp"`
-	Prompts      V2PromptsConfig   `toml:"prompts"   yaml:"prompts" json:"prompts"`
+	MockExecutor   bool                  `toml:"mock_executor" yaml:"mock_executor" json:"mock_executor"`
+	Collector      V2CollectorConfig     `toml:"collector" yaml:"collector" json:"collector"`
+	Sandbox        V2SandboxConfig       `toml:"sandbox"   yaml:"sandbox" json:"sandbox"`
+	Agents         V2AgentsConfig        `toml:"agents"    yaml:"agents" json:"agents"`
+	MCP            V2MCPConfig           `toml:"mcp"       yaml:"mcp" json:"mcp"`
+	Prompts        V2PromptsConfig       `toml:"prompts"   yaml:"prompts" json:"prompts"`
+	SessionManager V2SessionManagerConfig `toml:"session_manager" yaml:"session_manager" json:"session_manager"`
+}
+
+// V2SessionManagerConfig configures the session manager mode.
+type V2SessionManagerConfig struct {
+	// Mode selects the session manager implementation: "local" (default) or "nats".
+	// Local mode runs agents in-process with no external dependencies.
+	// NATS mode uses JetStream for crash-resilient, distributed execution.
+	Mode string `toml:"mode" yaml:"mode" json:"mode"`
+
+	// NATS holds configuration for the NATS session manager (only used when Mode == "nats").
+	NATS V2NATSConfig `toml:"nats" yaml:"nats" json:"nats"`
+}
+
+// V2NATSConfig configures the NATS connection and JetStream settings.
+type V2NATSConfig struct {
+	// URL is the NATS server URL (e.g., "nats://localhost:4222").
+	// If empty and Embedded is true, an embedded NATS server is started.
+	URL string `toml:"url" yaml:"url" json:"url"`
+
+	// Embedded starts an in-process NATS server. Useful for single-machine setups
+	// that still want crash-resilient prompt persistence.
+	Embedded bool `toml:"embedded" yaml:"embedded" json:"embedded"`
+
+	// EmbeddedDataDir is the data directory for the embedded NATS server's JetStream store.
+	// Defaults to <data-dir>/nats-data if empty.
+	EmbeddedDataDir string `toml:"embedded_data_dir" yaml:"embedded_data_dir" json:"embedded_data_dir"`
+
+	// StreamPrefix is the NATS JetStream stream name prefix. Default: "aiworkflow".
+	StreamPrefix string `toml:"stream_prefix" yaml:"stream_prefix" json:"stream_prefix"`
 }
 
 // V2SandboxConfig configures per-ACP-process sandbox isolation.
@@ -311,11 +341,24 @@ type ConfigLayer struct {
 }
 
 type V2Layer struct {
-	Collector *V2CollectorLayer `toml:"collector" yaml:"collector"`
-	Sandbox   *V2SandboxLayer   `toml:"sandbox"   yaml:"sandbox"`
-	Agents    *V2AgentsLayerCfg `toml:"agents"    yaml:"agents"`
-	MCP       *V2MCPLayer       `toml:"mcp"       yaml:"mcp"`
-	Prompts   *V2PromptsLayer   `toml:"prompts"   yaml:"prompts"`
+	Collector      *V2CollectorLayer      `toml:"collector"       yaml:"collector"`
+	Sandbox        *V2SandboxLayer        `toml:"sandbox"         yaml:"sandbox"`
+	Agents         *V2AgentsLayerCfg      `toml:"agents"          yaml:"agents"`
+	MCP            *V2MCPLayer            `toml:"mcp"             yaml:"mcp"`
+	Prompts        *V2PromptsLayer        `toml:"prompts"         yaml:"prompts"`
+	SessionManager *V2SessionManagerLayer `toml:"session_manager" yaml:"session_manager"`
+}
+
+type V2SessionManagerLayer struct {
+	Mode *string      `toml:"mode" yaml:"mode"`
+	NATS *V2NATSLayer `toml:"nats" yaml:"nats"`
+}
+
+type V2NATSLayer struct {
+	URL             *string `toml:"url"               yaml:"url"`
+	Embedded        *bool   `toml:"embedded"          yaml:"embedded"`
+	EmbeddedDataDir *string `toml:"embedded_data_dir" yaml:"embedded_data_dir"`
+	StreamPrefix    *string `toml:"stream_prefix"     yaml:"stream_prefix"`
 }
 
 type V2SandboxLayer struct {

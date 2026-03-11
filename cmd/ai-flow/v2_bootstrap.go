@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/go-chi/chi/v5"
+	"github.com/nats-io/nats.go"
 	"github.com/yoke233/ai-workflow/internal/acpclient"
 	"github.com/yoke233/ai-workflow/internal/appdata"
 	"github.com/yoke233/ai-workflow/internal/config"
@@ -84,6 +86,27 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 	}
 	sb := buildV2Sandbox(bootstrapCfg, dataDir)
 
+	// Build SessionManager based on config mode.
+	var sessionMgr v2engine.SessionManager
+	smMode := ""
+	if bootstrapCfg != nil {
+		smMode = strings.TrimSpace(strings.ToLower(bootstrapCfg.V2.SessionManager.Mode))
+	}
+	switch smMode {
+	case "nats":
+		natsMgr, natsErr := buildNATSSessionManager(bootstrapCfg, v2Store, dataDir)
+		if natsErr != nil {
+			slog.Error("v2 bootstrap: NATS session manager failed, falling back to local", "error", natsErr)
+			sessionMgr = v2engine.NewLocalSessionManager(acpPool, v2Store, sb)
+		} else {
+			sessionMgr = natsMgr
+			slog.Info("v2 bootstrap: using NATS session manager")
+		}
+	default:
+		sessionMgr = v2engine.NewLocalSessionManager(acpPool, v2Store, sb)
+		slog.Info("v2 bootstrap: using local session manager")
+	}
+
 	mockEnabled := bootstrapCfg != nil && bootstrapCfg.V2.MockExecutor
 	if !mockEnabled {
 		if raw := strings.TrimSpace(os.Getenv("AI_WORKFLOW_V2_MOCK_EXECUTOR")); raw != "" {
@@ -110,8 +133,7 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 				}
 				return runtimeManager.ResolveMCPServers(profileID, agentSupportsSSE)
 			},
-			SessionPool: acpPool,
-			Sandbox:     sb,
+			SessionManager: sessionMgr,
 			ReworkFollowupTemplate: func() string {
 				if bootstrapCfg == nil {
 					return ""
@@ -205,8 +227,8 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 		if runtimeManager != nil {
 			_ = runtimeManager.Close()
 		}
-		if acpPool != nil {
-			acpPool.Close()
+		if sessionMgr != nil {
+			sessionMgr.Close()
 		}
 		if leadAgent != nil {
 			leadAgent.Shutdown()
@@ -227,4 +249,54 @@ func bootstrapV2(v1StorePath string, roleResolver *acpclient.RoleResolver, boots
 
 	slog.Info("v2 engine bootstrapped", "db", v2DBPath)
 	return v2Store, registry, runtimeManager, cleanup, registrar
+}
+
+// buildNATSSessionManager creates a NATS-backed session manager from config.
+func buildNATSSessionManager(cfg *config.Config, store v2core.Store, dataDir string) (*v2engine.NATSSessionManager, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
+	}
+	natsCfg := cfg.V2.SessionManager.NATS
+
+	natsURL := strings.TrimSpace(natsCfg.URL)
+	if natsURL == "" && !natsCfg.Embedded {
+		return nil, fmt.Errorf("nats.url is required when mode=nats and embedded=false")
+	}
+
+	if natsCfg.Embedded {
+		// TODO: start embedded NATS server when github.com/nats-io/nats-server/v2 is available.
+		// For now, require an external NATS server.
+		if natsURL == "" {
+			return nil, fmt.Errorf("embedded NATS not yet implemented; provide nats.url")
+		}
+	}
+
+	nc, err := natsConnect(natsURL)
+	if err != nil {
+		return nil, fmt.Errorf("connect to NATS: %w", err)
+	}
+
+	prefix := strings.TrimSpace(natsCfg.StreamPrefix)
+	if prefix == "" {
+		prefix = "aiworkflow"
+	}
+
+	return v2engine.NewNATSSessionManager(v2engine.NATSSessionManagerConfig{
+		NATSConn:     nc,
+		StreamPrefix: prefix,
+		Store:        store,
+	})
+}
+
+// natsConnect connects to a NATS server with retry.
+func natsConnect(url string) (*nats.Conn, error) {
+	nc, err := nats.Connect(url,
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(10),
+		nats.ReconnectWait(2),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return nc, nil
 }

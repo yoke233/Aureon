@@ -387,6 +387,25 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 				cfg.V2.MCP.ProfileBindings = cloneV2MCPBindings(*mcp.ProfileBindings)
 			}
 		}
+		if sm := v2.SessionManager; sm != nil {
+			if sm.Mode != nil {
+				cfg.V2.SessionManager.Mode = *sm.Mode
+			}
+			if n := sm.NATS; n != nil {
+				if n.URL != nil {
+					cfg.V2.SessionManager.NATS.URL = *n.URL
+				}
+				if n.Embedded != nil {
+					cfg.V2.SessionManager.NATS.Embedded = *n.Embedded
+				}
+				if n.EmbeddedDataDir != nil {
+					cfg.V2.SessionManager.NATS.EmbeddedDataDir = *n.EmbeddedDataDir
+				}
+				if n.StreamPrefix != nil {
+					cfg.V2.SessionManager.NATS.StreamPrefix = *n.StreamPrefix
+				}
+			}
+		}
 		if prompts := v2.Prompts; prompts != nil {
 			if prompts.ReworkFollowup != nil {
 				cfg.V2.Prompts.ReworkFollowup = *prompts.ReworkFollowup

@@ -149,10 +149,12 @@ export function SkillsPage() {
     if (!detailSkill) return;
     setSaveSubmitting(true);
     try {
-      const updated = await apiClient.updateSkill(detailSkill.name, {
+      await apiClient.updateSkill(detailSkill.name, {
         skill_md: editingMd,
       });
-      setDetailSkill(updated);
+      const refreshed = await apiClient.getSkill(detailSkill.name);
+      setDetailSkill(refreshed);
+      setEditingMd(refreshed.skill_md ?? "");
       setIsEditing(false);
       await load();
     } catch (err) {

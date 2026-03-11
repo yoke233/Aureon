@@ -6,12 +6,24 @@ import {
   CalendarClock,
   Clock,
   Loader2,
+  Pause,
+  Play,
+  Plus,
   RefreshCw,
   TrendingDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -80,6 +92,10 @@ export function AnalyticsPage() {
   const [rangeDays, setRangeDays] = useState(7);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [cronFlows, setCronFlows] = useState<CronStatus[]>([]);
+  const [cronDialogOpen, setCronDialogOpen] = useState(false);
+  const [cronForm, setCronForm] = useState({ flowId: "", schedule: "", maxInstances: "1" });
+  const [cronSaving, setCronSaving] = useState(false);
+  const [cronError, setCronError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -474,10 +490,24 @@ export function AnalyticsPage() {
       {/* Cron scheduled flows */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CalendarClock className="h-4 w-4 text-indigo-500" />
-            定时任务
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-indigo-500" />
+              定时任务
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setCronForm({ flowId: "", schedule: "", maxInstances: "1" });
+                setCronError(null);
+                setCronDialogOpen(true);
+              }}
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              添加定时任务
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -488,13 +518,14 @@ export function AnalyticsPage() {
                 <TableHead>状态</TableHead>
                 <TableHead>最大并发</TableHead>
                 <TableHead>上次触发</TableHead>
+                <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {cronFlows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    暂无定时任务。可通过 API 对 Flow 设置 cron 触发：POST /api/flows/:id/cron
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    暂无定时任务
                   </TableCell>
                 </TableRow>
               ) : (
@@ -515,6 +546,40 @@ export function AnalyticsPage() {
                     <TableCell className="text-muted-foreground">
                       {c.last_triggered ? formatRelativeTime(c.last_triggered) : "从未触发"}
                     </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={async () => {
+                          try {
+                            if (c.enabled) {
+                              await apiClient.disableFlowCron(c.flow_id);
+                            } else {
+                              await apiClient.setupFlowCron(c.flow_id, {
+                                schedule: c.schedule ?? "0 * * * *",
+                                max_instances: c.max_instances,
+                              });
+                            }
+                            void load();
+                          } catch (e) {
+                            setError(getErrorMessage(e));
+                          }
+                        }}
+                      >
+                        {c.enabled ? (
+                          <>
+                            <Pause className="mr-1 h-3 w-3" />
+                            停用
+                          </>
+                        ) : (
+                          <>
+                            <Play className="mr-1 h-3 w-3" />
+                            启用
+                          </>
+                        )}
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -522,6 +587,82 @@ export function AnalyticsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Setup Cron Dialog */}
+      <Dialog open={cronDialogOpen} onClose={() => setCronDialogOpen(false)}>
+        <DialogHeader>
+          <DialogTitle>添加定时任务</DialogTitle>
+          <DialogDescription>
+            为 Flow 设置 Cron 定时触发。Flow 将作为模板，每次触发时自动克隆并执行。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          {cronError ? (
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {cronError}
+            </p>
+          ) : null}
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Flow ID</label>
+              <Input
+                type="number"
+                placeholder="输入 Flow ID"
+                value={cronForm.flowId}
+                onChange={(e) => setCronForm((f) => ({ ...f, flowId: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Cron 表达式</label>
+              <Input
+                placeholder="例如: 0 */6 * * * (每6小时)"
+                value={cronForm.schedule}
+                onChange={(e) => setCronForm((f) => ({ ...f, schedule: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground">
+                标准 5 字段格式: 分 时 日 月 周 (例: */15 * * * * = 每15分钟)
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">最大并发实例数</label>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={cronForm.maxInstances}
+                onChange={(e) => setCronForm((f) => ({ ...f, maxInstances: e.target.value }))}
+              />
+            </div>
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setCronDialogOpen(false)}>
+            取消
+          </Button>
+          <Button
+            disabled={cronSaving || !cronForm.flowId || !cronForm.schedule}
+            onClick={async () => {
+              setCronSaving(true);
+              setCronError(null);
+              try {
+                await apiClient.setupFlowCron(Number(cronForm.flowId), {
+                  schedule: cronForm.schedule,
+                  max_instances: Number(cronForm.maxInstances) || 1,
+                });
+                setCronDialogOpen(false);
+                void load();
+              } catch (e) {
+                setCronError(getErrorMessage(e));
+              } finally {
+                setCronSaving(false);
+              }
+            }}
+          >
+            {cronSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            确认
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

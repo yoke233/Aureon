@@ -10,6 +10,7 @@ import {
   FolderOpen,
   FileStack,
   ChevronsUpDown,
+  Sparkles,
 } from "lucide-react";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
 
@@ -20,6 +21,7 @@ const navItems = [
   { to: "/analytics", icon: BarChart3, label: "运行分析" },
   { to: "/templates", icon: FileStack, label: "模板" },
   { to: "/agents", icon: Bot, label: "代理" },
+  { to: "/skills", icon: Sparkles, label: "技能" },
   { to: "/projects", icon: FolderOpen, label: "项目" },
 ];
 

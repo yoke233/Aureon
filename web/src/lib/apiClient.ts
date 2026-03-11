@@ -213,6 +213,8 @@ export interface ApiClient {
   listSkills(): Promise<SkillInfo[]>;
   getSkill(name: string): Promise<SkillDetail>;
   createSkill(body: CreateSkillRequest): Promise<SkillInfo>;
+  updateSkill(name: string, body: { skill_md: string }): Promise<SkillInfo>;
+  deleteSkill(name: string): Promise<void>;
   importGitHubSkill(body: ImportGitHubSkillRequest): Promise<SkillInfo>;
 
   getAnalyticsSummary(params?: AnalyticsFilter): Promise<AnalyticsSummary>;
@@ -529,6 +531,17 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
         path: "/skills",
         method: "POST",
         body,
+      }),
+    updateSkill: (name, body) =>
+      request<SkillInfo, { skill_md: string }>({
+        path: `/skills/${encodeURIComponent(name)}`,
+        method: "PUT",
+        body,
+      }),
+    deleteSkill: (name) =>
+      request<void>({
+        path: `/skills/${encodeURIComponent(name)}`,
+        method: "DELETE",
       }),
     importGitHubSkill: (body) =>
       request<SkillInfo, ImportGitHubSkillRequest>({

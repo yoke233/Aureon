@@ -274,9 +274,9 @@ func runServer(ctx context.Context, args []string) error {
 	// If a self_upgrade built a new binary, exec it to replace the current process.
 	if pendingUpgradeBinary != "" {
 		fmt.Printf("Self-upgrade: exec %s\n", pendingUpgradeBinary)
-		execErr := syscall.Exec(pendingUpgradeBinary, os.Args, os.Environ())
-		// If syscall.Exec returns, it failed.
-		return fmt.Errorf("self-upgrade exec failed: %w", execErr)
+		if err := execUpgradeBinary(pendingUpgradeBinary, os.Args, os.Environ()); err != nil {
+			return fmt.Errorf("self-upgrade exec failed: %w", err)
+		}
 	}
 
 	return shutdownErr

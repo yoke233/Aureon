@@ -26,7 +26,7 @@ func runBuiltinSelfUpgrade(ctx context.Context, store core.Store, bus core.Event
 
 	// --- Resolve config ---
 	repoPath := "."
-	defaultBranch := "master"
+	defaultBranch := "main"
 	binaryOutput := ""
 	triggerRestart := true
 
@@ -42,6 +42,17 @@ func runBuiltinSelfUpgrade(ctx context.Context, store core.Store, bus core.Event
 		}
 		if v, ok := step.Config["restart"].(bool); ok {
 			triggerRestart = v
+		}
+	}
+	if defaultBranch == "main" {
+		if inferred, err := gitOutput(ctx, repoPath, nil, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
+			inferred = strings.TrimSpace(inferred)
+			if strings.HasPrefix(inferred, "origin/") {
+				trimmed := strings.TrimSpace(strings.TrimPrefix(inferred, "origin/"))
+				if trimmed != "" {
+					defaultBranch = trimmed
+				}
+			}
 		}
 	}
 

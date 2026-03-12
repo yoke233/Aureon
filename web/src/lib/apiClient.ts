@@ -51,6 +51,13 @@ import type {
   PushGitTagResponse,
   UsageAnalyticsSummary,
   UsageRecord,
+  Thread,
+  CreateThreadRequest,
+  UpdateThreadRequest,
+  ThreadMessage,
+  CreateThreadMessageRequest,
+  ThreadParticipant,
+  AddThreadParticipantRequest,
 } from "../types/apiV2";
 import type { SandboxSupportResponse, UpdateSandboxSupportRequest } from "../types/system";
 
@@ -700,6 +707,51 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
         path: `/projects/${projectId}/git/tags/push`,
         method: "POST",
         body,
+      }),
+
+    // Threads
+    listThreads: (params?: { status?: string; limit?: number; offset?: number }) =>
+      request<Thread[]>({
+        path: "/threads",
+        query: { status: params?.status, limit: params?.limit, offset: params?.offset },
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    createThread: (body: CreateThreadRequest) =>
+      request<Thread, CreateThreadRequest>({ path: "/threads", method: "POST", body }),
+    getThread: (threadId: number) =>
+      request<Thread>({ path: `/threads/${threadId}` }),
+    updateThread: (threadId: number, body: UpdateThreadRequest) =>
+      request<Thread, UpdateThreadRequest>({ path: `/threads/${threadId}`, method: "PUT", body }),
+    deleteThread: (threadId: number) =>
+      request<void>({ path: `/threads/${threadId}`, method: "DELETE" }),
+
+    // Thread Messages
+    listThreadMessages: (threadId: number, params?: { limit?: number; offset?: number }) =>
+      request<ThreadMessage[]>({
+        path: `/threads/${threadId}/messages`,
+        query: { limit: params?.limit, offset: params?.offset },
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    createThreadMessage: (threadId: number, body: CreateThreadMessageRequest) =>
+      request<ThreadMessage, CreateThreadMessageRequest>({
+        path: `/threads/${threadId}/messages`,
+        method: "POST",
+        body,
+      }),
+
+    // Thread Participants
+    listThreadParticipants: (threadId: number) =>
+      request<ThreadParticipant[]>({
+        path: `/threads/${threadId}/participants`,
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    addThreadParticipant: (threadId: number, body: AddThreadParticipantRequest) =>
+      request<ThreadParticipant, AddThreadParticipantRequest>({
+        path: `/threads/${threadId}/participants`,
+        method: "POST",
+        body,
+      }),
+    removeThreadParticipant: (threadId: number, userId: string) =>
+      request<void>({
+        path: `/threads/${threadId}/participants/${encodeURIComponent(userId)}`,
+        method: "DELETE",
       }),
   };
 };

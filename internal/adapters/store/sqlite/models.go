@@ -317,6 +317,56 @@ func (m *ThreadModel) toCore() *core.Thread {
 	}
 }
 
+type ThreadMessageModel struct {
+	ID        int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID  int64                     `gorm:"column:thread_id;not null"`
+	SenderID  string                    `gorm:"column:sender_id;not null"`
+	Role      string                    `gorm:"column:role;not null"`
+	Content   string                    `gorm:"column:content;not null"`
+	Metadata  JSONField[map[string]any] `gorm:"column:metadata;type:text"`
+	CreatedAt time.Time                 `gorm:"column:created_at"`
+}
+
+func (ThreadMessageModel) TableName() string { return "thread_messages" }
+
+func (m *ThreadMessageModel) toCore() *core.ThreadMessage {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadMessage{
+		ID:        m.ID,
+		ThreadID:  m.ThreadID,
+		SenderID:  m.SenderID,
+		Role:      m.Role,
+		Content:   m.Content,
+		Metadata:  m.Metadata.Data,
+		CreatedAt: m.CreatedAt,
+	}
+}
+
+type ThreadParticipantModel struct {
+	ID       int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID int64     `gorm:"column:thread_id;not null"`
+	UserID   string    `gorm:"column:user_id;not null"`
+	Role     string    `gorm:"column:role;not null"`
+	JoinedAt time.Time `gorm:"column:joined_at"`
+}
+
+func (ThreadParticipantModel) TableName() string { return "thread_participants" }
+
+func (m *ThreadParticipantModel) toCore() *core.ThreadParticipant {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadParticipant{
+		ID:       m.ID,
+		ThreadID: m.ThreadID,
+		UserID:   m.UserID,
+		Role:     m.Role,
+		JoinedAt: m.JoinedAt,
+	}
+}
+
 func projectModelFromCore(p *core.Project) *ProjectModel {
 	if p == nil {
 		return nil

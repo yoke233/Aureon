@@ -717,3 +717,73 @@ export interface PushGitTagResponse {
   name: string;
   pushed: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Thread (multi-participant discussion)
+// ---------------------------------------------------------------------------
+
+export type ThreadStatus = "active" | "closed" | "archived" | string;
+
+export interface Thread {
+  id: number;
+  title: string;
+  status: ThreadStatus;
+  owner_id?: string;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateThreadRequest {
+  title: string;
+  owner_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateThreadRequest {
+  title?: string;
+  status?: string;
+  owner_id?: string;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ThreadMessage {
+  id: number;
+  thread_id: number;
+  sender_id: string;
+  role: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CreateThreadMessageRequest {
+  sender_id?: string;
+  role?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ThreadParticipant {
+  id: number;
+  thread_id: number;
+  user_id: string;
+  role: string;
+  joined_at: string;
+}
+
+export interface AddThreadParticipantRequest {
+  user_id: string;
+  role?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Terminology aliases (external names → internal types)
+// ---------------------------------------------------------------------------
+
+export type WorkItem = Issue;
+export type Action = Step;
+export type Run = Execution;
+export type Deliverable = Artifact;

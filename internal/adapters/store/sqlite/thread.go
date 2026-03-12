@@ -139,3 +139,132 @@ func (s *Store) DeleteThread(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// ThreadMessage CRUD
+// ---------------------------------------------------------------------------
+
+func (s *Store) CreateThreadMessage(ctx context.Context, msg *core.ThreadMessage) (int64, error) {
+	if s == nil || s.orm == nil {
+		return 0, fmt.Errorf("store is not initialized")
+	}
+	if msg == nil {
+		return 0, fmt.Errorf("message is nil")
+	}
+
+	now := time.Now().UTC()
+	model := &ThreadMessageModel{
+		ThreadID:  msg.ThreadID,
+		SenderID:  strings.TrimSpace(msg.SenderID),
+		Role:      msg.Role,
+		Content:   msg.Content,
+		Metadata:  JSONField[map[string]any]{Data: msg.Metadata},
+		CreatedAt: now,
+	}
+	if model.Role == "" {
+		model.Role = "human"
+	}
+
+	if err := s.orm.WithContext(ctx).Create(model).Error; err != nil {
+		return 0, err
+	}
+	msg.ID = model.ID
+	msg.CreatedAt = now
+	return model.ID, nil
+}
+
+func (s *Store) ListThreadMessages(ctx context.Context, threadID int64, limit, offset int) ([]*core.ThreadMessage, error) {
+	if s == nil || s.orm == nil {
+		return nil, fmt.Errorf("store is not initialized")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var models []ThreadMessageModel
+	if err := s.orm.WithContext(ctx).
+		Where("thread_id = ?", threadID).
+		Order("id ASC").
+		Limit(limit).
+		Offset(offset).
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+
+	out := make([]*core.ThreadMessage, 0, len(models))
+	for i := range models {
+		out = append(out, models[i].toCore())
+	}
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// ThreadParticipant CRUD
+// ---------------------------------------------------------------------------
+
+func (s *Store) AddThreadParticipant(ctx context.Context, p *core.ThreadParticipant) (int64, error) {
+	if s == nil || s.orm == nil {
+		return 0, fmt.Errorf("store is not initialized")
+	}
+	if p == nil {
+		return 0, fmt.Errorf("participant is nil")
+	}
+
+	now := time.Now().UTC()
+	model := &ThreadParticipantModel{
+		ThreadID: p.ThreadID,
+		UserID:   strings.TrimSpace(p.UserID),
+		Role:     p.Role,
+		JoinedAt: now,
+	}
+	if model.Role == "" {
+		model.Role = "member"
+	}
+
+	if err := s.orm.WithContext(ctx).Create(model).Error; err != nil {
+		return 0, err
+	}
+	p.ID = model.ID
+	p.JoinedAt = now
+	return model.ID, nil
+}
+
+func (s *Store) ListThreadParticipants(ctx context.Context, threadID int64) ([]*core.ThreadParticipant, error) {
+	if s == nil || s.orm == nil {
+		return nil, fmt.Errorf("store is not initialized")
+	}
+
+	var models []ThreadParticipantModel
+	if err := s.orm.WithContext(ctx).
+		Where("thread_id = ?", threadID).
+		Order("id ASC").
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+
+	out := make([]*core.ThreadParticipant, 0, len(models))
+	for i := range models {
+		out = append(out, models[i].toCore())
+	}
+	return out, nil
+}
+
+func (s *Store) RemoveThreadParticipant(ctx context.Context, threadID int64, userID string) error {
+	if s == nil || s.orm == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+
+	result := s.orm.WithContext(ctx).
+		Where("thread_id = ? AND user_id = ?", threadID, strings.TrimSpace(userID)).
+		Delete(&ThreadParticipantModel{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}

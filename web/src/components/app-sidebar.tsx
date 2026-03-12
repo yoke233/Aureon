@@ -6,6 +6,7 @@ import { saveLanguage } from "@/i18n";
 import {
   LayoutDashboard,
   MessageSquare,
+  MessagesSquare,
   GitBranch,
   BarChart3,
   Bot,
@@ -22,6 +23,7 @@ import { useWorkbench } from "@/contexts/WorkbenchContext";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard" },
+  { to: "/threads", icon: MessagesSquare, labelKey: "nav.threads" },
   { to: "/chat", icon: MessageSquare, labelKey: "nav.chat" },
   { to: "/issues", icon: GitBranch, labelKey: "nav.flows" },
   { to: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },

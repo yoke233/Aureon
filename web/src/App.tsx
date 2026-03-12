@@ -17,6 +17,8 @@ import { ProjectsPage } from "@/pages/ProjectsPage";
 import { SandboxPage } from "@/pages/SandboxPage";
 import { SkillsPage } from "@/pages/SkillsPage";
 import { TemplatesPage } from "@/pages/TemplatesPage";
+import { ThreadsPage } from "@/pages/ThreadsPage";
+import { ThreadDetailPage } from "@/pages/ThreadDetailPage";
 import { UsagePage } from "@/pages/UsagePage";
 
 interface AppProps {
@@ -52,6 +54,8 @@ const WorkbenchRoutes = () => {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/threads" element={<ThreadsPage />} />
+          <Route path="/threads/:threadId" element={<ThreadDetailPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/issues" element={<IssuesPage />} />
           <Route path="/issues/new" element={<CreateIssuePage />} />

@@ -43,8 +43,9 @@
   "nav": {
     "navigation": "导航",
     "dashboard": "仪表盘",
+    "threads": "讨论",
     "chat": "对话",
-    "flows": "流程",
+    "flows": "工作项",
     "analytics": "运行分析",
     "usage": "用量统计",
     "sandbox": "沙盒",

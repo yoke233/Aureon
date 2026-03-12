@@ -115,3 +115,117 @@ func TestThreadTitleRequired(t *testing.T) {
 		t.Fatal("expected error for blank title")
 	}
 }
+
+func TestThreadMessageCRUD(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Create thread first.
+	thread := &core.Thread{Title: "msg-test"}
+	threadID, err := s.CreateThread(ctx, thread)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Create message.
+	msg := &core.ThreadMessage{
+		ThreadID: threadID,
+		SenderID: "user-1",
+		Role:     "human",
+		Content:  "hello world",
+		Metadata: map[string]any{"source": "test"},
+	}
+	msgID, err := s.CreateThreadMessage(ctx, msg)
+	if err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	if msgID <= 0 {
+		t.Fatal("expected positive message id")
+	}
+
+	// Create second message.
+	msg2 := &core.ThreadMessage{
+		ThreadID: threadID,
+		SenderID: "agent-1",
+		Role:     "agent",
+		Content:  "hi there",
+	}
+	if _, err := s.CreateThreadMessage(ctx, msg2); err != nil {
+		t.Fatalf("create message 2: %v", err)
+	}
+
+	// List messages.
+	msgs, err := s.ListThreadMessages(ctx, threadID, 10, 0)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].Content != "hello world" {
+		t.Fatalf("expected first message content 'hello world', got %q", msgs[0].Content)
+	}
+	if msgs[1].Role != "agent" {
+		t.Fatalf("expected second message role 'agent', got %q", msgs[1].Role)
+	}
+}
+
+func TestThreadParticipantCRUD(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Create thread.
+	thread := &core.Thread{Title: "participant-test"}
+	threadID, err := s.CreateThread(ctx, thread)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	// Add participant.
+	p := &core.ThreadParticipant{
+		ThreadID: threadID,
+		UserID:   "user-1",
+		Role:     "owner",
+	}
+	pID, err := s.AddThreadParticipant(ctx, p)
+	if err != nil {
+		t.Fatalf("add participant: %v", err)
+	}
+	if pID <= 0 {
+		t.Fatal("expected positive participant id")
+	}
+
+	// Add second participant.
+	p2 := &core.ThreadParticipant{
+		ThreadID: threadID,
+		UserID:   "agent-1",
+		Role:     "agent",
+	}
+	if _, err := s.AddThreadParticipant(ctx, p2); err != nil {
+		t.Fatalf("add participant 2: %v", err)
+	}
+
+	// List participants.
+	participants, err := s.ListThreadParticipants(ctx, threadID)
+	if err != nil {
+		t.Fatalf("list participants: %v", err)
+	}
+	if len(participants) != 2 {
+		t.Fatalf("expected 2 participants, got %d", len(participants))
+	}
+
+	// Remove participant.
+	if err := s.RemoveThreadParticipant(ctx, threadID, "user-1"); err != nil {
+		t.Fatalf("remove participant: %v", err)
+	}
+
+	participants, _ = s.ListThreadParticipants(ctx, threadID)
+	if len(participants) != 1 {
+		t.Fatalf("expected 1 participant after remove, got %d", len(participants))
+	}
+
+	// Remove non-existent.
+	if err := s.RemoveThreadParticipant(ctx, threadID, "nobody"); err != core.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}

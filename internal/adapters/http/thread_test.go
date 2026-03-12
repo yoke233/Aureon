@@ -125,6 +125,105 @@ func TestThreadGetNotFound(t *testing.T) {
 	}
 }
 
+func TestThreadMessageCRUD(t *testing.T) {
+	_, ts := setupAPI(t)
+
+	// Create thread.
+	resp, _ := post(ts, "/threads", map[string]any{"title": "msg-thread"})
+	var thread core.Thread
+	decodeJSON(resp, &thread)
+
+	// Create message.
+	resp, err := post(ts, fmt.Sprintf("/threads/%d/messages", thread.ID), map[string]any{
+		"sender_id": "user-1",
+		"role":      "human",
+		"content":   "hello from HTTP",
+	})
+	if err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+	var msg core.ThreadMessage
+	decodeJSON(resp, &msg)
+	if msg.Content != "hello from HTTP" {
+		t.Fatalf("expected content 'hello from HTTP', got %q", msg.Content)
+	}
+	if msg.ThreadID != thread.ID {
+		t.Fatalf("expected thread_id %d, got %d", thread.ID, msg.ThreadID)
+	}
+
+	// List messages.
+	resp, _ = get(ts, fmt.Sprintf("/threads/%d/messages", thread.ID))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var msgs []core.ThreadMessage
+	decodeJSON(resp, &msgs)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+
+	// Create message on non-existent thread.
+	resp, _ = post(ts, "/threads/9999/messages", map[string]any{"content": "x"})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestThreadParticipantCRUD(t *testing.T) {
+	_, ts := setupAPI(t)
+
+	// Create thread.
+	resp, _ := post(ts, "/threads", map[string]any{"title": "participant-thread"})
+	var thread core.Thread
+	decodeJSON(resp, &thread)
+
+	// Add participant.
+	resp, err := post(ts, fmt.Sprintf("/threads/%d/participants", thread.ID), map[string]any{
+		"user_id": "user-1",
+		"role":    "owner",
+	})
+	if err != nil {
+		t.Fatalf("add participant: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+	var p core.ThreadParticipant
+	decodeJSON(resp, &p)
+	if p.UserID != "user-1" {
+		t.Fatalf("expected user_id 'user-1', got %q", p.UserID)
+	}
+
+	// List participants.
+	resp, _ = get(ts, fmt.Sprintf("/threads/%d/participants", thread.ID))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var participants []core.ThreadParticipant
+	decodeJSON(resp, &participants)
+	if len(participants) != 1 {
+		t.Fatalf("expected 1 participant, got %d", len(participants))
+	}
+
+	// Remove participant.
+	req, _ := http.NewRequest(http.MethodDelete,
+		ts.URL+fmt.Sprintf("/threads/%d/participants/user-1", thread.ID), nil)
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Verify removed.
+	resp, _ = get(ts, fmt.Sprintf("/threads/%d/participants", thread.ID))
+	decodeJSON(resp, &participants)
+	if len(participants) != 0 {
+		t.Fatalf("expected 0 participants after remove, got %d", len(participants))
+	}
+}
+
 func TestThreadAndIssueRoutesIndependent(t *testing.T) {
 	_, ts := setupAPI(t)
 

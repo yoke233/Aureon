@@ -460,7 +460,7 @@ export function CreateIssuePage() {
                   : aiPrompt.trim()
                     ? t("createFlow.sourceAiPrompt")
                     : description.trim()
-                      ? t("createFlow.sourceDescription")
+                      ? t("createFlow.sourceDesc")
                       : t("createFlow.sourceFlowName")}
               </div>
             </div>

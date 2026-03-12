@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link } from "react-router-dom";
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
   Check,
   ChevronRight,
   Clock,
@@ -13,12 +15,24 @@ import {
   Square,
   XCircle,
 } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogBody,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
 import { cn } from "@/lib/utils";
 import { formatIssueDuration, formatRelativeTime, getErrorMessage, normalizeStepTypeLabel } from "@/lib/v2Workbench";
-import type { Execution, Issue, IssuePriority, IssueStatus, Step, ThreadWorkItemLink, Thread } from "@/types/apiV2";
+import type { Execution, Issue, IssuePriority, IssueStatus, Step, ThreadWorkItemLink, Thread, UpdateIssueRequest } from "@/types/apiV2";
 
 /* ── Status config ── */
 
@@ -80,6 +94,7 @@ function StepRow({ step, index, isLast }: { step: Step; index: number; isLast: b
       className={cn(
         "flex items-center gap-3 px-3.5 py-3 transition-colors hover:bg-muted/50",
         !isLast && "border-b",
+        step.status === "done" && "bg-muted/40",
         step.status === "running" && "bg-muted/30",
       )}
     >
@@ -128,6 +143,10 @@ export function IssueDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [threadLinks, setThreadLinks] = useState<ThreadWorkItemLink[]>([]);
   const [linkedThreads, setLinkedThreads] = useState<Record<number, Thread>>({});
+  const [depIssues, setDepIssues] = useState<Record<number, Issue>>({});
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState<UpdateIssueRequest>({});
+  const [saving, setSaving] = useState(false);
 
   /* ── Data loading ── */
 
@@ -156,6 +175,23 @@ export function IssueDetailPage() {
     void load();
     return () => { cancelled = true; };
   }, [fetchIssueData, numericIssueId]);
+
+  /* ── Load dependency issues ── */
+  useEffect(() => {
+    const depIds = issue?.depends_on ?? [];
+    if (depIds.length === 0) { setDepIssues({}); return; }
+    let cancelled = false;
+    const load = async () => {
+      const map: Record<number, Issue> = {};
+      const results = await Promise.allSettled(depIds.map((id) => apiClient.getIssue(id)));
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") map[depIds[i]] = r.value;
+      });
+      if (!cancelled) setDepIssues(map);
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [apiClient, issue?.depends_on]);
 
   useEffect(() => {
     if (!Number.isFinite(numericIssueId)) return;
@@ -190,6 +226,35 @@ export function IssueDetailPage() {
   const sCfg = statusConfig[issue?.status ?? "open"] ?? statusConfig.open;
   const pCfg = priorityConfig[issue?.priority ?? "medium"] ?? priorityConfig.medium;
 
+  /* ── Edit ── */
+
+  const openEdit = () => {
+    if (!issue) return;
+    setEditForm({
+      title: issue.title,
+      body: issue.body ?? "",
+      status: issue.status as IssueStatus,
+      priority: issue.priority,
+      labels: issue.labels ?? [],
+    });
+    setEditOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!issue) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await apiClient.updateIssue(issue.id, editForm);
+      setIssue(updated);
+      setEditOpen(false);
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   /* ── Actions ── */
 
   const runAction = async (action: "run" | "cancel") => {
@@ -211,6 +276,16 @@ export function IssueDetailPage() {
   /* ── Render ── */
 
   return (
+    <>
+    <EditIssueDialog
+      open={editOpen}
+      form={editForm}
+      saving={saving}
+      projects={projects}
+      onClose={() => setEditOpen(false)}
+      onSave={() => void saveEdit()}
+      onChange={(patch) => setEditForm((prev) => ({ ...prev, ...patch }))}
+    />
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="shrink-0 border-b px-8 pb-5 pt-6">
@@ -239,7 +314,7 @@ export function IssueDetailPage() {
             {loading && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={openEdit}>
               <Pencil className="h-3.5 w-3.5" />
               {t("common.edit")}
             </Button>
@@ -271,8 +346,10 @@ export function IssueDetailPage() {
             </div>
           )}
 
+          <Separator />
+
           {/* Steps */}
-          <div>
+          <div className="pt-5">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold">{t("workItemDetail.steps", "执行步骤")}</h3>
@@ -280,6 +357,10 @@ export function IssueDetailPage() {
                   {steps.length} {t("workItemDetail.stepsUnit", "步")}
                 </span>
               </div>
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs text-muted-foreground">
+                <Plus className="h-3.5 w-3.5" />
+                {t("workItemDetail.addStep", "添加步骤")}
+              </Button>
             </div>
             {steps.length > 0 ? (
               <div className="rounded-lg border">
@@ -402,15 +483,34 @@ export function IssueDetailPage() {
             <hr className="border-border" />
 
             {/* Dependencies */}
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <h4 className="text-[13px] text-muted-foreground">{t("workItemDetail.dependencies", "依赖")}</h4>
               {(issue?.depends_on ?? []).length > 0 ? (
-                <div className="space-y-1">
-                  {issue!.depends_on!.map((depId) => (
-                    <Link key={depId} to={`/work-items/${depId}`} className="block text-xs text-blue-600 hover:underline">
-                      WI-{depId}
-                    </Link>
-                  ))}
+                <div className="space-y-2">
+                  {issue!.depends_on!.map((depId) => {
+                    const dep = depIssues[depId];
+                    const depStatus = statusConfig[dep?.status ?? "open"] ?? statusConfig.open;
+                    return (
+                      <Link
+                        key={depId}
+                        to={`/work-items/${depId}`}
+                        className="flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs transition-colors hover:bg-muted/50"
+                      >
+                        <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium">
+                            WI-{depId}{dep ? ` · ${dep.title}` : ""}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                            <span>blocks</span>
+                            <span className={cn("rounded px-1.5 py-px text-[9px] font-medium", depStatus.text, depStatus.bg)}>
+                              {depStatus.label}
+                            </span>
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
                 </div>
               ) : (
                 <span className="text-xs italic text-muted-foreground">{t("workItemDetail.noDeps", "无前置依赖")}</span>
@@ -420,8 +520,135 @@ export function IssueDetailPage() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
 // Keep backward-compatible export
 export { IssueDetailPage as FlowDetailPage };
+
+/* ── Edit dialog ── */
+
+const FIELD_CLS = "flex flex-col gap-1.5";
+const LABEL_CLS = "text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70";
+const SELECT_WRAP = "relative";
+const SELECT_CLS = [
+  "w-full appearance-none rounded-lg border border-border/60 bg-muted/30 px-3 py-2",
+  "text-sm text-foreground shadow-none transition",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+  "hover:border-border",
+].join(" ");
+
+function EditIssueDialog({
+  open,
+  form,
+  saving,
+  projects: _projects,
+  onClose,
+  onSave,
+  onChange,
+}: {
+  open: boolean;
+  form: UpdateIssueRequest;
+  saving: boolean;
+  projects: { id: number; name: string }[];
+  onClose: () => void;
+  onSave: () => void;
+  onChange: (patch: Partial<UpdateIssueRequest>) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <Dialog open={open} onClose={onClose} className="max-w-md">
+      <DialogHeader>
+        <DialogTitle>{t("workItemDetail.editTitle", "编辑工作项")}</DialogTitle>
+        <DialogDescription>{t("workItemDetail.editSubtitle", "修改标题、描述、状态和优先级")}</DialogDescription>
+      </DialogHeader>
+      <DialogBody>
+        {/* Title */}
+        <div className={FIELD_CLS}>
+          <label className={LABEL_CLS}>{t("workItemDetail.fieldTitle", "标题")}</label>
+          <Input
+            value={form.title ?? ""}
+            onChange={(e) => onChange({ title: e.target.value })}
+            placeholder={t("workItemDetail.fieldTitlePlaceholder", "工作项标题")}
+          />
+        </div>
+
+        {/* Description */}
+        <div className={FIELD_CLS}>
+          <label className={LABEL_CLS}>{t("workItemDetail.fieldBody", "描述")}</label>
+          <Textarea
+            value={form.body ?? ""}
+            onChange={(e) => onChange({ body: e.target.value })}
+            placeholder={t("workItemDetail.fieldBodyPlaceholder", "详细描述（可选）")}
+            className="min-h-[80px] resize-none text-sm"
+          />
+        </div>
+
+        {/* Status + Priority */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className={FIELD_CLS}>
+            <label className={LABEL_CLS}>{t("common.status")}</label>
+            <div className={SELECT_WRAP}>
+              <select
+                value={form.status ?? ""}
+                onChange={(e) => onChange({ status: e.target.value as IssueStatus })}
+                className={SELECT_CLS}
+              >
+                {(["open","accepted","running","blocked","done","closed","cancelled"] as IssueStatus[]).map((s) => (
+                  <option key={s} value={s}>{statusConfig[s]?.label ?? s}</option>
+                ))}
+              </select>
+              <ChevronRight className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rotate-90 text-muted-foreground/60" />
+            </div>
+          </div>
+          <div className={FIELD_CLS}>
+            <label className={LABEL_CLS}>{t("workItemDetail.priority", "优先级")}</label>
+            <div className={SELECT_WRAP}>
+              <select
+                value={form.priority ?? ""}
+                onChange={(e) => onChange({ priority: e.target.value as IssuePriority })}
+                className={SELECT_CLS}
+              >
+                {(["urgent","high","medium","low"] as IssuePriority[]).map((p) => (
+                  <option key={p} value={p}>{priorityConfig[p]?.label ?? p}</option>
+                ))}
+              </select>
+              <ChevronRight className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rotate-90 text-muted-foreground/60" />
+            </div>
+          </div>
+        </div>
+
+        {/* Labels */}
+        <div className={FIELD_CLS}>
+          <label className={LABEL_CLS}>
+            {t("workItemDetail.labels", "标签")}
+            <span className="ml-1.5 normal-case tracking-normal text-muted-foreground/40">· 逗号分隔</span>
+          </label>
+          <Input
+            value={(form.labels ?? []).join(", ")}
+            onChange={(e) =>
+              onChange({ labels: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })
+            }
+            placeholder="bug, frontend, urgent"
+            className="font-mono text-xs"
+          />
+        </div>
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose} disabled={saving}>
+          {t("common.cancel")}
+        </Button>
+        <Button
+          onClick={onSave}
+          disabled={saving || !form.title?.trim()}
+          className="min-w-[72px] gap-1.5"
+        >
+          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {t("common.save", "保存")}
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  );
+}

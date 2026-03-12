@@ -39,6 +39,16 @@ export interface CreateIssueRequest {
   metadata?: Record<string, unknown>;
 }
 
+export interface UpdateIssueRequest {
+  title?: string;
+  body?: string;
+  status?: IssueStatus;
+  priority?: IssuePriority;
+  labels?: string[];
+  project_id?: number;
+  depends_on?: number[];
+}
+
 export interface Project {
   id: number;
   name: string;

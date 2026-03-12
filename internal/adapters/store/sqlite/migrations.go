@@ -388,6 +388,31 @@ func runMigrations(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_feature_entries_manifest ON feature_entries(manifest_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_feature_entries_status ON feature_entries(manifest_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_feature_entries_issue ON feature_entries(issue_id)`,
+		// step_signals table (explicit agent/human declarations about step outcomes).
+		`CREATE TABLE IF NOT EXISTS step_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            step_id INTEGER NOT NULL REFERENCES steps(id),
+            issue_id INTEGER NOT NULL,
+            exec_id INTEGER,
+            type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            payload TEXT,
+            actor TEXT NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_step_signals_step ON step_signals(step_id, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_step_signals_exec ON step_signals(exec_id)`,
+		// issue_attachments table (file attachments for issues).
+		`CREATE TABLE IF NOT EXISTS issue_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+            file_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            mime_type TEXT NOT NULL DEFAULT '',
+            size INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_issue_attachments_issue ON issue_attachments(issue_id)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			if strings.Contains(err.Error(), "duplicate column name") {

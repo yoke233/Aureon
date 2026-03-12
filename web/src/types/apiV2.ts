@@ -895,6 +895,19 @@ export interface FeatureManifestSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Issue Attachments
+// ---------------------------------------------------------------------------
+
+export interface IssueAttachment {
+  id: number;
+  issue_id: number;
+  file_name: string;
+  mime_type: string;
+  size: number;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Terminology aliases (external names → internal types)
 // ---------------------------------------------------------------------------
 

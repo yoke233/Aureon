@@ -25,6 +25,8 @@ type Store interface {
 	core.DAGTemplateStore
 	core.UsageStore
 	core.FeatureManifestStore
+	core.StepSignalStore
+	core.IssueAttachmentStore
 	Close() error
 }
 

@@ -86,6 +86,42 @@ type IssueModel struct {
 
 func (IssueModel) TableName() string { return "issues" }
 
+type IssueAttachmentModel struct {
+	ID        int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	IssueID   int64     `gorm:"column:issue_id;not null"`
+	FileName  string    `gorm:"column:file_name;not null"`
+	FilePath  string    `gorm:"column:file_path;not null"`
+	MimeType  string    `gorm:"column:mime_type;not null"`
+	Size      int64     `gorm:"column:size;not null"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (IssueAttachmentModel) TableName() string { return "issue_attachments" }
+
+func (m *IssueAttachmentModel) toCore() *core.IssueAttachment {
+	return &core.IssueAttachment{
+		ID:        m.ID,
+		IssueID:   m.IssueID,
+		FileName:  m.FileName,
+		FilePath:  m.FilePath,
+		MimeType:  m.MimeType,
+		Size:      m.Size,
+		CreatedAt: m.CreatedAt,
+	}
+}
+
+func issueAttachmentModelFromCore(a *core.IssueAttachment) *IssueAttachmentModel {
+	return &IssueAttachmentModel{
+		ID:        a.ID,
+		IssueID:   a.IssueID,
+		FileName:  a.FileName,
+		FilePath:  a.FilePath,
+		MimeType:  a.MimeType,
+		Size:      a.Size,
+		CreatedAt: a.CreatedAt,
+	}
+}
+
 type StepModel struct {
 	ID                   int64                     `gorm:"column:id;primaryKey;autoIncrement"`
 	IssueID              int64                     `gorm:"column:issue_id;not null"`
@@ -527,6 +563,59 @@ func featureEntryModelFromCore(e *core.FeatureEntry) *FeatureEntryModel {
 		CreatedAt:   e.CreatedAt,
 		UpdatedAt:   e.UpdatedAt,
 	}
+}
+
+// ── StepSignal ──
+
+type StepSignalModel struct {
+	ID        int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	StepID    int64                     `gorm:"column:step_id;not null"`
+	IssueID   int64                     `gorm:"column:issue_id;not null"`
+	ExecID    *int64                    `gorm:"column:exec_id"`
+	Type      string                    `gorm:"column:type;not null"`
+	Source    string                    `gorm:"column:source;not null"`
+	Payload   JSONField[map[string]any] `gorm:"column:payload;type:text"`
+	Actor     string                    `gorm:"column:actor;not null"`
+	CreatedAt time.Time                 `gorm:"column:created_at"`
+}
+
+func (StepSignalModel) TableName() string { return "step_signals" }
+
+func stepSignalModelFromCore(s *core.StepSignal) *StepSignalModel {
+	if s == nil {
+		return nil
+	}
+	return &StepSignalModel{
+		ID:        s.ID,
+		StepID:    s.StepID,
+		IssueID:   s.IssueID,
+		ExecID:    int64PtrIfNonZero(s.ExecID),
+		Type:      string(s.Type),
+		Source:    string(s.Source),
+		Payload:   JSONField[map[string]any]{Data: s.Payload},
+		Actor:     s.Actor,
+		CreatedAt: s.CreatedAt,
+	}
+}
+
+func (m *StepSignalModel) toCore() *core.StepSignal {
+	if m == nil {
+		return nil
+	}
+	sig := &core.StepSignal{
+		ID:        m.ID,
+		StepID:    m.StepID,
+		IssueID:   m.IssueID,
+		Type:      core.SignalType(m.Type),
+		Source:    core.SignalSource(m.Source),
+		Payload:   m.Payload.Data,
+		Actor:     m.Actor,
+		CreatedAt: m.CreatedAt,
+	}
+	if m.ExecID != nil {
+		sig.ExecID = *m.ExecID
+	}
+	return sig
 }
 
 func projectModelFromCore(p *core.Project) *ProjectModel {

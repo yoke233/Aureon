@@ -266,6 +266,18 @@ export interface ApiClient {
   listGitTags(projectId: number): Promise<GitTagEntry[]>;
   createGitTag(projectId: number, body: CreateGitTagRequest): Promise<CreateGitTagResponse>;
   pushGitTag(projectId: number, body: PushGitTagRequest): Promise<PushGitTagResponse>;
+
+  // Threads
+  listThreads(params?: { status?: string; limit?: number; offset?: number }): Promise<Thread[]>;
+  createThread(body: CreateThreadRequest): Promise<Thread>;
+  getThread(threadId: number): Promise<Thread>;
+  updateThread(threadId: number, body: UpdateThreadRequest): Promise<Thread>;
+  deleteThread(threadId: number): Promise<void>;
+  listThreadMessages(threadId: number, params?: { limit?: number; offset?: number }): Promise<ThreadMessage[]>;
+  createThreadMessage(threadId: number, body: CreateThreadMessageRequest): Promise<ThreadMessage>;
+  listThreadParticipants(threadId: number): Promise<ThreadParticipant[]>;
+  addThreadParticipant(threadId: number, body: AddThreadParticipantRequest): Promise<ThreadParticipant>;
+  removeThreadParticipant(threadId: number, userId: string): Promise<void>;
 }
 
 export const createApiClient = (opts: ApiClientOptions): ApiClient => {

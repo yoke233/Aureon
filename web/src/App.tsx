@@ -17,6 +17,8 @@ import { ProjectsPage } from "@/pages/ProjectsPage";
 import { SandboxPage } from "@/pages/SandboxPage";
 import { SkillsPage } from "@/pages/SkillsPage";
 import { TemplatesPage } from "@/pages/TemplatesPage";
+import { ThreadsPage } from "@/pages/ThreadsPage";
+import { ThreadDetailPage } from "@/pages/ThreadDetailPage";
 import { UsagePage } from "@/pages/UsagePage";
 
 interface AppProps {
@@ -52,14 +54,21 @@ const WorkbenchRoutes = () => {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/threads" element={<ThreadsPage />} />
+          <Route path="/threads/:threadId" element={<ThreadDetailPage />} />
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="/issues" element={<IssuesPage />} />
-          <Route path="/issues/new" element={<CreateIssuePage />} />
-          <Route path="/issues/:flowId" element={<IssueDetailPage />} />
-          {/* Legacy /flows routes redirect to /issues */}
-          <Route path="/flows" element={<Navigate to="/issues" replace />} />
-          <Route path="/flows/new" element={<Navigate to="/issues/new" replace />} />
-          <Route path="/flows/:flowId" element={<Navigate to="/issues" replace />} />
+          {/* Work Items (primary entry) */}
+          <Route path="/work-items" element={<IssuesPage />} />
+          <Route path="/work-items/new" element={<CreateIssuePage />} />
+          <Route path="/work-items/:flowId" element={<IssueDetailPage />} />
+          {/* Legacy /issues routes redirect to /work-items */}
+          <Route path="/issues" element={<Navigate to="/work-items" replace />} />
+          <Route path="/issues/new" element={<Navigate to="/work-items/new" replace />} />
+          <Route path="/issues/:flowId" element={<Navigate to="/work-items" replace />} />
+          {/* Legacy /flows routes redirect to /work-items */}
+          <Route path="/flows" element={<Navigate to="/work-items" replace />} />
+          <Route path="/flows/new" element={<Navigate to="/work-items/new" replace />} />
+          <Route path="/flows/:flowId" element={<Navigate to="/work-items" replace />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/executions/:execId" element={<ExecutionDetailPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />

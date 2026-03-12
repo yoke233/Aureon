@@ -296,6 +296,63 @@ func runMigrations(db *sql.DB) error {
         )`,
 		`CREATE INDEX IF NOT EXISTS idx_execution_probes_execution ON execution_probes(execution_id, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_execution_probes_active ON execution_probes(execution_id, status, id)`,
+		// threads table (independent multi-participant discussion container).
+		`CREATE TABLE IF NOT EXISTS threads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            owner_id TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            metadata TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_threads_status ON threads(status)`,
+		// thread_messages table.
+		`CREATE TABLE IF NOT EXISTS thread_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+            sender_id TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT 'human',
+            content TEXT NOT NULL DEFAULT '',
+            metadata TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_messages_thread ON thread_messages(thread_id, id)`,
+		// thread_participants table.
+		`CREATE TABLE IF NOT EXISTS thread_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member',
+            joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(thread_id, user_id)
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_participants_thread ON thread_participants(thread_id)`,
+		// thread_work_item_links table.
+		`CREATE TABLE IF NOT EXISTS thread_work_item_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id INTEGER NOT NULL REFERENCES threads(id),
+            work_item_id INTEGER NOT NULL REFERENCES issues(id),
+            relation_type TEXT NOT NULL DEFAULT 'related',
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(thread_id, work_item_id)
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_twil_thread ON thread_work_item_links(thread_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_twil_work_item ON thread_work_item_links(work_item_id)`,
+		// thread_agent_sessions table.
+		`CREATE TABLE IF NOT EXISTS thread_agent_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id INTEGER NOT NULL REFERENCES threads(id),
+            agent_profile_id TEXT NOT NULL,
+            acp_session_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'joining',
+            joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_active_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(thread_id, agent_profile_id)
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_tas_thread ON thread_agent_sessions(thread_id)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			if strings.Contains(err.Error(), "duplicate column name") {

@@ -43,8 +43,10 @@
   "nav": {
     "navigation": "Navigation",
     "dashboard": "Dashboard",
+    "threads": "Threads",
+    "workItems": "Work Items",
     "chat": "Chat",
-    "flows": "Flows",
+    "flows": "Work Items",
     "analytics": "Analytics",
     "usage": "Usage",
     "sandbox": "Sandbox",

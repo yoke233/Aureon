@@ -270,6 +270,157 @@ type UsageRecordModel struct {
 
 func (UsageRecordModel) TableName() string { return "usage_records" }
 
+// ── Thread ──
+
+type ThreadModel struct {
+	ID        int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	Title     string                    `gorm:"column:title;not null"`
+	Status    string                    `gorm:"column:status;not null"`
+	OwnerID   string                    `gorm:"column:owner_id;not null"`
+	Summary   string                    `gorm:"column:summary;not null"`
+	Metadata  JSONField[map[string]any] `gorm:"column:metadata;type:text"`
+	CreatedAt time.Time                 `gorm:"column:created_at"`
+	UpdatedAt time.Time                 `gorm:"column:updated_at"`
+}
+
+func (ThreadModel) TableName() string { return "threads" }
+
+func threadModelFromCore(t *core.Thread) *ThreadModel {
+	if t == nil {
+		return nil
+	}
+	return &ThreadModel{
+		ID:        t.ID,
+		Title:     t.Title,
+		Status:    string(t.Status),
+		OwnerID:   t.OwnerID,
+		Summary:   t.Summary,
+		Metadata:  JSONField[map[string]any]{Data: t.Metadata},
+		CreatedAt: t.CreatedAt,
+		UpdatedAt: t.UpdatedAt,
+	}
+}
+
+func (m *ThreadModel) toCore() *core.Thread {
+	if m == nil {
+		return nil
+	}
+	return &core.Thread{
+		ID:        m.ID,
+		Title:     m.Title,
+		Status:    core.ThreadStatus(m.Status),
+		OwnerID:   m.OwnerID,
+		Summary:   m.Summary,
+		Metadata:  m.Metadata.Data,
+		CreatedAt: m.CreatedAt,
+		UpdatedAt: m.UpdatedAt,
+	}
+}
+
+type ThreadMessageModel struct {
+	ID        int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID  int64                     `gorm:"column:thread_id;not null"`
+	SenderID  string                    `gorm:"column:sender_id;not null"`
+	Role      string                    `gorm:"column:role;not null"`
+	Content   string                    `gorm:"column:content;not null"`
+	Metadata  JSONField[map[string]any] `gorm:"column:metadata;type:text"`
+	CreatedAt time.Time                 `gorm:"column:created_at"`
+}
+
+func (ThreadMessageModel) TableName() string { return "thread_messages" }
+
+func (m *ThreadMessageModel) toCore() *core.ThreadMessage {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadMessage{
+		ID:        m.ID,
+		ThreadID:  m.ThreadID,
+		SenderID:  m.SenderID,
+		Role:      m.Role,
+		Content:   m.Content,
+		Metadata:  m.Metadata.Data,
+		CreatedAt: m.CreatedAt,
+	}
+}
+
+type ThreadParticipantModel struct {
+	ID       int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID int64     `gorm:"column:thread_id;not null"`
+	UserID   string    `gorm:"column:user_id;not null"`
+	Role     string    `gorm:"column:role;not null"`
+	JoinedAt time.Time `gorm:"column:joined_at"`
+}
+
+func (ThreadParticipantModel) TableName() string { return "thread_participants" }
+
+func (m *ThreadParticipantModel) toCore() *core.ThreadParticipant {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadParticipant{
+		ID:       m.ID,
+		ThreadID: m.ThreadID,
+		UserID:   m.UserID,
+		Role:     m.Role,
+		JoinedAt: m.JoinedAt,
+	}
+}
+
+// ThreadWorkItemLinkModel persists thread-workitem links.
+type ThreadWorkItemLinkModel struct {
+	ID           int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID     int64     `gorm:"column:thread_id;not null"`
+	WorkItemID   int64     `gorm:"column:work_item_id;not null"`
+	RelationType string    `gorm:"column:relation_type;not null;default:related"`
+	IsPrimary    bool      `gorm:"column:is_primary;not null;default:false"`
+	CreatedAt    time.Time `gorm:"column:created_at"`
+}
+
+func (ThreadWorkItemLinkModel) TableName() string { return "thread_work_item_links" }
+
+func (m *ThreadWorkItemLinkModel) toCore() *core.ThreadWorkItemLink {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadWorkItemLink{
+		ID:           m.ID,
+		ThreadID:     m.ThreadID,
+		WorkItemID:   m.WorkItemID,
+		RelationType: m.RelationType,
+		IsPrimary:    m.IsPrimary,
+		CreatedAt:    m.CreatedAt,
+	}
+}
+
+// ThreadAgentSessionModel persists thread agent sessions.
+type ThreadAgentSessionModel struct {
+	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID       int64     `gorm:"column:thread_id;not null"`
+	AgentProfileID string    `gorm:"column:agent_profile_id;not null"`
+	ACPSessionID   string    `gorm:"column:acp_session_id;not null;default:''"`
+	Status         string    `gorm:"column:status;not null;default:joining"`
+	JoinedAt       time.Time `gorm:"column:joined_at"`
+	LastActiveAt   time.Time `gorm:"column:last_active_at"`
+}
+
+func (ThreadAgentSessionModel) TableName() string { return "thread_agent_sessions" }
+
+func (m *ThreadAgentSessionModel) toCore() *core.ThreadAgentSession {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadAgentSession{
+		ID:             m.ID,
+		ThreadID:       m.ThreadID,
+		AgentProfileID: m.AgentProfileID,
+		ACPSessionID:   m.ACPSessionID,
+		Status:         m.Status,
+		JoinedAt:       m.JoinedAt,
+		LastActiveAt:   m.LastActiveAt,
+	}
+}
+
 func projectModelFromCore(p *core.Project) *ProjectModel {
 	if p == nil {
 		return nil

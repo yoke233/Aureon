@@ -51,6 +51,16 @@ import type {
   PushGitTagResponse,
   UsageAnalyticsSummary,
   UsageRecord,
+  Thread,
+  CreateThreadRequest,
+  UpdateThreadRequest,
+  ThreadMessage,
+  CreateThreadMessageRequest,
+  ThreadParticipant,
+  AddThreadParticipantRequest,
+  ThreadWorkItemLink,
+  CreateThreadWorkItemLinkRequest,
+  ThreadAgentSession,
 } from "../types/apiV2";
 import type { SandboxSupportResponse, UpdateSandboxSupportRequest } from "../types/system";
 
@@ -259,6 +269,30 @@ export interface ApiClient {
   listGitTags(projectId: number): Promise<GitTagEntry[]>;
   createGitTag(projectId: number, body: CreateGitTagRequest): Promise<CreateGitTagResponse>;
   pushGitTag(projectId: number, body: PushGitTagRequest): Promise<PushGitTagResponse>;
+
+  // Threads
+  listThreads(params?: { status?: string; limit?: number; offset?: number }): Promise<Thread[]>;
+  createThread(body: CreateThreadRequest): Promise<Thread>;
+  getThread(threadId: number): Promise<Thread>;
+  updateThread(threadId: number, body: UpdateThreadRequest): Promise<Thread>;
+  deleteThread(threadId: number): Promise<void>;
+  listThreadMessages(threadId: number, params?: { limit?: number; offset?: number }): Promise<ThreadMessage[]>;
+  createThreadMessage(threadId: number, body: CreateThreadMessageRequest): Promise<ThreadMessage>;
+  listThreadParticipants(threadId: number): Promise<ThreadParticipant[]>;
+  addThreadParticipant(threadId: number, body: AddThreadParticipantRequest): Promise<ThreadParticipant>;
+  removeThreadParticipant(threadId: number, userId: string): Promise<void>;
+
+  // Thread-WorkItem Links
+  createThreadWorkItemLink(threadId: number, body: CreateThreadWorkItemLinkRequest): Promise<ThreadWorkItemLink>;
+  listWorkItemsByThread(threadId: number): Promise<ThreadWorkItemLink[]>;
+  deleteThreadWorkItemLink(threadId: number, workItemId: number): Promise<void>;
+  listThreadsByWorkItem(issueId: number): Promise<ThreadWorkItemLink[]>;
+  createWorkItemFromThread(threadId: number, body: { title: string; body?: string; project_id?: number }): Promise<Issue>;
+
+  // Thread Agent Sessions
+  inviteThreadAgent(threadId: number, body: { agent_profile_id: string }): Promise<ThreadAgentSession>;
+  listThreadAgents(threadId: number): Promise<ThreadAgentSession[]>;
+  removeThreadAgent(threadId: number, agentSessionId: number): Promise<void>;
 }
 
 export const createApiClient = (opts: ApiClientOptions): ApiClient => {
@@ -700,6 +734,91 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
         path: `/projects/${projectId}/git/tags/push`,
         method: "POST",
         body,
+      }),
+
+    // Threads
+    listThreads: (params?: { status?: string; limit?: number; offset?: number }) =>
+      request<Thread[]>({
+        path: "/threads",
+        query: { status: params?.status, limit: params?.limit, offset: params?.offset },
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    createThread: (body: CreateThreadRequest) =>
+      request<Thread, CreateThreadRequest>({ path: "/threads", method: "POST", body }),
+    getThread: (threadId: number) =>
+      request<Thread>({ path: `/threads/${threadId}` }),
+    updateThread: (threadId: number, body: UpdateThreadRequest) =>
+      request<Thread, UpdateThreadRequest>({ path: `/threads/${threadId}`, method: "PUT", body }),
+    deleteThread: (threadId: number) =>
+      request<void>({ path: `/threads/${threadId}`, method: "DELETE" }),
+
+    // Thread Messages
+    listThreadMessages: (threadId: number, params?: { limit?: number; offset?: number }) =>
+      request<ThreadMessage[]>({
+        path: `/threads/${threadId}/messages`,
+        query: { limit: params?.limit, offset: params?.offset },
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    createThreadMessage: (threadId: number, body: CreateThreadMessageRequest) =>
+      request<ThreadMessage, CreateThreadMessageRequest>({
+        path: `/threads/${threadId}/messages`,
+        method: "POST",
+        body,
+      }),
+
+    // Thread Participants
+    listThreadParticipants: (threadId: number) =>
+      request<ThreadParticipant[]>({
+        path: `/threads/${threadId}/participants`,
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    addThreadParticipant: (threadId: number, body: AddThreadParticipantRequest) =>
+      request<ThreadParticipant, AddThreadParticipantRequest>({
+        path: `/threads/${threadId}/participants`,
+        method: "POST",
+        body,
+      }),
+    removeThreadParticipant: (threadId: number, userId: string) =>
+      request<void>({
+        path: `/threads/${threadId}/participants/${encodeURIComponent(userId)}`,
+        method: "DELETE",
+      }),
+    createThreadWorkItemLink: (threadId, body) =>
+      request<ThreadWorkItemLink, CreateThreadWorkItemLinkRequest>({
+        path: `/threads/${threadId}/links/work-items`,
+        method: "POST",
+        body,
+      }),
+    listWorkItemsByThread: (threadId) =>
+      request<ThreadWorkItemLink[]>({
+        path: `/threads/${threadId}/work-items`,
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    deleteThreadWorkItemLink: (threadId, workItemId) =>
+      request<void>({
+        path: `/threads/${threadId}/links/work-items/${workItemId}`,
+        method: "DELETE",
+      }),
+    listThreadsByWorkItem: (issueId) =>
+      request<ThreadWorkItemLink[]>({
+        path: `/issues/${issueId}/threads`,
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    createWorkItemFromThread: (threadId, body) =>
+      request<Issue, { title: string; body?: string; project_id?: number }>({
+        path: `/threads/${threadId}/create-work-item`,
+        method: "POST",
+        body,
+      }),
+    inviteThreadAgent: (threadId, body) =>
+      request<ThreadAgentSession, { agent_profile_id: string }>({
+        path: `/threads/${threadId}/agents`,
+        method: "POST",
+        body,
+      }),
+    listThreadAgents: (threadId) =>
+      request<ThreadAgentSession[]>({
+        path: `/threads/${threadId}/agents`,
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    removeThreadAgent: (threadId, agentSessionId) =>
+      request<void>({
+        path: `/threads/${threadId}/agents/${agentSessionId}`,
+        method: "DELETE",
       }),
   };
 };

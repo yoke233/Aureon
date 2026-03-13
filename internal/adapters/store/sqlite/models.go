@@ -111,28 +111,27 @@ type ActionModel struct {
 func (ActionModel) TableName() string { return "steps" }
 
 type RunModel struct {
-	ID               int64                       `gorm:"column:id;primaryKey;autoIncrement"`
-	StepID           int64                       `gorm:"column:step_id;not null"`
-	IssueID          int64                       `gorm:"column:issue_id;not null"`
-	Status           string                      `gorm:"column:status;not null"`
-	AgentID          string                      `gorm:"column:agent_id"`
-	AgentContextID   *int64                      `gorm:"column:agent_context_id"`
-	BriefingSnapshot string                      `gorm:"column:briefing_snapshot"`
-	Input            JSONField[map[string]any]   `gorm:"column:input;type:text"`
-	Output           JSONField[map[string]any]   `gorm:"column:output;type:text"`
-	ErrorMessage     string                      `gorm:"column:error_message"`
-	ErrorKind        string                      `gorm:"column:error_kind"`
-	Attempt          int                         `gorm:"column:attempt"`
-	StartedAt        *time.Time                  `gorm:"column:started_at"`
-	FinishedAt       *time.Time                  `gorm:"column:finished_at"`
-	CreatedAt        time.Time                   `gorm:"column:created_at"`
-	ResultMarkdown   string                      `gorm:"column:result_markdown"`
-	ResultMetadata   JSONField[map[string]any]   `gorm:"column:result_metadata;type:text"`
-	ResultAssets     JSONField[[]core.Asset]     `gorm:"column:result_assets;type:text"`
+	ID               int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	StepID           int64                     `gorm:"column:step_id;not null"`
+	IssueID          int64                     `gorm:"column:issue_id;not null"`
+	Status           string                    `gorm:"column:status;not null"`
+	AgentID          string                    `gorm:"column:agent_id"`
+	AgentContextID   *int64                    `gorm:"column:agent_context_id"`
+	BriefingSnapshot string                    `gorm:"column:briefing_snapshot"`
+	Input            JSONField[map[string]any] `gorm:"column:input;type:text"`
+	Output           JSONField[map[string]any] `gorm:"column:output;type:text"`
+	ErrorMessage     string                    `gorm:"column:error_message"`
+	ErrorKind        string                    `gorm:"column:error_kind"`
+	Attempt          int                       `gorm:"column:attempt"`
+	StartedAt        *time.Time                `gorm:"column:started_at"`
+	FinishedAt       *time.Time                `gorm:"column:finished_at"`
+	CreatedAt        time.Time                 `gorm:"column:created_at"`
+	ResultMarkdown   string                    `gorm:"column:result_markdown"`
+	ResultMetadata   JSONField[map[string]any] `gorm:"column:result_metadata;type:text"`
+	ResultAssets     JSONField[[]core.Asset]   `gorm:"column:result_assets;type:text"`
 }
 
 func (RunModel) TableName() string { return "executions" }
-
 
 type AgentContextModel struct {
 	ID               int64      `gorm:"column:id;primaryKey;autoIncrement"`
@@ -162,7 +161,6 @@ type EventModel struct {
 }
 
 func (EventModel) TableName() string { return "event_log" }
-
 
 type AgentProfileModel struct {
 	ID               string                        `gorm:"column:id;primaryKey"`
@@ -698,7 +696,6 @@ func (m *RunModel) toCore() *core.Run {
 	}
 }
 
-
 func agentContextModelFromCore(ac *core.AgentContext) *AgentContextModel {
 	if ac == nil {
 		return nil
@@ -786,7 +783,6 @@ func int64PtrIfNonZero(v int64) *int64 {
 	}
 	return &v
 }
-
 
 func agentProfileModelFromCore(p *core.AgentProfile) *AgentProfileModel {
 	if p == nil {
@@ -915,4 +911,3 @@ func (m *UsageRecordModel) toCore() *core.UsageRecord {
 		CreatedAt:        m.CreatedAt,
 	}
 }
-

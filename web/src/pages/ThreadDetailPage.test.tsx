@@ -394,6 +394,7 @@ describe("ThreadDetailPage", () => {
     fireEvent.mouseDown(screen.getByRole("button", { name: /@worker-a/ }));
 
     expect((input as HTMLInputElement).value).toBe("@worker-a ");
+    expect(await screen.findByText("已识别目标 agent")).toBeTruthy();
   });
 
   it("点击消息里的 mention 会高亮对应 agent 卡片", async () => {
@@ -425,5 +426,36 @@ describe("ThreadDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("agent-card-worker-a").className).toContain("border-blue-400");
     });
+  });
+
+  it("hover 消息 mention 时展示 agent 信息卡", async () => {
+    const wsClient = createWsClientMock();
+    const apiClient = {
+      getThread: vi.fn().mockResolvedValue(buildThread("已有摘要")),
+      listThreadMessages: vi.fn().mockResolvedValue([
+        {
+          id: 102,
+          thread_id: 1,
+          sender_id: "human",
+          role: "human",
+          content: "@worker-a 请处理 hover",
+          metadata: { target_agent_id: "worker-a" },
+          created_at: "2026-03-13T00:00:00Z",
+        },
+      ]),
+      listThreadParticipants: vi.fn().mockResolvedValue([]),
+      listWorkItemsByThread: vi.fn().mockResolvedValue([]),
+      listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a")]),
+      listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
+    };
+    mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
+
+    renderPage();
+
+    fireEvent.mouseEnter(await screen.findByRole("button", { name: "@worker-a" }));
+
+    const hoverCard = await screen.findByTestId("mention-hover-card-worker-a");
+    expect(hoverCard.textContent).toContain("Turns: 0");
+    expect(hoverCard.textContent).toContain("tokens: 0.0k");
   });
 });

@@ -110,6 +110,16 @@ function splitMessageMentions(content: string): Array<{ type: "text" | "mention"
   return parts.length > 0 ? parts : [{ type: "text", value: content }];
 }
 
+function readCommittedMentionTarget(message: string, activeAgentProfileIDs: string[]): string | null {
+  const trimmed = message.trimStart();
+  const match = trimmed.match(/^@([A-Za-z0-9._:-]+)(?:\s|$)/);
+  if (!match) {
+    return null;
+  }
+  const profileID = match[1].trim();
+  return activeAgentProfileIDs.includes(profileID) ? profileID : null;
+}
+
 export function ThreadDetailPage() {
   const { t } = useTranslation();
   const { threadId } = useParams<{ threadId: string }>();
@@ -141,6 +151,7 @@ export function ThreadDetailPage() {
   const [mentionDraft, setMentionDraft] = useState<{ start: number; end: number; query: string } | null>(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const [highlightedAgentProfileID, setHighlightedAgentProfileID] = useState<string | null>(null);
+  const [hoveredMentionProfileID, setHoveredMentionProfileID] = useState<string | null>(null);
   const pendingThreadRequestIdRef = useRef<string | null>(null);
   const syntheticMessageIDRef = useRef(-1);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
@@ -155,6 +166,9 @@ export function ThreadDetailPage() {
   const agentRoutingMode = readAgentRoutingMode(thread);
   const profileByID = new Map(availableProfiles.map((profile) => [profile.id, profile]));
   const agentSessionByProfileID = new Map(agentSessions.map((session) => [session.agent_profile_id, session]));
+  const committedMentionTargetID = readCommittedMentionTarget(newMessage, activeAgentProfileIDs);
+  const committedMentionProfile = committedMentionTargetID ? profileByID.get(committedMentionTargetID) : undefined;
+  const committedMentionSession = committedMentionTargetID ? agentSessionByProfileID.get(committedMentionTargetID) : undefined;
   const mentionCandidates = activeAgentProfileIDs
     .map((profileID) => {
       const profile = profileByID.get(profileID);
@@ -324,8 +338,7 @@ export function ThreadDetailPage() {
       }
       pendingThreadRequestIdRef.current = null;
       setSending(false);
-      setNewMessage("");
-      setMentionDraft(null);
+      clearMentionComposerState();
     });
     const unsubscribeThreadError = wsClient.subscribe<{ request_id?: string; error?: string }>("thread.error", (payload) => {
       if (pendingThreadRequestIdRef.current && payload.request_id && payload.request_id !== pendingThreadRequestIdRef.current) {
@@ -333,7 +346,7 @@ export function ThreadDetailPage() {
       }
       pendingThreadRequestIdRef.current = null;
       setSending(false);
-      setMentionDraft(null);
+      clearMentionComposerState();
       setError(payload.error?.trim() || t("threads.sendFailed", "Thread message failed to send"));
     });
     const unsubscribeThreadAgentEvent = wsClient.subscribe<ThreadEventPayload>("thread.agent_joined", (payload) => {
@@ -416,6 +429,12 @@ export function ThreadDetailPage() {
     if (node) {
       node.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
+  };
+
+  const clearMentionComposerState = () => {
+    setNewMessage("");
+    setMentionDraft(null);
+    setSelectedMentionIndex(0);
   };
 
   const handleSend = async () => {
@@ -675,19 +694,38 @@ export function ThreadDetailPage() {
                         const profileID = part.profileID ?? "";
                         const session = agentSessionByProfileID.get(profileID);
                         const profile = profileByID.get(profileID);
-                        const title = session
-                          ? `${profile?.name ?? profileID} · ${session.status} · ${session.turn_count} turns`
-                          : `${profile?.name ?? profileID} · 未加入当前 Thread`;
                         return (
-                          <button
-                            key={`${msg.id}-mention-${index}`}
-                            type="button"
-                            className="mx-0.5 inline-flex rounded-md bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-900 transition hover:bg-blue-200 hover:text-blue-950"
-                            title={title}
-                            onClick={() => focusAgentProfile(profileID)}
-                          >
-                            {part.value}
-                          </button>
+                          <span key={`${msg.id}-mention-${index}`} className="relative mx-0.5 inline-flex">
+                            <button
+                              type="button"
+                              className="inline-flex rounded-md bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-900 transition hover:bg-blue-200 hover:text-blue-950"
+                              onClick={() => focusAgentProfile(profileID)}
+                              onMouseEnter={() => setHoveredMentionProfileID(profileID)}
+                              onMouseLeave={() => setHoveredMentionProfileID((current) => (current === profileID ? null : current))}
+                            >
+                              {part.value}
+                            </button>
+                            {hoveredMentionProfileID === profileID ? (
+                              <span
+                                data-testid={`mention-hover-card-${profileID}`}
+                                className="pointer-events-none absolute bottom-full left-0 z-20 mb-2 w-56 rounded-md border border-slate-200 bg-white p-3 text-left shadow-lg"
+                              >
+                                <span className="block text-sm font-medium text-slate-900">
+                                  {profile?.name ?? profileID}
+                                </span>
+                                <span className="mt-1 block text-xs text-slate-500">@{profileID}</span>
+                                <span className="mt-2 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                                  {session?.status ?? "not_joined"}
+                                </span>
+                                <span className="mt-2 block text-xs text-slate-600">
+                                  {t("threads.turns", "Turns")}: {session?.turn_count ?? 0}
+                                </span>
+                                <span className="mt-1 block text-xs text-slate-600">
+                                  {t("threads.tokens", "tokens")}: {session ? ((session.total_input_tokens + session.total_output_tokens) / 1000).toFixed(1) : "0.0"}k
+                                </span>
+                              </span>
+                            ) : null}
+                          </span>
                         );
                       })}
                     </p>
@@ -698,6 +736,26 @@ export function ThreadDetailPage() {
 
             {/* Send input */}
             <div className="relative border-t pt-3">
+              {committedMentionTargetID ? (
+                <div className="mb-2 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
+                  <span className="text-slate-600">
+                    {t("threads.mentionResolved", "已识别目标 agent")}
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex items-center rounded-full bg-white px-2 py-0.5 font-medium text-blue-900 shadow-sm"
+                    onClick={() => focusAgentProfile(committedMentionTargetID)}
+                  >
+                    @{committedMentionTargetID}
+                  </button>
+                  <span className="text-slate-500">
+                    {committedMentionProfile?.name ?? committedMentionTargetID}
+                  </span>
+                  <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                    {committedMentionSession?.status ?? "active"}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex gap-2">
                 <Input
                   ref={messageInputRef}

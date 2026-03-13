@@ -13,7 +13,6 @@ import { WorkItemDetailPage } from "@/pages/WorkItemDetailPage";
 import { WorkItemsPage } from "@/pages/WorkItemsPage";
 import { FeatureManifestPage } from "@/pages/FeatureManifestPage";
 import { GitTagsPage } from "@/pages/GitTagsPage";
-import { LLMConfigPage } from "@/pages/LLMConfigPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { SandboxPage } from "@/pages/SandboxPage";
@@ -87,7 +86,7 @@ const WorkbenchRoutes = () => {
           <Route path="/executions/:execId" element={<ExecutionDetailPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/usage" element={<UsagePage />} />
-          <Route path="/llm-api" element={<LLMConfigPage />} />
+          <Route path="/llm-api" element={<Navigate to="/agents" replace />} />
           <Route path="/sandbox" element={<SandboxPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/skills" element={<SkillsPage />} />

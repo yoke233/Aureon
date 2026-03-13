@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -13,10 +13,10 @@ import {
   Bot,
   FolderOpen,
   FileStack,
-  Cpu,
+  ChevronDown,
+  ChevronRight,
   ChevronsUpDown,
   Sparkles,
-  Shield,
   Coins,
   LogOut,
   Globe,
@@ -25,30 +25,61 @@ import {
 } from "lucide-react";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
 
-const navItems = [
-  { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard" },
-  { to: "/threads", icon: MessagesSquare, labelKey: "nav.threads" },
-  { to: "/work-items", icon: ClipboardList, labelKey: "nav.workItems" },
-  { to: "/chat", icon: MessageSquare, labelKey: "nav.chat" },
-  { to: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
-  { to: "/usage", icon: Coins, labelKey: "nav.usage" },
-  { to: "/llm-api", icon: Cpu, labelKey: "nav.llmApi" },
-  { to: "/sandbox", icon: Shield, labelKey: "nav.sandbox" },
-  { to: "/templates", icon: FileStack, labelKey: "nav.templates" },
-  { to: "/agents", icon: Bot, labelKey: "nav.agents" },
-  { to: "/skills", icon: Sparkles, labelKey: "nav.skills" },
-  { to: "/projects", icon: FolderOpen, labelKey: "nav.projects" },
+const navSections = [
+  {
+    labelKey: "nav.sectionWorkspace",
+    items: [
+      { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard" },
+      { to: "/threads", icon: MessagesSquare, labelKey: "nav.threads" },
+      { to: "/work-items", icon: ClipboardList, labelKey: "nav.workItems" },
+      { to: "/chat", icon: MessageSquare, labelKey: "nav.chat" },
+    ],
+  },
+  {
+    labelKey: "nav.sectionDelivery",
+    items: [
+      { to: "/templates", icon: FileStack, labelKey: "nav.templates" },
+      { to: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
+      { to: "/usage", icon: Coins, labelKey: "nav.usage" },
+      { to: "/projects", icon: FolderOpen, labelKey: "nav.projects" },
+    ],
+  },
+  {
+    labelKey: "nav.sectionRuntime",
+    items: [
+      { to: "/agents", icon: Bot, labelKey: "nav.agents" },
+      { to: "/skills", icon: Sparkles, labelKey: "nav.skills" },
+    ],
+  },
 ];
 
 export function AppSidebar() {
   const { t, i18n } = useTranslation();
   const { projects, selectedProjectId, setSelectedProjectId, logout } = useWorkbench();
+  const location = useLocation();
   const [showPicker, setShowPicker] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebar-collapsed") === "true");
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem("sidebar-collapsed-sections");
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed as Record<string, boolean> : {};
+    } catch {
+      return {};
+    }
+  });
   const currentProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? projects[0] ?? null,
     [projects, selectedProjectId],
   );
+  const toggleSection = (labelKey: string) => {
+    setCollapsedSections((current) => {
+      const next = { ...current, [labelKey]: !current[labelKey] };
+      localStorage.setItem("sidebar-collapsed-sections", JSON.stringify(next));
+      return next;
+    });
+  };
 
   return (
     <aside
@@ -109,32 +140,65 @@ export function AppSidebar() {
       )}
 
       {/* Navigation */}
-      <nav className={cn("flex-1 space-y-1 py-3", collapsed ? "px-1.5" : "px-3")}>
+      <nav className={cn("flex-1 overflow-y-auto py-3", collapsed ? "px-1.5" : "px-3")}>
         {!collapsed && (
           <div className="mb-2 px-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             {t("nav.navigation")}
           </div>
         )}
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === "/"}
-            title={collapsed ? t(item.labelKey) : undefined}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center rounded-md text-sm font-medium transition-colors",
-                collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2",
-                isActive
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-              )
-            }
-          >
-            <item.icon className="h-4 w-4 shrink-0" />
-            {!collapsed && t(item.labelKey)}
-          </NavLink>
-        ))}
+        <div className="space-y-3">
+          {navSections.map((section) => {
+            const sectionActive = section.items.some((item) =>
+              item.to === "/"
+                ? location.pathname === "/"
+                : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`),
+            );
+
+            return (
+            <div key={section.labelKey} className="space-y-1">
+              {!collapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection(section.labelKey)}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-md px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] transition-colors",
+                    sectionActive
+                      ? "bg-accent/80 text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground",
+                  )}
+                >
+                  <span>{t(section.labelKey)}</span>
+                  {collapsedSections[section.labelKey] ? (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                </button>
+              )}
+              {(collapsed || !collapsedSections[section.labelKey]) && section.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === "/"}
+                  title={collapsed ? t(item.labelKey) : undefined}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center rounded-md text-sm font-medium transition-colors",
+                      collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2",
+                      isActive
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    )
+                  }
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  {!collapsed && t(item.labelKey)}
+                </NavLink>
+              ))}
+            </div>
+            );
+          })}
+        </div>
       </nav>
 
       {/* Language switcher + Logout + Collapse toggle */}

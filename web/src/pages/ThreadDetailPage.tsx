@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Bot, Link2, Loader2, Plus, Save, Send, Users } from "lucide-react";
@@ -11,6 +11,7 @@ import { useWorkbench } from "@/contexts/WorkbenchContext";
 import { formatRelativeTime, getErrorMessage } from "@/lib/v2Workbench";
 import { Link } from "react-router-dom";
 import type { Thread, ThreadMessage, ThreadParticipant, ThreadWorkItemLink, ThreadAgentSession, Issue } from "@/types/apiV2";
+import type { ThreadAckPayload, ThreadEventPayload } from "@/types/ws";
 
 function hasSavedSummary(thread: Thread | null): boolean {
   return Boolean(thread?.summary?.trim());
@@ -34,7 +35,7 @@ export function ThreadDetailPage() {
   const { t } = useTranslation();
   const { threadId } = useParams<{ threadId: string }>();
   const navigate = useNavigate();
-  const { apiClient } = useWorkbench();
+  const { apiClient, wsClient } = useWorkbench();
 
   const [thread, setThread] = useState<Thread | null>(null);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
@@ -53,6 +54,8 @@ export function ThreadDetailPage() {
   const [showLinkWI, setShowLinkWI] = useState(false);
   const [linkWIId, setLinkWIId] = useState("");
   const [agentSessions, setAgentSessions] = useState<ThreadAgentSession[]>([]);
+  const pendingThreadRequestIdRef = useRef<string | null>(null);
+  const syntheticMessageIDRef = useRef(-1);
 
   const id = Number(threadId);
   const orderedWorkItemLinks = [...workItemLinks].sort((a, b) => {
@@ -104,21 +107,167 @@ export function ThreadDetailPage() {
     return () => { cancelled = true; };
   }, [apiClient, id]);
 
+  useEffect(() => {
+    if (!id || isNaN(id)) {
+      return;
+    }
+
+    const appendRealtimeMessage = (payload: ThreadEventPayload, roleFallback: "human" | "agent") => {
+      const content = typeof payload.content === "string" && payload.content.trim().length > 0
+        ? payload.content
+        : typeof payload.message === "string"
+          ? payload.message
+          : "";
+      if (!content.trim()) {
+        return;
+      }
+
+      const senderID = typeof payload.sender_id === "string" && payload.sender_id.trim().length > 0
+        ? payload.sender_id.trim()
+        : typeof payload.profile_id === "string" && payload.profile_id.trim().length > 0
+          ? payload.profile_id.trim()
+          : roleFallback;
+      const role = typeof payload.role === "string" && payload.role.trim().length > 0
+        ? payload.role.trim()
+        : roleFallback;
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: syntheticMessageIDRef.current--,
+          thread_id: id,
+          sender_id: senderID,
+          role,
+          content,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    };
+
+    const refreshAgentSessions = async () => {
+      try {
+        const sessions = await apiClient.listThreadAgents(id);
+        setAgentSessions(sessions);
+      } catch {
+        // Ignore background refresh failures; the main page error state is kept for direct user actions.
+      }
+    };
+
+    const sendThreadSubscription = (type: "subscribe_thread" | "unsubscribe_thread") => {
+      try {
+        wsClient.send({
+          type,
+          data: { thread_id: id },
+        });
+      } catch {
+        // Ignore send errors here; page load should still work via REST.
+      }
+    };
+
+    const unsubscribeThreadMessage = wsClient.subscribe<ThreadEventPayload>("thread.message", (payload) => {
+      if (payload.thread_id !== id) {
+        return;
+      }
+      appendRealtimeMessage(payload, "human");
+    });
+    const unsubscribeThreadOutput = wsClient.subscribe<ThreadEventPayload>("thread.agent_output", (payload) => {
+      if (payload.thread_id !== id) {
+        return;
+      }
+      appendRealtimeMessage(payload, "agent");
+    });
+    const unsubscribeThreadAck = wsClient.subscribe<ThreadAckPayload>("thread.ack", (payload) => {
+      if (payload.thread_id !== id) {
+        return;
+      }
+      if (pendingThreadRequestIdRef.current && payload.request_id && payload.request_id !== pendingThreadRequestIdRef.current) {
+        return;
+      }
+      pendingThreadRequestIdRef.current = null;
+      setSending(false);
+      setNewMessage("");
+    });
+    const unsubscribeThreadError = wsClient.subscribe<{ request_id?: string; error?: string }>("thread.error", (payload) => {
+      if (pendingThreadRequestIdRef.current && payload.request_id && payload.request_id !== pendingThreadRequestIdRef.current) {
+        return;
+      }
+      pendingThreadRequestIdRef.current = null;
+      setSending(false);
+      setError(payload.error?.trim() || t("threads.sendFailed", "Thread message failed to send"));
+    });
+    const unsubscribeThreadAgentEvent = wsClient.subscribe<ThreadEventPayload>("thread.agent_joined", (payload) => {
+      if (payload.thread_id === id) {
+        void refreshAgentSessions();
+      }
+    });
+    const unsubscribeThreadAgentLeft = wsClient.subscribe<ThreadEventPayload>("thread.agent_left", (payload) => {
+      if (payload.thread_id === id) {
+        void refreshAgentSessions();
+      }
+    });
+    const unsubscribeThreadAgentBooted = wsClient.subscribe<ThreadEventPayload>("thread.agent_booted", (payload) => {
+      if (payload.thread_id === id) {
+        void refreshAgentSessions();
+      }
+    });
+    const unsubscribeThreadAgentFailed = wsClient.subscribe<ThreadEventPayload>("thread.agent_failed", (payload) => {
+      if (payload.thread_id !== id) {
+        return;
+      }
+      setError(payload.error?.trim() || t("threads.agentFailed", "An agent in this thread failed."));
+      void refreshAgentSessions();
+    });
+    const unsubscribeStatus = wsClient.onStatusChange((status) => {
+      if (status === "open") {
+        sendThreadSubscription("subscribe_thread");
+      }
+    });
+
+    if (wsClient.getStatus() === "open") {
+      sendThreadSubscription("subscribe_thread");
+    }
+
+    return () => {
+      unsubscribeThreadMessage();
+      unsubscribeThreadOutput();
+      unsubscribeThreadAck();
+      unsubscribeThreadError();
+      unsubscribeThreadAgentEvent();
+      unsubscribeThreadAgentLeft();
+      unsubscribeThreadAgentBooted();
+      unsubscribeThreadAgentFailed();
+      unsubscribeStatus();
+      pendingThreadRequestIdRef.current = null;
+      if (wsClient.getStatus() === "open") {
+        sendThreadSubscription("unsubscribe_thread");
+      }
+    };
+  }, [apiClient, id, t, wsClient]);
+
   const handleSend = async () => {
     if (!newMessage.trim() || !id) return;
     setSending(true);
     setError(null);
     try {
-      const msg = await apiClient.createThreadMessage(id, {
-        content: newMessage.trim(),
-        role: "human",
+      const requestId = `thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      pendingThreadRequestIdRef.current = requestId;
+      wsClient.send({
+        type: "thread.send",
+        data: {
+          request_id: requestId,
+          thread_id: id,
+          message: newMessage.trim(),
+          sender_id: thread?.owner_id || "human",
+        },
       });
-      setMessages((prev) => [...prev, msg]);
-      setNewMessage("");
     } catch (e) {
+      pendingThreadRequestIdRef.current = null;
+      setSending(false);
       setError(getErrorMessage(e));
     } finally {
-      setSending(false);
+      if (!pendingThreadRequestIdRef.current) {
+        setSending(false);
+      }
     }
   };
 

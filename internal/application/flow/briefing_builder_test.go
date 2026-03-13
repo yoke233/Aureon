@@ -16,6 +16,8 @@ type stubInputStore struct {
 	workItems    map[int64]*core.WorkItem
 	actions      map[int64][]*core.Action      // keyed by WorkItemID
 	deliverables map[int64]*core.Deliverable   // keyed by ActionID (latest)
+	projects     map[int64]*core.Project
+	bindings     map[int64][]*core.ResourceBinding // keyed by ProjectID
 }
 
 func newStubInputStore() *stubInputStore {
@@ -23,6 +25,8 @@ func newStubInputStore() *stubInputStore {
 		workItems:    make(map[int64]*core.WorkItem),
 		actions:      make(map[int64][]*core.Action),
 		deliverables: make(map[int64]*core.Deliverable),
+		projects:     make(map[int64]*core.Project),
+		bindings:     make(map[int64][]*core.ResourceBinding),
 	}
 }
 
@@ -46,6 +50,17 @@ func (s *stubInputStore) GetLatestDeliverableByAction(_ context.Context, actionI
 
 func (s *stubInputStore) GetFeatureManifestByProject(_ context.Context, _ int64) (*core.FeatureManifest, error) {
 	return nil, core.ErrNotFound
+}
+
+func (s *stubInputStore) GetProject(_ context.Context, id int64) (*core.Project, error) {
+	if project, ok := s.projects[id]; ok {
+		return project, nil
+	}
+	return nil, core.ErrNotFound
+}
+
+func (s *stubInputStore) ListResourceBindings(_ context.Context, projectID int64) ([]*core.ResourceBinding, error) {
+	return s.bindings[projectID], nil
 }
 
 // --- panicStore satisfies Store by panicking on any unimplemented method ---
@@ -440,5 +455,141 @@ func TestExtractDeliverableSummary_EmptyDeliverable(t *testing.T) {
 	got := extractDeliverableSummary(deliverable)
 	if got != "" {
 		t.Errorf("expected empty string for empty deliverable, got: %q", got)
+	}
+}
+
+// --- Project Brief tests ---
+
+func TestInputBuilder_InjectsProjectBrief(t *testing.T) {
+	store := newStubInputStore()
+	projID := int64(10)
+	store.projects[projID] = &core.Project{
+		ID:          projID,
+		Name:        "my-app",
+		Kind:        core.ProjectDev,
+		Description: "A sample application for testing.",
+	}
+	store.bindings[projID] = []*core.ResourceBinding{
+		{ID: 1, ProjectID: projID, Kind: "git", URI: "https://github.com/example/my-app", Label: "main repo"},
+	}
+	store.workItems[1] = &core.WorkItem{ID: 1, Title: "Task", ProjectID: &projID}
+	action := &core.Action{ID: 10, WorkItemID: 1, Name: "implement", Position: 0}
+	store.actions[1] = []*core.Action{action}
+
+	builder := NewInputBuilder(store)
+	input, err := builder.Build(context.Background(), action)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if !strings.Contains(input, "my-app") {
+		t.Errorf("expected project name in input, got: %q", input)
+	}
+	if !strings.Contains(input, "dev") {
+		t.Errorf("expected project kind in input, got: %q", input)
+	}
+	if !strings.Contains(input, "sample application") {
+		t.Errorf("expected project description in input, got: %q", input)
+	}
+	if !strings.Contains(input, "main repo") {
+		t.Errorf("expected resource binding label in input, got: %q", input)
+	}
+	if !strings.Contains(input, "github.com/example/my-app") {
+		t.Errorf("expected resource binding URI in input, got: %q", input)
+	}
+}
+
+func TestInputBuilder_SkipsProjectBriefWhenNoProject(t *testing.T) {
+	store := newStubInputStore()
+	store.workItems[1] = &core.WorkItem{ID: 1, Title: "Task"}
+	action := &core.Action{ID: 10, WorkItemID: 1, Name: "s", Position: 0}
+	store.actions[1] = []*core.Action{action}
+
+	builder := NewInputBuilder(store)
+	input, err := builder.Build(context.Background(), action)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if strings.Contains(input, "project") {
+		t.Errorf("expected no project section when no ProjectID, got: %q", input)
+	}
+}
+
+// --- Progress Summary tests ---
+
+func TestInputBuilder_InjectsProgressSummary(t *testing.T) {
+	store := newStubInputStore()
+	store.workItems[1] = &core.WorkItem{ID: 1, Title: "Task"}
+	store.actions[1] = []*core.Action{
+		{ID: 100, WorkItemID: 1, Name: "plan", Position: 0, Status: core.ActionDone},
+		{ID: 101, WorkItemID: 1, Name: "implement", Position: 1, Status: core.ActionRunning},
+		{ID: 102, WorkItemID: 1, Name: "review", Position: 2, Status: core.ActionPending},
+	}
+
+	action := store.actions[1][1] // implement (running)
+	builder := NewInputBuilder(store)
+	input, err := builder.Build(context.Background(), action)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if !strings.Contains(input, "1/3 actions completed") {
+		t.Errorf("expected progress fraction, got: %q", input)
+	}
+	if !strings.Contains(input, "[done] plan") {
+		t.Errorf("expected done marker for plan, got: %q", input)
+	}
+	if !strings.Contains(input, "[running] implement") {
+		t.Errorf("expected running marker for implement, got: %q", input)
+	}
+	if !strings.Contains(input, "← current") {
+		t.Errorf("expected current marker, got: %q", input)
+	}
+	if !strings.Contains(input, "[pending] review") {
+		t.Errorf("expected pending marker for review, got: %q", input)
+	}
+}
+
+func TestInputBuilder_SkipsProgressWhenSingleAction(t *testing.T) {
+	store := newStubInputStore()
+	store.workItems[1] = &core.WorkItem{ID: 1, Title: "Task"}
+	action := &core.Action{ID: 10, WorkItemID: 1, Name: "only", Position: 0}
+	store.actions[1] = []*core.Action{action}
+
+	builder := NewInputBuilder(store)
+	input, err := builder.Build(context.Background(), action)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if strings.Contains(input, "Progress:") {
+		t.Errorf("expected no progress section for single action, got: %q", input)
+	}
+}
+
+// --- Context Ref Priority Order with new types ---
+
+func TestInputBuilder_ProjectBriefBeforeWorkItemSummary(t *testing.T) {
+	store := newStubInputStore()
+	projID := int64(10)
+	store.projects[projID] = &core.Project{ID: projID, Name: "my-proj", Kind: core.ProjectDev}
+	store.workItems[1] = &core.WorkItem{ID: 1, Title: "My Task", ProjectID: &projID}
+	action := &core.Action{ID: 10, WorkItemID: 1, Name: "s", Position: 0}
+	store.actions[1] = []*core.Action{action}
+
+	builder := NewInputBuilder(store)
+	input, err := builder.Build(context.Background(), action)
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	projIdx := strings.Index(input, "project")
+	wiIdx := strings.Index(input, "work item")
+	if projIdx < 0 || wiIdx < 0 {
+		t.Fatalf("expected both project and work item sections, got: %q", input)
+	}
+	if projIdx > wiIdx {
+		t.Errorf("expected project brief before work item summary")
 	}
 }

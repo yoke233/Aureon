@@ -238,6 +238,10 @@ func refBudget(ref ContextRef) int {
 		return 2000
 	case CtxAgentMemory:
 		return 1500
+	case CtxProgressSummary:
+		return 800
+	case CtxSkillsSummary:
+		return 1000
 	case CtxUpstreamArtifact:
 		return maxInputRefChars
 	default:

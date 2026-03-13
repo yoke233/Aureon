@@ -1,12 +1,18 @@
 # 命名迁移规范：Thread / WorkItem
 
 > 本文档定义系统对外术语升级的映射矩阵、兼容策略与淘汰周期。
+>
+> 状态：部分实现
+>
+> 最后按代码核对：2026-03-13
+>
+> 重要说明：当前迁移主要发生在前端 UI 路由与命名层；后端 REST API 仍以 `/issues` 为主，`/work-items` 尚未成为后端 alias。
 
 ## 命名映射矩阵
 
 | 内部 Go struct / 表名 | API 外部名 | UI 显示名 | 说明 |
 |----------------------|-----------|----------|------|
-| `Issue` | `WorkItem` | Work Item | Issue 表/struct 暂不重命名；API 新增 `/work-items` alias |
+| `Issue` | `WorkItem` | Work Item | Issue 表/struct 暂不重命名；当前主要是 UI 术语升级，后端 REST 仍使用 `/issues` |
 | `Step` | `Action` | Action | Step 表/struct 暂不重命名；API payload 新增 alias 字段 |
 | `Execution` | `Run` | Run | Execution 表/struct 暂不重命名；API payload 新增 alias 字段 |
 | `Artifact` | `Deliverable` | Deliverable | Artifact 表/struct 暂不重命名；API payload 新增 alias 字段 |
@@ -24,6 +30,11 @@
 
 ## HTTP 路由兼容策略
 
+当前现状分两层：
+
+- 前端页面主入口：`/work-items`
+- 后端 REST 主入口：`/issues`
+
 ### 新增路由
 
 | 路由 | 说明 |
@@ -33,8 +44,8 @@
 | `GET /threads/{id}` | Thread 详情 |
 | `PUT /threads/{id}` | 更新 Thread |
 | `DELETE /threads/{id}` | 删除 Thread |
-| `GET /work-items` | 等价于 `GET /issues`，返回相同数据 |
-| `GET /work-items/{id}` | 等价于 `GET /issues/{id}` |
+
+说明：截至 2026-03-13，后端并未提供 `/work-items` REST alias；如果未来补齐，应在此文档重新登记。
 
 ### 保留路由（兼容期内继续可用）
 
@@ -47,7 +58,7 @@
 
 ### 兼容周期
 
-- **Phase 1（当前）**：新旧路由同时可用，旧路由不发出 deprecation 警告
+- **Phase 1（当前）**：前端新旧页面路由并存，后端 REST 仍以 `/issues` 为准
 - **Phase 2（未来）**：旧路由返回 `Deprecation` header
 - **Phase 3（未来）**：旧路由移除
 
@@ -80,9 +91,10 @@
 
 暂不在 API 响应中同时返回新旧字段名。当前策略：
 
-- `/issues` 返回 Issue 字段名（`issue_id`, `step_id`, `execution_id`, `artifact_id`）
-- `/work-items` 返回相同数据，字段名与 `/issues` 一致（内部名保持不变）
-- `/threads` 返回 Thread 独立字段名（`thread_id`, `message_id`, `participant_id`）
+- `/issues` 继续返回现有字段结构，不额外增加 `work_item_id` alias
+- `/work-items` 目前仅是前端页面术语，不是已落地的后端 REST 路由
+- `/threads` 主对象继续返回通用主键字段 `id`
+- Thread 子资源（如 message、participant、agent session、work item link）按现有模型返回 `id` 与 `thread_id`
 
 ### 错误码策略
 
@@ -117,3 +129,8 @@ export type Action = Step;
 export type Run = Execution;
 export type Deliverable = Artifact;
 ```
+
+补充说明：
+
+- 前端路由当前已切到 `/work-items`，对应实现见 `web/src/App.tsx`
+- 但 API Client 仍调用 `/issues`，因此本文不应再把 `/work-items` 写成已落地的后端等价路由

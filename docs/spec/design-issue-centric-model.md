@@ -1,6 +1,19 @@
 # Issue-Centric Execution Model
 
+> Status: target architecture with partial implementation
+> Updated: 2026-03-13
+
 > Design rationale for the unified Issue model that replaces the former Flow + Issue pair.
+
+## Current Compatibility Reality
+
+This document describes the dominant direction of the codebase, but the rename is not fully complete.
+
+- The core domain already treats `Issue` as the unified work unit that replaces the former `Flow + Issue` pair.
+- The codebase still retains compatibility naming in several places, such as `FlowScheduler`, `PRFlow` prompts, and some `flow`-prefixed modules/errors.
+- The web app uses `/work-items` as the primary route, while legacy `/issues` and `/flows` routes redirect there for compatibility.
+
+Read this spec as "current architecture direction plus compatibility layer", not as "every Flow-era concept has been physically removed from the repository".
 
 ## Core Principle
 
@@ -61,12 +74,14 @@ Project
 
 ### Issue absorbs Flow
 
-The former `Flow` entity (execution container with Steps) is merged into `Issue`. This eliminates:
+At the domain-model level, the former `Flow` entity (execution container with Steps) is merged into `Issue`. This eliminates:
 - A redundant entity and its CRUD surface
 - A confusing 1:1 relationship (Issue → FlowID → Flow)
 - Two parallel status tracks (IssueStatus + FlowStatus)
 
 Issue now carries both planning metadata (title, body, priority, labels) and execution state (status lifecycle, steps, metadata).
+
+Implementation note: the repository still contains Flow-era compatibility names in scheduler/prompt/UI modules, so this is semantically true before it is fully true as a repository-wide rename.
 
 ### Step drops DependsOn, uses Position
 

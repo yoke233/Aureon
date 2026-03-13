@@ -1,11 +1,30 @@
 # Lead Chat 动态 Skills 设计方案
 
-> 状态: 草案 (Draft) — 待讨论
-> 日期: 2026-03-12
+> 状态：未来设计 / 草案
+>
+> 最后按代码核对：2026-03-13
+>
+> 重要说明：当前仓库已经有通用 skill 系统，但并未落地本文这套 `sys-*` Lead 动态技能体系。
+
+## 当前已实现范围
+
+当前仓库中已存在的能力：
+
+- 通用 skills 目录、`SKILL.md` 解析与校验
+- skills CRUD / GitHub import HTTP API
+- sandbox 内 skill linking
+- builtin skills，例如 `step-signal` 与 `step-context`
+
+当前尚未落地的能力：
+
+- 默认 Lead profile 预装 `sys-*` 系统 skills
+- `AI_WORKFLOW_API_BASE` / `AI_WORKFLOW_PROJECT_ID` 这组专门为本文脚本体系准备的环境变量注入
+- `load_mode: on_demand` 的完整动态加载协议
+- 文中列出的 `sys-issue-manage` / `sys-step-manage` 等系统 skill 实体
 
 ## 1. 背景与目标
 
-当前 Lead Agent 的聊天框只具备基本的文件读写和终端操作能力。用户希望 Lead 聊天能够**深度链接系统内部能力**，通过自然语言对话来完成：创建 Issue、监控执行进度、管理定时任务、查看分析报表等操作。
+当前 Lead Agent 的聊天框仍主要依赖通用文件读写、终端能力和少量已注入 skills。本文描述的是一套未来可能扩展的“系统技能层”。
 
 **核心原则：Skills + 脚本，动态加载，而非直接暴露 MCP tools。**
 
@@ -233,7 +252,7 @@ skills/
 ### 5.1 当前 Skills 加载流程
 
 ```
-Profile.Skills = ["sys-issue-manage", "sys-progress-monitor"]
+Profile.Skills = ["...existing skills..."]
     ↓
 Sandbox.Prepare() → EnsureSkillsLinked()
     ↓
@@ -242,7 +261,7 @@ Symlink: <skills-root>/sys-issue-manage → <agent-home>/skills/sys-issue-manage
 ACP Agent 读取 skills/ 目录中的 SKILL.md
 ```
 
-当前问题：Skills 在 Session 创建时静态绑定，无法运行时动态切换。
+当前问题：Skills 主要在 Session 创建时静态绑定，缺少本文想要的 Lead 专属系统技能动态装载层。
 
 ### 5.2 动态加载方案
 
@@ -260,7 +279,7 @@ ACP Agent 读取 skills/ 目录中的 SKILL.md
                         └─────────────────────────┘
 ```
 
-#### 方案 A: Profile 预装 + 按需激活（推荐）
+#### 方案 A: Profile 预装 + 按需激活（推荐，尚未落地）
 
 在 Lead Profile 中预配全部 sys-* skills，Agent 根据 SKILL.md 中的 `assign_when` 字段判断何时使用：
 
@@ -281,10 +300,10 @@ skills = [
 ]
 ```
 
-**优点**: 实现简单，当前架构完全支持
-**缺点**: 所有 SKILL.md 在 session 启动时全部加载，context 占用较大
+**优点**: 实现简单，当前架构原则上可承载
+**缺点**: 当前默认配置并未这样做，且上下文占用较大
 
-#### 方案 B: 分层加载（Lazy Skill Loading）
+#### 方案 B: 分层加载（Lazy Skill Loading，未实现）
 
 扩展 Metadata 和加载机制：
 
@@ -311,7 +330,7 @@ load_mode: on_demand       # 新增：lazy | eager | on_demand
 **优点**: Context 占用小，可支持大量 skills
 **缺点**: 需要扩展 Metadata + ACP 交互协议
 
-#### 方案 C: Skill Group（组合方案）
+#### 方案 C: Skill Group（组合方案，未实现）
 
 定义 skill group，按场景批量加载：
 
@@ -408,7 +427,7 @@ version: 1
 - 执行前确认用户意图，避免误触发
 ```
 
-## 7. 需要的代码改动
+## 7. 需要的代码改动（未来工作）
 
 ### 7.1 Metadata 扩展（Phase 2）
 
@@ -427,7 +446,7 @@ type Metadata struct {
 ### 7.2 Sandbox 环境变量注入
 
 ```go
-// internal/adapters/sandbox/home_dir.go — Prepare() 中追加
+// internal/adapters/sandbox/home_dir.go — 未来若采用本文方案，可在 Prepare() 中追加
 env["AI_WORKFLOW_API_BASE"] = fmt.Sprintf("http://127.0.0.1:%d/api", serverPort)
 env["AI_WORKFLOW_API_TOKEN"] = sessionToken
 env["AI_WORKFLOW_PROJECT_ID"] = strconv.FormatInt(projectID, 10)
@@ -446,7 +465,13 @@ capabilities = ["planning", "review", "fullstack"]
 skills = ["sys-issue-manage", "sys-step-manage", "sys-progress-monitor", "sys-cron-scheduler", "sys-project-manage", "sys-template-manage", "sys-analytics"]
 ```
 
-## 8. 待讨论项
+## 8. 建议与当前实现的衔接方式
+
+- 不要把本文当成“现有 skill 系统说明”，它描述的是未来扩展层
+- 如果要说明现有系统，请补一篇独立文档描述 skills CRUD、builtin skills、ephemeral skills
+- 如果未来继续推进本文方案，建议先从 `sys-issue-manage`、`sys-step-manage` 两个最小 skill 开始
+
+## 9. 待讨论项
 
 1. **脚本语言选择** — 全用 Bash 还是部分用 Python/Node？Bash 更轻量但处理 JSON 不方便
 2. **权限控制** — 是否需要按 skill 做权限细分？比如普通用户不能用 `sys-agent-config`

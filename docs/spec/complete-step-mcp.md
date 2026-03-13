@@ -1,10 +1,29 @@
 # complete_step MCP 工具设计（Step 完成 + Gate 完成）
 
+> 状态：已被后续方案吸收/替代
+>
+> 最后按代码核对：2026-03-13
+>
+> 说明：当前系统主路径不是本文的 `complete_step` 单工具方案，而是 `StepSignal + step_complete / step_need_help / gate_approve / gate_reject` 组合。
+
 ## 背景
+
+本文保留为历史设计记录，用来解释为什么后来演进成 `StepSignal` 体系。
 
 当前运行时在 `WatchExecution` 返回后，会直接把执行结果写入 artifact，并在流程引擎成功分支将 step 标记为 `done`（gate step 走额外的 gate finalize 逻辑）。
 
 这意味着“完成语义”主要来自执行返回，而不是 agent 的显式协议。
+
+## 当前落地情况
+
+当前代码中的实现对应关系如下：
+
+- 本文的 `complete_step(kind=exec, status=done)` 已被 `step_complete` 替代
+- 本文的 `complete_step(status=blocked|failed)` 已拆分为 `step_need_help` 与现有错误分类链路
+- 本文的 `complete_step(kind=gate)` 已被 `gate_approve` / `gate_reject` 替代
+- gate 文本兜底 `AI_WORKFLOW_GATE_JSON` 仍然保留
+
+因此，本文不应再被视为当前协议定义。
 
 ## 目标
 
@@ -22,7 +41,7 @@
 - 主路径：agent 调用 `complete_step`（通过 MCP 注入）。
 - 兜底路径：若未调用工具，保留当前逻辑（`WatchExecution` 返回 + artifact 输出），保证兼容现有 agent。
 
-## 工具协议草案
+## 工具协议草案（历史方案）
 
 工具名：`complete_step`
 
@@ -48,14 +67,14 @@
 - `kind=gate` 时必须有 `gate.verdict`。
 - `status=blocked|failed` 时建议携带 `error_kind`。
 
-## 与现有状态机映射
+## 与现有状态机映射（历史方案）
 
 - `status=done` -> `StepDone`
 - `status=blocked` -> `StepBlocked`
 - `status=failed` -> `StepFailed`
 - `kind=gate` + `gate.verdict=reject` -> 走现有 gate reject 流程（复用 gate finalize）
 
-## MCP 注入路径（仅在执行 step 时注入）
+## MCP 注入路径（仅在执行 step 时注入，设计思路仍有参考价值）
 
 > 核心约束：`complete_step` 能力**不应作为常驻 MCP 能力长期绑定给 profile**，而应在每次 step execution 会话创建时按需注入，执行结束即失效。
 
@@ -83,7 +102,9 @@
 
 执行器监听工具调用输出，识别 `complete_step` 调用结果并落入 execution output / artifact metadata，供引擎 finalize 使用。
 
-## 推荐分阶段实施
+当前实现并未消费 `complete_step`，而是直接消费 `StepSignal` 与对应 MCP 工具。
+
+## 推荐分阶段实施（已结束）
 
 ### Phase 1（低风险）
 
@@ -98,8 +119,8 @@
 
 ### Phase 3（gate 收敛）
 
-- gate 的 JSON 行协议迁移到 `complete_step.kind=gate`。
-- 保留原 `AI_WORKFLOW_GATE_JSON` 解析作为向后兼容兜底。
+- gate 的 JSON 行协议原计划迁移到 `complete_step.kind=gate`
+- 实际演进为 `gate_approve` / `gate_reject`，并保留原 `AI_WORKFLOW_GATE_JSON` 兜底
 
 ## 风险与应对
 
@@ -108,6 +129,12 @@
 3. **多次调用 complete_step**：采用“首次成功写入生效，后续幂等拒绝”。
 4. **NATS 分布式一致性**：将工具调用结果写入 execution output，并在 result message 中回传最终规范化状态。
 5. **能力越权暴露**：通过“仅 execution 注入 + 会话生命周期回收”避免 `complete_step` 在非执行链路可见。
+
+## 对当前文档的使用建议
+
+- 如果要理解现行协议，请优先看 `docs/spec/gate-human-intervention.zh-CN.md`
+- 如果要理解现行工具注册，请以 `internal/platform/appcmd/mcp_serve.go` 为准
+- 本文适合作为历史演进记录，不适合作为当前实现规范
 
 ## 验收标准
 

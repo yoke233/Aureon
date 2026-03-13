@@ -1,7 +1,18 @@
 # Memory System Design — 分层递进实现方案
 
+> 状态：部分实现
+> 更新时间：2026-03-13
+
 > 基于 `spec-context-memory.md` 的愿景，制定可落地的实现路径。
 > 核心原则：先补齐本地管道，再接外部服务；被动注入优先于主动查询。
+
+## 当前实现状态
+
+- 已落地：`IssueSummary`、分层 `UpstreamArtifact`、`FeatureManifest` 注入，以及 session token 预算监控。
+- 已有但不是本文所述 memory 主链：`AgentProfile.PromptTemplate` 会经过配置装载与 role/profile 解析；线程场景另有 `ThreadBootTemplate`。
+- 已有但仍是“技能分发/挂载”能力，不是本文设想的“技能内容注入”：builtin skills 提取、profile skills 校验、skills 目录链接。
+- 未落地：`CtxProjectBrief` 填充、真实 `agent_memory` 持久化/召回、OpenViking 接入。
+- 仍属未来设计：文中的 `CtxFlowSummary` / `core.CtxFlowSummary` 当前代码并不存在，应视为后续扩展草案。
 
 ## 现状
 
@@ -14,10 +25,10 @@
 | renderBriefingSnapshot | `application/flow/pipeline.go` | 运行中，按类型分配字符预算 (`refBudget()`) |
 | ExecutionInput | `application/flow/execution_input.go` | 运行中，渲染 Briefing 快照为 prompt |
 | Token 预算监控 | `runtime/agent/acp_session_pool.go` | 运行中，会话级累积 token 追踪 + 三级预算检查 (OK/Warning/Exceeded) |
-| AgentProfile.Skills | `core/agent.go` | 字段存在，Skills 元数据可解析，但未注入 prompt |
-| AgentProfile.PromptTemplate | `core/agent.go` | 字段存在，未使用 |
+| AgentProfile.Skills | `core/agent.go` | 字段存在；builtin skills 可提取、profile skills 可校验并链接到 agent 目录，但本文设想的“技能摘要注入 prompt”尚未实现 |
+| AgentProfile.PromptTemplate | `core/agent.go` | 字段存在，并参与配置装载与 role/profile 解析；但不属于本文这条 memory/briefing 注入链路 |
 | Legacy Memory 接口 | `legacy/core/memory.go` | 废弃，Cold/Warm/Hot 三层模型 |
-| OpenViking 规范 | `docs/spec/spec-context-memory.md` | 设计完成，未实现 |
+| OpenViking 规范 | `docs/spec/spec-context-memory.md` | 预研/设计完成，当前主运行链路未接入 |
 | ContextRef 类型 | `core/briefing.go` | ✅ `issue_summary` / `upstream_artifact` / `feature_manifest` 已填充；🔲 `project_brief` / `agent_memory` 未填充 |
 
 ### 关键缺口
@@ -25,6 +36,8 @@
 ~~Agent 执行时除了上游步骤的输出，**不知道项目是什么、Flow 到了哪一步、历史上遇到过什么问题**。~~
 
 > **更新 (2026-03-12):** P0 和 P1 优化已部分落地：Agent 现在能看到 Issue 摘要、分层上游 Artifact（L0 摘要 / L2 全文）、Feature Manifest，并有 Session Token 预算监控。剩余缺口：ProjectBrief、FlowSummary、AgentMemory、Skills 注入。
+
+> **补充说明 (2026-03-13):** 这里的 `FlowSummary` 仍是设计稿术语。当前代码里没有 `CtxFlowSummary` 类型；现行兼容层仍保留部分 `Flow*` 命名，但 briefing 注入只覆盖已实现的几类 `ContextRef`。
 
 ## 分层实现路径
 
@@ -39,24 +52,27 @@
 > - ✅ 按类型分配字符预算 — `pipeline.go` `refBudget()`
 > - ✅ Session Token 预算监控 — `acp_session_pool.go` `CheckTokenBudget()` / `NoteTokens()`
 > - 🔲 1.1 `CtxProjectBrief` — 未实现
-> - 🔲 1.2 `CtxFlowSummary` — 未实现
-> - 🔲 1.3 Skills 内容注入 — 未实现
+> - 🔲 1.2 `CtxFlowSummary` — 仍为设计草案，当前代码中尚无该 `ContextRefType`
+> - 🔲 1.3 Skills 内容注入 — 未实现；当前只有 skills 分发/校验/挂载
 
 #### 1.1 填充 `CtxProjectBrief`
 
-BriefingBuilder 在 Build() 时，通过 Store 查询 Step 所属 Flow → Flow 所属 Project → 拼接项目摘要：
+BriefingBuilder 在 Build() 时，通过 Store 查询 Step 所属 Issue → Issue 所属 Project → 拼接项目摘要：
 
 ```go
 // briefing_builder.go — Build() 内新增
-project, err := b.store.GetProject(ctx, flow.ProjectID)
-if err == nil && project != nil {
-    brief := renderProjectBrief(project, bindings)
-    briefing.ContextRefs = append(briefing.ContextRefs, core.ContextRef{
-        Type:   core.CtxProjectBrief,
-        RefID:  project.ID,
-        Label:  "project: " + project.Name,
-        Inline: brief,
-    })
+issue, err := b.store.GetIssue(ctx, step.IssueID)
+if err == nil && issue != nil && issue.ProjectID != nil {
+    project, err := b.store.GetProject(ctx, *issue.ProjectID)
+    if err == nil && project != nil {
+        brief := renderProjectBrief(project, bindings)
+        briefing.ContextRefs = append(briefing.ContextRefs, core.ContextRef{
+            Type:   core.CtxProjectBrief,
+            RefID:  project.ID,
+            Label:  "project: " + project.Name,
+            Inline: brief,
+        })
+    }
 }
 ```
 
@@ -67,25 +83,26 @@ if err == nil && project != nil {
 
 预算：~200-500 tokens，固定开销。
 
-#### 1.2 填充 `CtxFlowSummary`
+#### 1.2 填充 `CtxFlowSummary`（待定命名，实质上是 Issue/Execution Progress 摘要）
 
-把 Flow 的已完成步骤列表 + 状态 + 当前步骤位置拼成摘要：
+当前代码没有 `CtxFlowSummary` 类型；如果沿用这个设计名称，建议它表达的是“当前 Issue 的执行进度摘要”，而不是回到旧 `Flow` 实体。示意如下：
 
 ```go
 // briefing_builder.go — Build() 内新增
-steps, _ := b.store.ListStepsByFlow(ctx, step.FlowID)
-summary := renderFlowSummary(flow, steps, step.ID)
+issue, _ := b.store.GetIssue(ctx, step.IssueID)
+steps, _ := b.store.ListStepsByIssue(ctx, step.IssueID)
+summary := renderIssueProgress(issue, steps, step.ID)
 briefing.ContextRefs = append(briefing.ContextRefs, core.ContextRef{
     Type:   core.CtxFlowSummary,
-    RefID:  flow.ID,
-    Label:  "flow progress",
+    RefID:  step.IssueID,
+    Label:  "issue progress",
     Inline: summary,
 })
 ```
 
-`renderFlowSummary` 输出示例：
+`renderIssueProgress` 输出示例：
 ```
-Flow: "Add OAuth login" (3/5 steps completed)
+Issue: "Add OAuth login" (3/5 steps completed)
 - [done] plan: decompose requirements
 - [done] implement: auth middleware
 - [done] implement: login page

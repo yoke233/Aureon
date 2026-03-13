@@ -1,5 +1,26 @@
 # Context & Memory 规范（OpenViking 集成）
 
+> 状态：预研 / 未来设计
+>
+> 最后按代码核对：2026-03-13
+>
+> 重要说明：当前主线实现不是本文描述的 OpenViking 集成方案，而是本地 Briefing + Step Context。本文应被视为 OpenViking 方向的设计草案。
+
+## 与当前实现的关系
+
+当前仓库里与本文相关、但尚不足以视为“已接入主链”的内容只有：
+
+- `cmd/viking`：OpenViking helper CLI
+- `internal/legacy/core/context.go`：遗留 `ContextStore` 接口定义
+
+当前未见主链落地的内容包括：
+
+- OpenViking provider 接入运行时
+- TL 可用的 `context_overview` / `context_search` / `memory_search` MCP 工具
+- `session.Commit()` 驱动的主链经验沉淀
+
+如果需要查看当前实际落地的上下文系统，请优先参考 `docs/spec/memory-system-design.md`。
+
 ## 目标
 
 定义 ai-workflow 的上下文理解与经验记忆系统，基于 OpenViking 实现。
@@ -158,7 +179,7 @@ memory_save(content, tags)    手动保存观察                    TL 主动记
 Worker/Reviewer 的执行经验通过 session.Commit() 自动沉淀到各自的 agent/memories/，
 但它们不主动查询 OpenViking。TL 是唯一主动查询的角色。
 
-## Go 接口定义
+## Go 接口定义（预留接口）
 
 ### ContextStore
 
@@ -321,7 +342,7 @@ Worker ACP session 启动
        // 自动提取 coder 的执行经验
 ```
 
-## 配置
+## 配置（目标形态，非当前默认配置）
 
 ```yaml
 context:
@@ -339,7 +360,7 @@ context:
 - Search 不可用（返回空）→ 经验召回不可用
 - Session.Commit() 仅记录消息，不提取记忆
 
-## 实现阶段
+## 实现阶段（尚未完成）
 
 ### P0：最小闭环
 

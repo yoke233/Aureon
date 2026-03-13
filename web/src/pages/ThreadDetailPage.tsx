@@ -69,9 +69,11 @@ function parseMentionTarget(message: string, activeAgentProfileIDs: string[]): {
   return { targetAgentID, error: null };
 }
 
-function readAgentRoutingMode(thread: Thread | null): "mention_only" | "broadcast" {
+function readAgentRoutingMode(thread: Thread | null): "mention_only" | "broadcast" | "auto" {
   const value = thread?.metadata?.agent_routing_mode;
-  return value === "broadcast" ? "broadcast" : "mention_only";
+  if (value === "broadcast") return "broadcast";
+  if (value === "auto") return "auto";
+  return "mention_only";
 }
 
 function detectMentionDraft(message: string, caretPosition: number | null): { start: number; end: number; query: string } | null {
@@ -183,6 +185,7 @@ export function ThreadDetailPage() {
   const [hoveredMentionProfileID, setHoveredMentionProfileID] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("agents");
   const [summaryCollapsed, setSummaryCollapsed] = useState(true);
+  const [thinkingAgentIDs, setThinkingAgentIDs] = useState<Set<string>>(new Set());
   const pendingThreadRequestIdRef = useRef<string | null>(null);
   const syntheticMessageIDRef = useRef(-1);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
@@ -361,6 +364,16 @@ export function ThreadDetailPage() {
     });
     const unsubscribeThreadOutput = wsClient.subscribe<ThreadEventPayload>("thread.agent_output", (payload) => {
       if (payload.thread_id !== id) return;
+      // Clear thinking state for this agent since it has responded.
+      const agentID = payload.profile_id?.trim() || payload.sender_id?.trim();
+      if (agentID) {
+        setThinkingAgentIDs((prev) => {
+          if (!prev.has(agentID)) return prev;
+          const next = new Set(prev);
+          next.delete(agentID);
+          return next;
+        });
+      }
       appendRealtimeMessage(payload, "agent");
     });
     const unsubscribeThreadAck = wsClient.subscribe<ThreadAckPayload>("thread.ack", (payload) => {
@@ -388,8 +401,30 @@ export function ThreadDetailPage() {
     });
     const unsubscribeThreadAgentFailed = wsClient.subscribe<ThreadEventPayload>("thread.agent_failed", (payload) => {
       if (payload.thread_id !== id) return;
+      // Clear thinking state for failed agent.
+      const failedID = payload.profile_id?.trim();
+      if (failedID) {
+        setThinkingAgentIDs((prev) => {
+          if (!prev.has(failedID)) return prev;
+          const next = new Set(prev);
+          next.delete(failedID);
+          return next;
+        });
+      }
       setError(payload.error?.trim() || t("threads.agentFailed", "An agent in this thread failed."));
       void refreshAgentSessions();
+    });
+    const unsubscribeThreadAgentThinking = wsClient.subscribe<ThreadEventPayload>("thread.agent_thinking", (payload) => {
+      if (payload.thread_id !== id) return;
+      const thinkingID = payload.profile_id?.trim();
+      if (thinkingID) {
+        setThinkingAgentIDs((prev) => {
+          if (prev.has(thinkingID)) return prev;
+          const next = new Set(prev);
+          next.add(thinkingID);
+          return next;
+        });
+      }
     });
     const unsubscribeStatus = wsClient.onStatusChange((status) => {
       if (status === "open") sendThreadSubscription("subscribe_thread");
@@ -408,8 +443,10 @@ export function ThreadDetailPage() {
       unsubscribeThreadAgentLeft();
       unsubscribeThreadAgentBooted();
       unsubscribeThreadAgentFailed();
+      unsubscribeThreadAgentThinking();
       unsubscribeStatus();
       pendingThreadRequestIdRef.current = null;
+      setThinkingAgentIDs(new Set());
       if (wsClient.getStatus() === "open") {
         sendThreadSubscription("unsubscribe_thread");
       }
@@ -618,7 +655,7 @@ export function ThreadDetailPage() {
     }
   };
 
-  const handleSetRoutingMode = async (nextMode: "mention_only" | "broadcast") => {
+  const handleSetRoutingMode = async (nextMode: "mention_only" | "broadcast" | "auto") => {
     if (!thread || !id || nextMode === agentRoutingMode) return;
     setSavingRoutingMode(true);
     setError(null);
@@ -772,6 +809,17 @@ export function ThreadDetailPage() {
             >
               {t("threads.routingBroadcast", "Broadcast")}
             </button>
+            <button
+              type="button"
+              className={cn(
+                "rounded-md px-2.5 py-1 transition-colors",
+                agentRoutingMode === "auto" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => void handleSetRoutingMode("auto")}
+              disabled={savingRoutingMode}
+            >
+              {t("threads.routingAuto", "Auto")}
+            </button>
           </div>
           <Badge variant="secondary" className="gap-1 text-xs">
             <Users className="h-3 w-3" />
@@ -857,10 +905,34 @@ export function ThreadDetailPage() {
                     </div>
                   );
                 })}
-                {sending && (
+                {thinkingAgentIDs.size > 0 && (
+                  <div className="flex flex-col gap-2">
+                    {[...thinkingAgentIDs].map((agentID) => {
+                      const profile = profileByID.get(agentID);
+                      return (
+                        <div key={agentID} className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                            <Bot className="h-4 w-4" />
+                          </div>
+                          <div className="flex items-center gap-2 rounded-2xl rounded-tl-md bg-muted/60 px-4 py-2.5">
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {profile?.name ?? agentID}
+                            </span>
+                            <span className="inline-flex items-center gap-0.5">
+                              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "0ms" }} />
+                              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "150ms" }} />
+                              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} />
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {sending && thinkingAgentIDs.size === 0 && (
                   <div className="flex items-center gap-2 px-11 text-xs text-muted-foreground">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>{t("chat.thinking", "Thinking")}...</span>
+                    <span>{t("threads.sending", "Sending")}...</span>
                   </div>
                 )}
                 <div ref={messagesEndRef} />
@@ -939,9 +1011,11 @@ export function ThreadDetailPage() {
                     placeholder={
                       thread.status !== "active"
                         ? t("threads.threadClosed", "Thread is closed")
-                        : agentRoutingMode === "broadcast"
-                          ? t("threads.messagePlaceholderBroadcast", "Type a message (broadcasts to all agents)...")
-                          : t("threads.messagePlaceholder", "Type @ to mention an agent, or just send a message...")
+                        : agentRoutingMode === "auto"
+                          ? t("threads.messagePlaceholderAuto", "Type a message (auto-routed to the best-fit agent)...")
+                          : agentRoutingMode === "broadcast"
+                            ? t("threads.messagePlaceholderBroadcast", "Type a message (broadcasts to all agents)...")
+                            : t("threads.messagePlaceholder", "Type @ to mention an agent, or just send a message...")
                     }
                     className="h-auto flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
                     value={newMessage}
@@ -990,9 +1064,11 @@ export function ThreadDetailPage() {
                   </Button>
                 </div>
                 <p className="mt-1.5 text-[11px] text-muted-foreground">
-                  {agentRoutingMode === "broadcast"
-                    ? t("threads.mentionHintBroadcast", "Broadcast mode: messages go to all active agents. Use @agent-id for targeting.")
-                    : t("threads.mentionHintMentionOnly", "Mention-only mode: use @agent-id to direct messages to specific agents.")}
+                  {agentRoutingMode === "auto"
+                    ? t("threads.mentionHintAuto", "Auto mode: messages are automatically routed to the best-fit agent based on content analysis.")
+                    : agentRoutingMode === "broadcast"
+                      ? t("threads.mentionHintBroadcast", "Broadcast mode: messages go to all active agents. Use @agent-id for targeting.")
+                      : t("threads.mentionHintMentionOnly", "Mention-only mode: use @agent-id to direct messages to specific agents.")}
                 </p>
               </div>
             </div>

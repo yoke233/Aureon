@@ -35,13 +35,13 @@ import {
   toEventListItem,
   touchSessionList,
   applyActivityPayload,
-  toRealtimePayload,
   buildRealtimeEvent,
   buildActivityHistory,
   computeEventLevel,
   EVENT_LEVEL_ORDER,
   type EventLevel,
 } from "@/components/chat/chatUtils";
+import { cn } from "@/lib/utils";
 import { ChatSessionSidebar } from "@/components/chat/ChatSessionSidebar";
 import { ChatHeader } from "@/components/chat/ChatHeader";
 import { DraftSessionSetup } from "@/components/chat/DraftSessionSetup";
@@ -117,6 +117,7 @@ export function ChatPage() {
   const pendingChunkBuffersRef = useRef<Record<string, string>>({});
   const chunkFlushFrameRef = useRef<number | null>(null);
   const pendingRequestIdRef = useRef<string | null>(null);
+  const activeSessionRef = useRef<string | null>(null);
   const syntheticEventIdRef = useRef(-1);
   const pendingDraftInfoRef = useRef<{
     projectId?: number;
@@ -154,14 +155,10 @@ export function ChatPage() {
       ...current,
       [detail.session_id]: true,
     }));
-    if (detail.available_commands) {
-      setAvailableCommands(detail.available_commands);
-    }
-    if (detail.config_options) {
-      setConfigOptions(detail.config_options);
-    }
-    if (detail.modes) {
-      setSessionModes(detail.modes);
+    if (detail.session_id === activeSessionRef.current) {
+      setAvailableCommands(detail.available_commands ?? []);
+      setConfigOptions(detail.config_options ?? []);
+      setSessionModes(detail.modes ?? null);
     }
   };
 
@@ -229,6 +226,13 @@ export function ChatPage() {
   useEffect(() => {
     void refreshSessions();
   }, []);
+
+  useEffect(() => {
+    activeSessionRef.current = activeSession;
+    setAvailableCommands([]);
+    setConfigOptions([]);
+    setSessionModes(null);
+  }, [activeSession]);
 
   useEffect(() => {
     let cancelled = false;
@@ -553,6 +557,10 @@ export function ChatPage() {
   }, [chatFeedEntries, feedVisibleCount]);
 
   const hasMoreFeedEntries = feedVisibleCount < chatFeedEntries.length;
+  const visiblePendingPermissions = useMemo(
+    () => pendingPermissions.filter((perm) => perm.session_id === activeSession),
+    [pendingPermissions, activeSession],
+  );
 
   // Event level filter
   const filteredEventItems = useMemo(
@@ -754,7 +762,8 @@ export function ChatPage() {
     const unsubscribeConfigUpdate = wsClient.subscribe<{ session_id?: string; config_options?: ConfigOption[] }>(
       "chat.config_updated",
       (payload) => {
-        if (payload.config_options) {
+        const sessionId = payload.session_id?.trim();
+        if (sessionId && sessionId === activeSessionRef.current && payload.config_options) {
           setConfigOptions(payload.config_options);
         }
       },
@@ -762,7 +771,8 @@ export function ChatPage() {
     const unsubscribeModeUpdate = wsClient.subscribe<{ session_id?: string; modes?: SessionModeState }>(
       "chat.mode_updated",
       (payload) => {
-        if (payload.modes) {
+        const sessionId = payload.session_id?.trim();
+        if (sessionId && sessionId === activeSessionRef.current && payload.modes) {
           setSessionModes(payload.modes);
         }
       },
@@ -1257,9 +1267,9 @@ export function ChatPage() {
           <ChatScrollTrack containerRef={chatContainerRef} />
         </div>{/* end relative wrapper */}
 
-        {pendingPermissions.length > 0 && (
+        {visiblePendingPermissions.length > 0 && (
           <div className="space-y-2 border-t bg-amber-50/50 px-6 py-3">
-            {pendingPermissions.map((perm) => {
+            {visiblePendingPermissions.map((perm) => {
               const title = perm.tool_call.title || perm.tool_call.kind || "Tool Call";
               const location = perm.tool_call.locations?.[0]?.path;
               return (

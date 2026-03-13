@@ -111,6 +111,7 @@ type Store interface {
 	FeatureManifestStore
 	StepSignalStore
 	IssueAttachmentStore
+	NotificationStore
 	Close() error
 }
 

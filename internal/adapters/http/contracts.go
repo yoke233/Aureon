@@ -27,6 +27,7 @@ type Store interface {
 	core.FeatureManifestStore
 	core.StepSignalStore
 	core.IssueAttachmentStore
+	core.NotificationStore
 	Close() error
 }
 

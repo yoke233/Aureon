@@ -249,6 +249,9 @@ func (h *Handler) Register(r chi.Router) {
 	// Threads (multi-participant discussion)
 	registerThreadRoutes(r, h)
 
+	// Notifications
+	registerNotificationRoutes(r, h)
+
 	// Chat (lead agent)
 	registerChatRoutes(r, h.lead)
 

@@ -106,6 +106,10 @@ describe("ThreadDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     void i18n.changeLanguage("zh-CN");
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -307,8 +311,8 @@ describe("ThreadDetailPage", () => {
       target_agent_id: "worker-a",
     });
 
-    expect(await screen.findByText("@worker-a 请处理这个问题")).toBeTruthy();
-    expect(await screen.findByText("@worker-a")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "@worker-a" })).toBeTruthy();
+    expect(await screen.findByText("请处理这个问题")).toBeTruthy();
   });
 
   it("默认仅 @ 激活，普通消息不会携带 target_agent_id", async () => {
@@ -366,5 +370,60 @@ describe("ThreadDetailPage", () => {
       });
     });
     expect(await screen.findByText("当前已开启广播模式：普通消息会发给全部 active agents；输入 @agent-id 仍可定向某个 agent。")).toBeTruthy();
+  });
+
+  it("输入 @ 时展示候选并插入 mention", async () => {
+    const wsClient = createWsClientMock();
+    const apiClient = {
+      getThread: vi.fn().mockResolvedValue(buildThread("已有摘要")),
+      listThreadMessages: vi.fn().mockResolvedValue([]),
+      listThreadParticipants: vi.fn().mockResolvedValue([]),
+      listWorkItemsByThread: vi.fn().mockResolvedValue([]),
+      listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a"), buildAgentSession(12, "worker-b")]),
+      listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a"), buildProfile("worker-b")]),
+    };
+    mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
+
+    renderPage();
+
+    const input = await screen.findByPlaceholderText("Type a message...");
+    fireEvent.change(input, { target: { value: "@wor", selectionStart: 4 } });
+
+    expect(await screen.findByRole("button", { name: /@worker-a/ })).toBeTruthy();
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: /@worker-a/ }));
+
+    expect((input as HTMLInputElement).value).toBe("@worker-a ");
+  });
+
+  it("点击消息里的 mention 会高亮对应 agent 卡片", async () => {
+    const wsClient = createWsClientMock();
+    const apiClient = {
+      getThread: vi.fn().mockResolvedValue(buildThread("已有摘要")),
+      listThreadMessages: vi.fn().mockResolvedValue([
+        {
+          id: 101,
+          thread_id: 1,
+          sender_id: "human",
+          role: "human",
+          content: "@worker-a 请处理这个问题",
+          metadata: { target_agent_id: "worker-a" },
+          created_at: "2026-03-13T00:00:00Z",
+        },
+      ]),
+      listThreadParticipants: vi.fn().mockResolvedValue([]),
+      listWorkItemsByThread: vi.fn().mockResolvedValue([]),
+      listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a")]),
+      listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
+    };
+    mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "@worker-a" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-card-worker-a").className).toContain("border-blue-400");
+    });
   });
 });

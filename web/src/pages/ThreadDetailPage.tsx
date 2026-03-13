@@ -57,6 +57,59 @@ function readAgentRoutingMode(thread: Thread | null): "mention_only" | "broadcas
   return value === "broadcast" ? "broadcast" : "mention_only";
 }
 
+function detectMentionDraft(message: string, caretPosition: number | null): { start: number; end: number; query: string } | null {
+  if (caretPosition == null || caretPosition < 0) {
+    return null;
+  }
+
+  const left = message.slice(0, caretPosition);
+  const leftMatch = left.match(/(^|\s)@([A-Za-z0-9._:-]*)$/);
+  if (!leftMatch) {
+    return null;
+  }
+
+  const prefixLength = leftMatch[1]?.length ?? 0;
+  const fullMatchLength = leftMatch[0]?.length ?? 0;
+  const start = left.length - fullMatchLength + prefixLength;
+  const right = message.slice(caretPosition);
+  const rightMatch = right.match(/^[A-Za-z0-9._:-]*/);
+  const end = caretPosition + (rightMatch?.[0]?.length ?? 0);
+
+  return {
+    start,
+    end,
+    query: message.slice(start + 1, end),
+  };
+}
+
+function replaceMentionDraft(message: string, draft: { start: number; end: number }, profileID: string): { nextMessage: string; caretPosition: number } {
+  const replacement = `@${profileID} `;
+  const nextMessage = `${message.slice(0, draft.start)}${replacement}${message.slice(draft.end)}`;
+  return {
+    nextMessage,
+    caretPosition: draft.start + replacement.length,
+  };
+}
+
+function splitMessageMentions(content: string): Array<{ type: "text" | "mention"; value: string; profileID?: string }> {
+  const parts: Array<{ type: "text" | "mention"; value: string; profileID?: string }> = [];
+  const mentionPattern = /@([A-Za-z0-9._:-]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null = mentionPattern.exec(content);
+  while (match) {
+    if (match.index > lastIndex) {
+      parts.push({ type: "text", value: content.slice(lastIndex, match.index) });
+    }
+    parts.push({ type: "mention", value: match[0], profileID: match[1] });
+    lastIndex = match.index + match[0].length;
+    match = mentionPattern.exec(content);
+  }
+  if (lastIndex < content.length) {
+    parts.push({ type: "text", value: content.slice(lastIndex) });
+  }
+  return parts.length > 0 ? parts : [{ type: "text", value: content }];
+}
+
 export function ThreadDetailPage() {
   const { t } = useTranslation();
   const { threadId } = useParams<{ threadId: string }>();
@@ -85,8 +138,13 @@ export function ThreadDetailPage() {
   const [invitingAgent, setInvitingAgent] = useState(false);
   const [removingAgentID, setRemovingAgentID] = useState<number | null>(null);
   const [savingRoutingMode, setSavingRoutingMode] = useState(false);
+  const [mentionDraft, setMentionDraft] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
+  const [highlightedAgentProfileID, setHighlightedAgentProfileID] = useState<string | null>(null);
   const pendingThreadRequestIdRef = useRef<string | null>(null);
   const syntheticMessageIDRef = useRef(-1);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const agentCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const id = Number(threadId);
   const joinedAgentProfileIDs = new Set(agentSessions.map((session) => session.agent_profile_id));
@@ -95,6 +153,28 @@ export function ThreadDetailPage() {
     .filter((session) => session.status === "active" || session.status === "booting")
     .map((session) => session.agent_profile_id);
   const agentRoutingMode = readAgentRoutingMode(thread);
+  const profileByID = new Map(availableProfiles.map((profile) => [profile.id, profile]));
+  const agentSessionByProfileID = new Map(agentSessions.map((session) => [session.agent_profile_id, session]));
+  const mentionCandidates = activeAgentProfileIDs
+    .map((profileID) => {
+      const profile = profileByID.get(profileID);
+      const session = agentSessionByProfileID.get(profileID);
+      return {
+        id: profileID,
+        label: profile?.name ? `${profile.name} (${profileID})` : profileID,
+        status: session?.status ?? "active",
+      };
+    })
+    .filter((candidate) => {
+      if (!mentionDraft) {
+        return false;
+      }
+      const query = mentionDraft.query.trim().toLowerCase();
+      return query === ""
+        || candidate.id.toLowerCase().includes(query)
+        || candidate.label.toLowerCase().includes(query);
+    })
+    .slice(0, 6);
   const orderedWorkItemLinks = [...workItemLinks].sort((a, b) => {
     if (a.is_primary === b.is_primary) {
       return a.id - b.id;
@@ -152,6 +232,16 @@ export function ThreadDetailPage() {
     }
     setInviteProfileID(inviteableProfiles[0]?.id ?? "");
   }, [inviteProfileID, inviteableProfiles]);
+
+  useEffect(() => {
+    if (mentionCandidates.length === 0) {
+      setSelectedMentionIndex(0);
+      return;
+    }
+    if (selectedMentionIndex >= mentionCandidates.length) {
+      setSelectedMentionIndex(0);
+    }
+  }, [mentionCandidates.length, selectedMentionIndex]);
 
   useEffect(() => {
     if (!id || isNaN(id)) {
@@ -235,6 +325,7 @@ export function ThreadDetailPage() {
       pendingThreadRequestIdRef.current = null;
       setSending(false);
       setNewMessage("");
+      setMentionDraft(null);
     });
     const unsubscribeThreadError = wsClient.subscribe<{ request_id?: string; error?: string }>("thread.error", (payload) => {
       if (pendingThreadRequestIdRef.current && payload.request_id && payload.request_id !== pendingThreadRequestIdRef.current) {
@@ -242,6 +333,7 @@ export function ThreadDetailPage() {
       }
       pendingThreadRequestIdRef.current = null;
       setSending(false);
+      setMentionDraft(null);
       setError(payload.error?.trim() || t("threads.sendFailed", "Thread message failed to send"));
     });
     const unsubscribeThreadAgentEvent = wsClient.subscribe<ThreadEventPayload>("thread.agent_joined", (payload) => {
@@ -292,6 +384,39 @@ export function ThreadDetailPage() {
       }
     };
   }, [apiClient, id, t, wsClient]);
+
+  const updateMentionDraft = (value: string, caretPosition: number | null) => {
+    const nextDraft = detectMentionDraft(value, caretPosition);
+    setMentionDraft(nextDraft);
+    setSelectedMentionIndex(0);
+  };
+
+  const handleMessageInputChange = (value: string, caretPosition: number | null) => {
+    setNewMessage(value);
+    updateMentionDraft(value, caretPosition);
+  };
+
+  const applyMentionCandidate = (profileID: string) => {
+    if (!mentionDraft) {
+      return;
+    }
+    const { nextMessage, caretPosition } = replaceMentionDraft(newMessage, mentionDraft, profileID);
+    setNewMessage(nextMessage);
+    setMentionDraft(null);
+    setSelectedMentionIndex(0);
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(caretPosition, caretPosition);
+    });
+  };
+
+  const focusAgentProfile = (profileID: string) => {
+    setHighlightedAgentProfileID(profileID);
+    const node = agentCardRefs.current[profileID];
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  };
 
   const handleSend = async () => {
     if (!newMessage.trim() || !id) return;
@@ -542,28 +667,112 @@ export function ThreadDetailPage() {
                       ) : null}
                       <span>{formatRelativeTime(msg.created_at)}</span>
                     </div>
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <p className="whitespace-pre-wrap break-words">
+                      {splitMessageMentions(msg.content).map((part, index) => {
+                        if (part.type === "text") {
+                          return <span key={`${msg.id}-text-${index}`}>{part.value}</span>;
+                        }
+                        const profileID = part.profileID ?? "";
+                        const session = agentSessionByProfileID.get(profileID);
+                        const profile = profileByID.get(profileID);
+                        const title = session
+                          ? `${profile?.name ?? profileID} · ${session.status} · ${session.turn_count} turns`
+                          : `${profile?.name ?? profileID} · 未加入当前 Thread`;
+                        return (
+                          <button
+                            key={`${msg.id}-mention-${index}`}
+                            type="button"
+                            className="mx-0.5 inline-flex rounded-md bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-900 transition hover:bg-blue-200 hover:text-blue-950"
+                            title={title}
+                            onClick={() => focusAgentProfile(profileID)}
+                          >
+                            {part.value}
+                          </button>
+                        );
+                      })}
+                    </p>
                   </div>
                 ))
               )}
             </div>
 
             {/* Send input */}
-            <div className="flex gap-2 border-t pt-3">
-              <Input
-                placeholder={t("threads.messagePlaceholder", "Type a message...")}
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                disabled={sending || thread.status !== "active"}
-              />
-              <Button
-                size="sm"
-                onClick={handleSend}
-                disabled={!newMessage.trim() || sending || thread.status !== "active"}
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+            <div className="relative border-t pt-3">
+              <div className="flex gap-2">
+                <Input
+                  ref={messageInputRef}
+                  placeholder={t("threads.messagePlaceholder", "Type a message...")}
+                  value={newMessage}
+                  onChange={(e) => handleMessageInputChange(e.target.value, e.target.selectionStart)}
+                  onClick={(e) => updateMentionDraft(e.currentTarget.value, e.currentTarget.selectionStart)}
+                  onKeyUp={(e) => updateMentionDraft(e.currentTarget.value, e.currentTarget.selectionStart)}
+                  onBlur={() => {
+                    window.setTimeout(() => {
+                      setMentionDraft(null);
+                    }, 120);
+                  }}
+                  onKeyDown={(e) => {
+                    if (mentionDraft && mentionCandidates.length > 0) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setSelectedMentionIndex((prev) => (prev + 1) % mentionCandidates.length);
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setSelectedMentionIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+                        return;
+                      }
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        applyMentionCandidate(mentionCandidates[selectedMentionIndex].id);
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        setMentionDraft(null);
+                        return;
+                      }
+                    }
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  disabled={sending || thread.status !== "active"}
+                />
+                <Button
+                  size="sm"
+                  onClick={handleSend}
+                  disabled={!newMessage.trim() || sending || thread.status !== "active"}
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+              {mentionDraft && mentionCandidates.length > 0 ? (
+                <div className="absolute bottom-full left-0 right-12 z-10 mb-2 rounded-md border border-slate-200 bg-white p-1 shadow-lg">
+                  <div className="px-2 py-1 text-[11px] text-muted-foreground">
+                    {t("threads.mentionCandidates", "选择要激活的 agent")}
+                  </div>
+                  <div className="space-y-1">
+                    {mentionCandidates.map((candidate, index) => (
+                      <button
+                        key={candidate.id}
+                        type="button"
+                        className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition ${
+                          index === selectedMentionIndex ? "bg-blue-50 text-blue-900" : "hover:bg-slate-50"
+                        }`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          applyMentionCandidate(candidate.id);
+                        }}
+                      >
+                        <span className="truncate">@{candidate.id}</span>
+                        <span className="ml-2 shrink-0 text-[11px] text-muted-foreground">{candidate.status}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
             <p className="pt-2 text-[11px] text-muted-foreground">
               {agentRoutingMode === "broadcast"
@@ -681,7 +890,18 @@ export function ThreadDetailPage() {
               ) : (
                 <div className="space-y-3">
                   {agentSessions.map((s) => (
-                    <div key={s.id} className="space-y-1 rounded-md border border-border/60 p-2">
+                    <div
+                      key={s.id}
+                      ref={(node) => {
+                        agentCardRefs.current[s.agent_profile_id] = node;
+                      }}
+                      data-testid={`agent-card-${s.agent_profile_id}`}
+                      className={`space-y-1 rounded-md border p-2 transition ${
+                        highlightedAgentProfileID === s.agent_profile_id
+                          ? "border-blue-400 bg-blue-50 shadow-sm"
+                          : "border-border/60"
+                      }`}
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 space-y-1">
                           <div className="flex items-center gap-2 text-sm">

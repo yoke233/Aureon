@@ -50,12 +50,13 @@ const (
 	EventChatPermissionRequest EventType = "chat.permission_request"
 
 	// Thread events for multi-participant discussion.
-	EventThreadMessage     EventType = "thread.message"
-	EventThreadAgentJoined EventType = "thread.agent_joined"
-	EventThreadAgentLeft   EventType = "thread.agent_left"
-	EventThreadAgentOutput EventType = "thread.agent_output"
-	EventThreadAgentBooted EventType = "thread.agent_booted"
-	EventThreadAgentFailed EventType = "thread.agent_failed"
+	EventThreadMessage       EventType = "thread.message"
+	EventThreadAgentJoined   EventType = "thread.agent_joined"
+	EventThreadAgentLeft     EventType = "thread.agent_left"
+	EventThreadAgentOutput   EventType = "thread.agent_output"
+	EventThreadAgentBooted   EventType = "thread.agent_booted"
+	EventThreadAgentFailed   EventType = "thread.agent_failed"
+	EventThreadAgentThinking EventType = "thread.agent_thinking"
 
 	// Feature manifest events.
 	EventManifestEntryUpdated EventType = "manifest.entry_updated"

@@ -129,7 +129,7 @@ export function DashboardPage() {
         icon: <Clock className="h-4 w-4 text-muted-foreground" />,
       },
     ];
-  }, [activeWorkItems.length, doneWorkItems.length, workItems, projects.length, schedulerStats, selectedProject, stats]);
+  }, [activeWorkItems.length, doneWorkItems.length, workItems, projects.length, schedulerStats, selectedProject, stats, t]);
 
   if (!selectedProjectId && projects.length === 0) {
     return (

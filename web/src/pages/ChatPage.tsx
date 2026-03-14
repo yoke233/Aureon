@@ -37,24 +37,11 @@ import {
 } from "@/components/chat/chatUtils";
 import { ChatSessionSidebar } from "@/components/chat/ChatSessionSidebar";
 import { ChatHeader } from "@/components/chat/ChatHeader";
-import { DraftSessionSetup } from "@/components/chat/DraftSessionSetup";
-import { MessageFeedView } from "@/components/chat/MessageFeedView";
+import { ChatMainPanel } from "@/components/chat/ChatMainPanel";
 import { ChatInputBar } from "@/components/chat/ChatInputBar";
-import { ChatEventsPanel } from "@/components/chat/ChatEventsPanel";
 import { PermissionBar, type PermissionRequest } from "@/components/chat/PermissionBar";
-import { ChatScrollTrack } from "@/components/chat/ChatScrollTrack";
+import { CrystallizeDialog } from "@/components/chat/CrystallizeDialog";
 import { useChatFeed } from "@/components/chat/useChatFeed";
-import { Loader2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogBody,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import type { RuntimeConfigReloadedPayload } from "@/types/ws";
 
 const FEED_PAGE_SIZE = 100;
@@ -143,7 +130,7 @@ export function ChatPage() {
   const [feedVisibleCount, setFeedVisibleCount] = useState(FEED_PAGE_SIZE);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const syncSessionDetail = (detail: import("@/types/apiV2").ChatSessionDetail) => {
+  const syncSessionDetail = useCallback((detail: import("@/types/apiV2").ChatSessionDetail) => {
     const record = toDetailRecord(detail, t);
     const userViews = detail.messages
       .filter((message) => message.role === "user")
@@ -168,9 +155,9 @@ export function ChatPage() {
       setConfigOptions(detail.config_options ?? []);
       setSessionModes(detail.modes ?? null);
     }
-  };
+  }, [t]);
 
-  const syncSessionEvents = (sessionId: string, events: ApiEvent[]) => {
+  const syncSessionEvents = useCallback((sessionId: string, events: ApiEvent[]) => {
     setEventsBySession((current) => {
       const latestLoadedAt = events.reduce((maxTime, event) => (
         Math.max(maxTime, new Date(event.timestamp).getTime())
@@ -190,9 +177,9 @@ export function ChatPage() {
         [sessionId]: merged,
       };
     });
-  };
+  }, [t]);
 
-  const loadSessionState = async (sessionId: string) => {
+  const loadSessionState = useCallback(async (sessionId: string) => {
     const [detail, events] = await Promise.all([
       apiClient.getChatSession(sessionId),
       apiClient.listEvents({
@@ -204,7 +191,7 @@ export function ChatPage() {
     ]);
     syncSessionDetail(detail);
     syncSessionEvents(sessionId, events);
-  };
+  }, [apiClient, syncSessionDetail, syncSessionEvents]);
 
   const loadAgentCatalog = useCallback(async () => {
     try {
@@ -232,7 +219,7 @@ export function ChatPage() {
     }
   }, [apiClient]);
 
-  const refreshSessions = async (preferredSessionId?: string | null) => {
+  const refreshSessions = useCallback(async (preferredSessionId?: string | null) => {
     setLoadingSessions(true);
     try {
       const list = await apiClient.listChatSessions();
@@ -255,11 +242,11 @@ export function ChatPage() {
       setLoadingSessions(false);
       setInitialLoaded(true);
     }
-  };
+  }, [apiClient, t]);
 
   useEffect(() => {
     void refreshSessions();
-  }, []);
+  }, [refreshSessions]);
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
@@ -272,7 +259,7 @@ export function ChatPage() {
     void loadAgentCatalog();
   }, [loadAgentCatalog]);
 
-  const flushBufferedChunks = () => {
+  const flushBufferedChunks = useCallback(() => {
     if (chunkFlushFrameRef.current != null) {
       cancelAnimationFrame(chunkFlushFrameRef.current);
       chunkFlushFrameRef.current = null;
@@ -337,9 +324,9 @@ export function ChatPage() {
         ),
       );
     });
-  };
+  }, []);
 
-  const scheduleChunkFlush = () => {
+  const scheduleChunkFlush = useCallback(() => {
     if (chunkFlushFrameRef.current != null) {
       return;
     }
@@ -347,7 +334,7 @@ export function ChatPage() {
       chunkFlushFrameRef.current = null;
       flushBufferedChunks();
     });
-  };
+  }, [flushBufferedChunks]);
 
   const currentSession = useMemo(
     () => sessions.find((session) => session.session_id === activeSession) ?? null,
@@ -395,7 +382,7 @@ export function ChatPage() {
       }
       return left.label.localeCompare(right.label, "zh-CN");
     });
-  }, [drivers]);
+  }, [drivers, t]);
   const leadDriverMap = useMemo(
     () => new Map(leadDriverOptions.map((option) => [option.driverId, option])),
     [leadDriverOptions],
@@ -426,7 +413,7 @@ export function ChatPage() {
           session.driver_id ? driverLabelForId(session.driver_id, t).toLowerCase() : "",
         ].some((value) => (value ?? "").toLowerCase().includes(query));
       }),
-    [sessionSearch, sessions],
+    [sessionSearch, sessions, t],
   );
 
   const groupedSessions = useMemo<SessionGroup[]>(() => {
@@ -462,11 +449,20 @@ export function ChatPage() {
         }
         return left.label.localeCompare(right.label, "zh-CN");
       });
-  }, [filteredSessions]);
+  }, [filteredSessions, t]);
 
-  const currentMessages = currentSession ? (messagesBySession[currentSession.session_id] ?? []) : draftMessages;
-  const currentEvents = currentSession ? (eventsBySession[currentSession.session_id] ?? []) : [];
-  const currentActivities = currentSession ? (activitiesBySession[currentSession.session_id] ?? []) : [];
+  const currentMessages = useMemo(
+    () => (currentSession ? (messagesBySession[currentSession.session_id] ?? []) : draftMessages),
+    [currentSession, draftMessages, messagesBySession],
+  );
+  const currentEvents = useMemo(
+    () => (currentSession ? (eventsBySession[currentSession.session_id] ?? []) : []),
+    [currentSession, eventsBySession],
+  );
+  const currentActivities = useMemo(
+    () => (currentSession ? (activitiesBySession[currentSession.session_id] ?? []) : []),
+    [activitiesBySession, currentSession],
+  );
   const isDraftSessionView = initialLoaded && !currentSession && currentMessages.length === 0;
   const currentUsage = useMemo(
     () =>
@@ -731,7 +727,7 @@ export function ChatPage() {
       unsubscribePermissionResolved();
       unsubscribeRuntimeConfigReloaded();
     };
-  }, [wsClient, loadAgentCatalog, t]);
+  }, [flushBufferedChunks, loadAgentCatalog, scheduleChunkFlush, t, wsClient]);
 
   useEffect(() => {
     if (!activeSession || loadedSessions[activeSession]) {
@@ -752,7 +748,7 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeSession, apiClient, loadedSessions]);
+  }, [activeSession, loadedSessions, loadSessionState]);
 
   const createSession = () => {
     setDraftProjectId(selectedProjectId);
@@ -1134,78 +1130,48 @@ export function ChatPage() {
           </p>
         )}
 
-        <div className="relative flex-1">
-          <div
-            ref={chatContainerRef}
-            className="absolute inset-0 overflow-y-auto px-5 py-4 pr-6 [scrollbar-gutter:stable]"
-            onScroll={handleChatScroll}
-          >
-          {detailView === "events" ? (
-            <ChatEventsPanel events={currentEvents} />
-          ) : isDraftSessionView ? (
-            <div className="flex min-h-full items-center justify-center">
-              <DraftSessionSetup
-                projects={projects}
-                draftProjectId={draftProjectId}
-                draftDriverId={draftDriverId}
-                leadDriverOptions={leadDriverOptions}
-                leadProfiles={leadProfiles}
-                drivers={drivers}
-                messageInput={messageInput}
-                pendingFiles={pendingFiles}
-                draftSessionReady={draftSessionReady}
-                submitting={submitting}
-                currentDriverLabel={currentDriverLabel}
-                currentProjectLabel={currentProjectLabel}
-                fileInputRef={fileInputRef}
-                onProjectChange={(id) => {
-                  setDraftProjectId(id);
-                  setSelectedProjectId(id);
-                }}
-                onDriverChange={setDraftDriverId}
-                onMessageChange={setMessageInput}
-                onSend={() => void sendMessage()}
-                onPaste={handlePaste}
-                onRemovePendingFile={removePendingFile}
-              />
-            </div>
-          ) : chatFeedEntries.length === 0 ? (
-            <div className="mx-auto w-full max-w-[1200px] rounded-2xl border border-dashed bg-muted/20 px-5 py-6 text-sm text-muted-foreground">
-              {t("chat.noMessagesInSession")}
-            </div>
-          ) : (
-            <div className="mx-auto w-full max-w-[1200px] space-y-1">
-              {/* Load-more indicator at top */}
-              {hasMoreFeedEntries && (
-                <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
-                  {loadingMore
-                    ? t("chat.loadingMore", { defaultValue: "加载中..." })
-                    : t("chat.scrollUpForMore", { defaultValue: "向上滚动加载更早消息" })}
-                </div>
-              )}
-              <MessageFeedView
-                entries={visibleFeedEntries}
-                submitting={submitting}
-                copiedMessageId={copiedMessageId}
-                collapsedActivityGroups={collapsedActivityGroups}
-                onCopyMessage={(id, content) => void handleCopyMessage(id, content)}
-                onCreateWorkItem={handleCreateWorkItem}
-                onActivityGroupToggle={(id) =>
-                  setCollapsedActivityGroups((prev) => ({ ...prev, [id]: !(collapsedActivityGroups[id] !== false) }))
-                }
-              />
-              {submitting && !activeSession && (
-                <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-blue-600">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>{t("chat.creatingSession", { defaultValue: "正在创建会话..." })}</span>
-                </div>
-              )}
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-          </div>{/* end scrollable inner */}
-          <ChatScrollTrack containerRef={chatContainerRef} />
-        </div>{/* end relative wrapper */}
+        <ChatMainPanel
+          detailView={detailView}
+          currentEvents={currentEvents}
+          isDraftSessionView={isDraftSessionView}
+          projects={projects}
+          draftProjectId={draftProjectId}
+          draftDriverId={draftDriverId}
+          leadDriverOptions={leadDriverOptions}
+          leadProfiles={leadProfiles}
+          drivers={drivers}
+          messageInput={messageInput}
+          pendingFiles={pendingFiles}
+          draftSessionReady={draftSessionReady}
+          submitting={submitting}
+          currentDriverLabel={currentDriverLabel}
+          currentProjectLabel={currentProjectLabel}
+          fileInputRef={fileInputRef}
+          onProjectChange={(id) => {
+            setDraftProjectId(id);
+            setSelectedProjectId(id);
+          }}
+          onDriverChange={setDraftDriverId}
+          onMessageChange={setMessageInput}
+          onSend={() => void sendMessage()}
+          onPaste={handlePaste}
+          onRemovePendingFile={removePendingFile}
+          chatFeedEntries={chatFeedEntries}
+          hasMoreFeedEntries={hasMoreFeedEntries}
+          loadingMore={loadingMore}
+          visibleFeedEntries={visibleFeedEntries}
+          copiedMessageId={copiedMessageId}
+          collapsedActivityGroups={collapsedActivityGroups}
+          activeSession={activeSession}
+          chatContainerRef={chatContainerRef}
+          messagesEndRef={messagesEndRef}
+          onScroll={handleChatScroll}
+          onCopyMessage={(id, content) => void handleCopyMessage(id, content)}
+          onCreateWorkItem={handleCreateWorkItem}
+          onActivityGroupToggle={(id) =>
+            setCollapsedActivityGroups((prev) => ({ ...prev, [id]: !(collapsedActivityGroups[id] !== false) }))
+          }
+        />
 
         <PermissionBar
           permissions={visiblePendingPermissions}
@@ -1248,109 +1214,22 @@ export function ChatPage() {
           onChange={handleFileSelect}
         />
 
-        <Dialog open={crystallizeOpen} onClose={() => !crystallizing && setCrystallizeOpen(false)}>
-          <DialogHeader>
-            <DialogTitle>{t("chat.crystallizeDialogTitle", { defaultValue: "结晶为 Thread / Work Item" })}</DialogTitle>
-            <DialogDescription>
-              {t("chat.crystallizeDialogDesc", {
-                defaultValue: "把当前 chat session 固化为 thread，并按需同步创建 work item。",
-              })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            <div className="space-y-2">
-              <label htmlFor="crystallize-thread-title" className="text-sm font-medium text-slate-900">
-                {t("chat.crystallizeThreadTitle", { defaultValue: "Thread 标题" })}
-              </label>
-              <Input
-                id="crystallize-thread-title"
-                value={threadTitleDraft}
-                onChange={(e) => setThreadTitleDraft(e.target.value)}
-                placeholder={t("chat.crystallizeThreadTitlePlaceholder", { defaultValue: "输入 thread 标题" })}
-                disabled={crystallizing}
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="crystallize-thread-summary" className="text-sm font-medium text-slate-900">
-                {t("chat.crystallizeThreadSummary", { defaultValue: "Thread 摘要" })}
-              </label>
-              <Textarea
-                id="crystallize-thread-summary"
-                value={threadSummaryDraft}
-                onChange={(e) => setThreadSummaryDraft(e.target.value)}
-                placeholder={t("chat.crystallizeThreadSummaryPlaceholder", { defaultValue: "输入 thread 摘要" })}
-                disabled={crystallizing}
-                className="min-h-[140px]"
-              />
-            </div>
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={createWorkItem}
-                onChange={(e) => setCreateWorkItem(e.target.checked)}
-                disabled={crystallizing}
-                className="h-4 w-4 rounded border-slate-300"
-              />
-              <span>{t("chat.crystallizeCreateWorkItem", { defaultValue: "同时创建 work item" })}</span>
-            </label>
-            {createWorkItem ? (
-              <>
-                <div className="space-y-2">
-                  <label htmlFor="crystallize-work-item-title" className="text-sm font-medium text-slate-900">
-                    {t("chat.crystallizeWorkItemTitle", { defaultValue: "Work item 标题" })}
-                  </label>
-                  <Input
-                    id="crystallize-work-item-title"
-                    value={workItemTitleDraft}
-                    onChange={(e) => setWorkItemTitleDraft(e.target.value)}
-                    placeholder={t("chat.crystallizeWorkItemTitlePlaceholder", { defaultValue: "输入 work item 标题" })}
-                    disabled={crystallizing}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label htmlFor="crystallize-work-item-body" className="text-sm font-medium text-slate-900">
-                    {t("chat.crystallizeWorkItemBody", { defaultValue: "Work item 内容" })}
-                  </label>
-                  <Textarea
-                    id="crystallize-work-item-body"
-                    value={workItemBodyDraft}
-                    onChange={(e) => setWorkItemBodyDraft(e.target.value)}
-                    placeholder={t("chat.crystallizeWorkItemBodyPlaceholder", {
-                      defaultValue: "可留空，后端会回退到 thread summary。",
-                    })}
-                    disabled={crystallizing}
-                    className="min-h-[120px]"
-                  />
-                </div>
-              </>
-            ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <button
-              type="button"
-              className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => setCrystallizeOpen(false)}
-              disabled={crystallizing}
-            >
-              {t("common.cancel", { defaultValue: "取消" })}
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center justify-center rounded-md bg-slate-900 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => void submitCrystallize()}
-              disabled={crystallizing}
-            >
-              {crystallizing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {t("chat.crystallizing", { defaultValue: "结晶中..." })}
-                </>
-              ) : (
-                t("chat.crystallizeConfirm", { defaultValue: "确认结晶" })
-              )}
-            </button>
-          </DialogFooter>
-        </Dialog>
+        <CrystallizeDialog
+          open={crystallizeOpen}
+          crystallizing={crystallizing}
+          threadTitle={threadTitleDraft}
+          threadSummary={threadSummaryDraft}
+          workItemTitle={workItemTitleDraft}
+          workItemBody={workItemBodyDraft}
+          createWorkItem={createWorkItem}
+          onClose={() => setCrystallizeOpen(false)}
+          onThreadTitleChange={setThreadTitleDraft}
+          onThreadSummaryChange={setThreadSummaryDraft}
+          onWorkItemTitleChange={setWorkItemTitleDraft}
+          onWorkItemBodyChange={setWorkItemBodyDraft}
+          onCreateWorkItemChange={setCreateWorkItem}
+          onSubmit={() => void submitCrystallize()}
+        />
       </div>
     </div>
   );

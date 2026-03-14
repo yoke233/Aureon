@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Shield, RefreshCw, CheckCircle2, XCircle, Cpu, Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,7 @@ export function SandboxPage() {
     setProvider(next.configured_provider || "home_dir");
   };
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -52,11 +52,11 @@ export function SandboxPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiClient]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const save = async () => {
     setSaving(true);

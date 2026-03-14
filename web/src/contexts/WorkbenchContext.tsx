@@ -309,7 +309,6 @@ export function WorkbenchProvider({ children }: ProviderProps) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBaseUrl, applyProjects, wsBaseUrl, loginAttempt]);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Plus,
@@ -47,7 +47,7 @@ export function SkillsPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -58,11 +58,11 @@ export function SkillsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiClient]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const filtered = useMemo(
     () =>

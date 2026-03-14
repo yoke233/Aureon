@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
@@ -82,6 +82,11 @@ export function InspectionPage() {
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedFindings, setExpandedFindings] = useState<Set<number>>(new Set());
+  const selectedReportRef = useRef<InspectionReport | null>(null);
+
+  useEffect(() => {
+    selectedReportRef.current = selectedReport;
+  }, [selectedReport]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,8 +97,14 @@ export function InspectionPage() {
         limit: 20,
       });
       setReports(data);
-      if (data.length > 0 && !selectedReport) {
-        const detail = await apiClient.getInspection(data[0].id);
+      if (data.length === 0) {
+        setSelectedReport(null);
+      } else {
+        const currentSelectedId = selectedReportRef.current?.id;
+        const targetReportId = currentSelectedId != null && data.some((report) => report.id === currentSelectedId)
+          ? currentSelectedId
+          : data[0].id;
+        const detail = await apiClient.getInspection(targetReportId);
         setSelectedReport(detail);
       }
     } catch (e) {
@@ -101,7 +112,7 @@ export function InspectionPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiClient, selectedProjectId, selectedReport]);
+  }, [apiClient, selectedProjectId]);
 
   useEffect(() => {
     void load();
@@ -313,9 +324,8 @@ export function InspectionPage() {
                       </TableHeader>
                       <TableBody>
                         {findings.map((f) => (
-                          <>
+                          <Fragment key={f.id}>
                             <TableRow
-                              key={f.id}
                               className="cursor-pointer hover:bg-muted/50"
                               onClick={() => toggleFinding(f.id)}
                             >
@@ -348,7 +358,7 @@ export function InspectionPage() {
                               </TableCell>
                             </TableRow>
                             {expandedFindings.has(f.id) && (
-                              <TableRow key={`${f.id}-detail`}>
+                              <TableRow>
                                 <TableCell colSpan={5} className="bg-muted/30 px-6 py-4">
                                   <div className="space-y-2 text-sm">
                                     <p>{f.description}</p>
@@ -367,7 +377,7 @@ export function InspectionPage() {
                                 </TableCell>
                               </TableRow>
                             )}
-                          </>
+                          </Fragment>
                         ))}
                       </TableBody>
                     </Table>

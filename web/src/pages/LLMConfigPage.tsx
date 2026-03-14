@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Cpu, KeyRound, Loader2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +53,7 @@ export function LLMConfigPage() {
     setConfigs(next.configs ?? []);
   };
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -64,11 +64,11 @@ export function LLMConfigPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiClient]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const payload = useMemo<LLMConfigResponse>(() => ({
     default_config_id: defaultConfigID,

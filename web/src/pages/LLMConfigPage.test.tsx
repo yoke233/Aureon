@@ -1,0 +1,124 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { I18nextProvider } from "react-i18next";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "../i18n";
+import { LLMConfigPage } from "./LLMConfigPage";
+
+const { mockUseWorkbench } = vi.hoisted(() => ({
+  mockUseWorkbench: vi.fn(),
+}));
+
+vi.mock("@/contexts/WorkbenchContext", () => ({
+  useWorkbench: mockUseWorkbench,
+}));
+
+function renderPage() {
+  return render(
+    <I18nextProvider i18n={i18n}>
+      <MemoryRouter>
+        <LLMConfigPage />
+      </MemoryRouter>
+    </I18nextProvider>,
+  );
+}
+
+describe("LLMConfigPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    void i18n.changeLanguage("zh-CN");
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("支持新增、移除、切换默认配置并保存", async () => {
+    const apiClient = {
+      getLLMConfig: vi.fn().mockResolvedValue({
+        default_config_id: "openai-prod",
+        configs: [
+          {
+            id: "openai-prod",
+            type: "openai_response",
+            base_url: "https://api.example.com/v1",
+            api_key: "sk-prod",
+            model: "gpt-4.1-mini",
+          },
+        ],
+      }),
+      updateLLMConfig: vi.fn().mockResolvedValue({
+        default_config_id: "llm-config-2",
+        configs: [
+          {
+            id: "llm-config-2",
+            type: "anthropic",
+            base_url: "https://api.anthropic.com",
+            api_key: "sk-ant",
+            model: "claude-3-7-sonnet-latest",
+          },
+        ],
+      }),
+    };
+
+    mockUseWorkbench.mockReturnValue({ apiClient });
+
+    renderPage();
+
+    expect(await screen.findByText("LLM API 管理")).toBeTruthy();
+    expect(screen.getByDisplayValue("gpt-4.1-mini")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "新增配置" }));
+
+    const newConfigCard = (await screen.findByDisplayValue("llm-config-2")).closest(".rounded-2xl");
+    expect(newConfigCard).toBeTruthy();
+    fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("类型"), {
+      target: { value: "anthropic" },
+    });
+    fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("配置 ID"), {
+      target: { value: "claude-backup" },
+    });
+    fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("BASE_URL"), {
+      target: { value: "https://api.anthropic.com" },
+    });
+    fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("MODEL"), {
+      target: { value: "claude-3-7-sonnet-latest" },
+    });
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "claude-backup" } });
+
+    const originalCard = screen.getByDisplayValue("openai-prod").closest(".rounded-2xl");
+    expect(originalCard).toBeTruthy();
+    fireEvent.click((originalCard as HTMLElement).querySelector("button") as HTMLButtonElement);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(apiClient.updateLLMConfig).toHaveBeenCalledWith({
+        default_config_id: "claude-backup",
+        configs: [
+          {
+            id: "claude-backup",
+            type: "anthropic",
+            base_url: "https://api.anthropic.com",
+            api_key: "",
+            model: "claude-3-7-sonnet-latest",
+          },
+        ],
+      });
+    });
+  });
+
+  it("加载失败时展示错误信息", async () => {
+    const apiClient = {
+      getLLMConfig: vi.fn().mockRejectedValue(new Error("config unavailable")),
+      updateLLMConfig: vi.fn(),
+    };
+
+    mockUseWorkbench.mockReturnValue({ apiClient });
+
+    renderPage();
+
+    expect(await screen.findByText("config unavailable")).toBeTruthy();
+  });
+});

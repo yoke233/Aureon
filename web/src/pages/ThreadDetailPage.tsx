@@ -4,28 +4,23 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   Bot,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Link2,
   Loader2,
   MessageSquare,
-  Plus,
-  Save,
   Send,
   Settings2,
-  User,
   Users,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { ThreadAgentsPanel } from "@/components/threads/ThreadAgentsPanel";
+import { ThreadDetailsPanel } from "@/components/threads/ThreadDetailsPanel";
+import { ThreadMessageList } from "@/components/threads/ThreadMessageList";
+import { InvitePickerDialog } from "@/components/threads/InvitePickerDialog";
 import { cn } from "@/lib/utils";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
 import { formatRelativeTime, getErrorMessage } from "@/lib/v2Workbench";
-import { Link } from "react-router-dom";
 import type { AgentProfile, Thread, ThreadMessage, ThreadParticipant, ThreadWorkItemLink, ThreadAgentSession, Issue } from "@/types/apiV2";
 import type { ThreadAckPayload, ThreadEventPayload } from "@/types/ws";
 
@@ -38,15 +33,10 @@ function hasSavedSummary(thread: Thread | null): boolean {
 function deriveWorkItemTitle(thread: Thread): string {
   const firstMeaningfulLine = (thread.summary ?? "")
     .split(/\r?\n/)
-    .map((line) => line.replace(/^[-*#\d.\)\s]+/, "").trim())
+    .map((line) => line.replace(/^[-*#\d.)\s]+/, "").trim())
     .find((line) => line.length > 0);
   const title = firstMeaningfulLine || thread.title.trim();
   return title.length > 80 ? `${title.slice(0, 77)}...` : title;
-}
-
-function readSourceType(issue: Issue | undefined): string | null {
-  const value = issue?.metadata?.source_type;
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function readTargetAgentID(metadata: Record<string, unknown> | undefined): string | null {
@@ -988,110 +978,24 @@ export function ThreadDetailPage() {
       ) : null}
 
       {/* ── Invite picker dialog ── */}
-      {invitePickerCandidates.length > 0 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="mx-4 w-full max-w-md rounded-2xl border bg-background shadow-2xl">
-            <div className="flex items-center justify-between border-b px-5 py-3.5">
-              <div>
-                <h3 className="text-sm font-semibold">{t("threads.invitePickerTitle", "Select agents to invite")}</h3>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {t("threads.invitePickerHint", "Multiple agents matched. Select the ones you want to invite.")}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={() => { setInvitePickerCandidates([]); setInvitePickerSelected(new Set()); }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="max-h-72 overflow-y-auto p-3">
-              <div className="space-y-1.5">
-                {invitePickerCandidates.map((profile) => {
-                  const isSelected = invitePickerSelected.has(profile.id);
-                  return (
-                    <button
-                      key={profile.id}
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all",
-                        isSelected
-                          ? "border-blue-300 bg-blue-50 shadow-sm"
-                          : "border-border/60 hover:border-border hover:bg-muted/30",
-                        invitePickerBusy && "pointer-events-none opacity-60",
-                      )}
-                      onClick={() => {
-                        setInvitePickerSelected((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(profile.id)) next.delete(profile.id);
-                          else next.add(profile.id);
-                          return next;
-                        });
-                      }}
-                      disabled={invitePickerBusy}
-                    >
-                      <div className={cn(
-                        "flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors",
-                        isSelected ? "border-blue-500 bg-blue-500 text-white" : "border-slate-300 bg-white",
-                      )}>
-                        {isSelected && <Check className="h-3 w-3" />}
-                      </div>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                        <Bot className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate text-sm font-medium">{profile.name ?? profile.id}</span>
-                          <Badge variant="outline" className="shrink-0 text-[9px]">{profile.role}</Badge>
-                        </div>
-                        {profile.name && (
-                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">@{profile.id}</p>
-                        )}
-                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                          {profile.driver_id ?? profile.driver?.launch_command ?? "-"}
-                          {profile.capabilities && profile.capabilities.length > 0 && (
-                            <> | {profile.capabilities.slice(0, 3).join(", ")}{profile.capabilities.length > 3 ? "..." : ""}</>
-                          )}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex items-center justify-between border-t px-5 py-3">
-              <span className="text-xs text-muted-foreground">
-                {invitePickerSelected.size > 0
-                  ? t("threads.invitePickerCount", { defaultValue: "{{count}} selected", count: invitePickerSelected.size })
-                  : t("threads.invitePickerNone", "None selected")}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { setInvitePickerCandidates([]); setInvitePickerSelected(new Set()); }}
-                  disabled={invitePickerBusy}
-                >
-                  {t("common.cancel", "Cancel")}
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleInvitePickerConfirm}
-                  disabled={invitePickerSelected.size === 0 || invitePickerBusy}
-                >
-                  {invitePickerBusy ? (
-                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  )}
-                  {t("threads.invitePickerConfirm", "Invite")} {invitePickerSelected.size > 0 ? `(${invitePickerSelected.size})` : ""}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <InvitePickerDialog
+        candidates={invitePickerCandidates}
+        selectedIDs={invitePickerSelected}
+        busy={invitePickerBusy}
+        onToggle={(profileID) => {
+          setInvitePickerSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(profileID)) next.delete(profileID);
+            else next.add(profileID);
+            return next;
+          });
+        }}
+        onClose={() => {
+          setInvitePickerCandidates([]);
+          setInvitePickerSelected(new Set());
+        }}
+        onConfirm={handleInvitePickerConfirm}
+      />
 
       {/* ── Main content: chat + sidebar ── */}
       <div className="flex min-h-0 flex-1">
@@ -1099,135 +1003,18 @@ export function ThreadDetailPage() {
         <div className="flex min-w-0 flex-1 flex-col">
           {/* ── Messages ── */}
           <div className="flex-1 overflow-y-auto px-5 py-4">
-            {messages.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-                <MessageSquare className="h-10 w-10 text-muted-foreground/30" />
-                <p className="text-sm">{t("threads.noMessages", "No messages yet. Start the conversation.")}</p>
-                {agentSessions.length === 0 && (
-                  <p className="text-xs">{t("threads.inviteHint", "Invite an agent from the sidebar to get started.")}</p>
-                )}
-              </div>
-            ) : (
-              <div className="mx-auto max-w-3xl space-y-4">
-                {messages.map((msg) => {
-                  const isAgent = msg.role === "agent";
-                  const isSystem = msg.role === "system";
-                  const targetAgent = readTargetAgentID(msg.metadata);
-                  const autoRoutedTo = readAutoRoutedTo(msg.metadata);
-                  const profile = isAgent ? profileByID.get(msg.sender_id) : undefined;
-
-                  // System messages (e.g. invite confirmations)
-                  if (isSystem) {
-                    return (
-                      <div key={msg.id} className="flex justify-center">
-                        <div className="flex items-center gap-2 rounded-full border border-border/40 bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">
-                          <Bot className="h-3 w-3" />
-                          <span>{msg.content}</span>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={msg.id} className={cn("flex gap-3", !isAgent && "flex-row-reverse")}>
-                      {/* Avatar */}
-                      <div className={cn(
-                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-                        isAgent
-                          ? "bg-emerald-100 text-emerald-700"
-                          : "bg-blue-100 text-blue-700",
-                      )}>
-                        {isAgent ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
-                      </div>
-                      {/* Bubble */}
-                      <div className={cn("group/msg max-w-[75%] min-w-0")}>
-                        {/* Sender line */}
-                        <div className={cn(
-                          "mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground",
-                          !isAgent && "flex-row-reverse",
-                        )}>
-                          <span className="font-medium text-foreground/70">
-                            {isAgent ? (profile?.name ?? msg.sender_id) : (msg.sender_id || "You")}
-                          </span>
-                          {targetAgent ? (
-                            <span className="rounded bg-blue-50 px-1 py-px text-[10px] text-blue-600">
-                              @{targetAgent}
-                            </span>
-                          ) : null}
-                          <span>{formatRelativeTime(msg.created_at)}</span>
-                        </div>
-                        {/* Content */}
-                        <div className={cn(
-                          "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-                          isAgent
-                            ? "rounded-tl-md bg-muted/80 text-foreground"
-                            : "rounded-tr-md bg-blue-600 text-white",
-                        )}>
-                          <p className="whitespace-pre-wrap break-words">
-                            {renderMessageContent(msg)}
-                          </p>
-                        </div>
-                        {/* Auto-routing tag */}
-                        {!isAgent && autoRoutedTo.length > 0 && (
-                          <div className={cn(
-                            "mt-1 flex flex-wrap items-center gap-1 text-[10px]",
-                            !isAgent && "justify-end",
-                          )}>
-                            <span className="text-muted-foreground/60">Auto</span>
-                            <span className="text-muted-foreground/40">→</span>
-                            {autoRoutedTo.map((agentID) => {
-                              const agentProfile = profileByID.get(agentID);
-                              return (
-                                <button
-                                  key={agentID}
-                                  type="button"
-                                  className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
-                                  onClick={() => focusAgentProfile(agentID)}
-                                >
-                                  <Bot className="h-2.5 w-2.5" />
-                                  {agentProfile?.name ?? agentID}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                {thinkingAgentIDs.size > 0 && (
-                  <div className="flex flex-col gap-2">
-                    {[...thinkingAgentIDs].map((agentID) => {
-                      const profile = profileByID.get(agentID);
-                      return (
-                        <div key={agentID} className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                            <Bot className="h-4 w-4" />
-                          </div>
-                          <div className="flex items-center gap-2 rounded-2xl rounded-tl-md bg-muted/60 px-4 py-2.5">
-                            <span className="text-xs font-medium text-muted-foreground">
-                              {profile?.name ?? agentID}
-                            </span>
-                            <span className="inline-flex items-center gap-0.5">
-                              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "0ms" }} />
-                              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "150ms" }} />
-                              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} />
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {sending && thinkingAgentIDs.size === 0 && (
-                  <div className="flex items-center gap-2 px-11 text-xs text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>{t("threads.sending", "Sending")}...</span>
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
+            <ThreadMessageList
+              messages={messages}
+              profileByID={profileByID}
+              thinkingAgentIDs={thinkingAgentIDs}
+              sending={sending}
+              messagesEndRef={messagesEndRef}
+              renderMessageContent={renderMessageContent}
+              focusAgentProfile={focusAgentProfile}
+              readTargetAgentID={readTargetAgentID}
+              readAutoRoutedTo={readAutoRoutedTo}
+              formatRelativeTime={formatRelativeTime}
+            />
           </div>
 
           {/* ── Input area ── */}
@@ -1405,381 +1192,58 @@ export function ThreadDetailPage() {
           {/* Tab content */}
           <div className="flex-1 overflow-y-auto">
             {sidebarTab === "agents" ? (
-              <div className="space-y-4 p-4">
-                {/* Invite Agent section */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("threads.inviteAgent", "Invite Agent")}
-                    </h3>
-                    {selectedInviteIDs.size > 0 && (
-                      <Button
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={handleInviteAgent}
-                        disabled={invitingAgent}
-                      >
-                        {invitingAgent ? (
-                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Plus className="mr-1 h-3.5 w-3.5" />
-                        )}
-                        {t("threads.inviteSelected", "Add")} ({selectedInviteIDs.size})
-                      </Button>
-                    )}
-                  </div>
-                  {inviteableProfiles.length === 0 ? (
-                    <p className="rounded-lg border border-dashed px-3 py-3 text-center text-[11px] text-muted-foreground">
-                      {t("threads.noInviteableAgents", "All available agents have been invited")}
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {inviteableProfiles.map((profile) => {
-                        const isSelected = selectedInviteIDs.has(profile.id);
-                        return (
-                          <button
-                            key={profile.id}
-                            type="button"
-                            className={cn(
-                              "flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-all",
-                              isSelected
-                                ? "border-blue-300 bg-blue-50 shadow-sm"
-                                : "border-border/60 bg-background hover:border-border hover:bg-muted/30",
-                              invitingAgent && "pointer-events-none opacity-60",
-                            )}
-                            onClick={() => toggleInviteSelection(profile.id)}
-                            disabled={invitingAgent}
-                          >
-                            {/* Checkbox */}
-                            <div className={cn(
-                              "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
-                              isSelected
-                                ? "border-blue-500 bg-blue-500 text-white"
-                                : "border-slate-300 bg-white",
-                            )}>
-                              {isSelected && <Check className="h-3 w-3" />}
-                            </div>
-                            {/* Avatar */}
-                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                              <Bot className="h-3.5 w-3.5" />
-                            </div>
-                            {/* Info */}
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="truncate text-xs font-medium">
-                                  {profile.name ?? profile.id}
-                                </span>
-                                <Badge variant="outline" className="shrink-0 text-[9px]">{profile.role}</Badge>
-                              </div>
-                              {profile.name && (
-                                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">@{profile.id}</p>
-                              )}
-                              <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                                {t("threads.driver", "Driver")}: {profile.driver_id ?? profile.driver?.launch_command ?? "-"}
-                                {profile.capabilities && profile.capabilities.length > 0 && (
-                                  <> | {profile.capabilities.slice(0, 3).join(", ")}{profile.capabilities.length > 3 ? "..." : ""}</>
-                                )}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Agent Cards */}
-                {agentSessionsWithProfileID.length === 0 ? (
-                  <div className="rounded-xl border border-dashed py-8 text-center">
-                    <Bot className="mx-auto h-8 w-8 text-muted-foreground/30" />
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {t("threads.noAgents", "No agents joined yet")}
-                    </p>
-                    <p className="mt-1 text-[11px] text-muted-foreground/60">
-                      {t("threads.noAgentsHint", "Use the selector above to invite an agent")}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("threads.activeAgents", "Active Agents")} ({agentSessionsWithProfileID.length})
-                    </h3>
-                    {agentSessionsWithProfileID.map((s) => {
-                      const profile = profileByID.get(s.agent_profile_id);
-                      return (
-                        <div
-                          key={s.id}
-                          ref={(node) => { agentCardRefs.current[s.agent_profile_id] = node; }}
-                          data-testid={`agent-card-${s.agent_profile_id}`}
-                          className={cn(
-                            "rounded-xl border p-3 transition-all",
-                            highlightedAgentProfileID === s.agent_profile_id
-                              ? "border-blue-300 bg-blue-50 shadow-md"
-                              : "border-border/60 bg-background hover:border-border",
-                          )}
-                        >
-                          <div className="flex items-start gap-2.5">
-                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                              <Bot className="h-4 w-4" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="truncate text-sm font-medium">
-                                  {profile?.name ?? s.agent_profile_id}
-                                </span>
-                                <span className="flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                  <span className={cn("h-1.5 w-1.5 rounded-full", agentStatusColor(s.status ?? "unknown"))} />
-                                  {s.status ?? "unknown"}
-                                </span>
-                              </div>
-                              {profile?.name && (
-                                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">@{s.agent_profile_id}</p>
-                              )}
-                              <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground">
-                                <span>{t("threads.turns", "Turns")}: {s.turn_count ?? 0}</span>
-                                <span>{(((s.total_input_tokens ?? 0) + (s.total_output_tokens ?? 0)) / 1000).toFixed(1)}k tokens</span>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                              onClick={() => void handleRemoveAgent(s.id)}
-                              disabled={removingAgentID === s.id}
-                              aria-label={t("threads.removeAgentAria", { defaultValue: "Remove {{agent}}", agent: s.agent_profile_id })}
-                            >
-                              {removingAgentID === s.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <X className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Participants */}
-                {participants.length > 0 && (
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("threads.participants", "Participants")} ({participants.length})
-                    </h3>
-                    <div className="space-y-1.5">
-                      {participants.map((p) => (
-                        <div key={p.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm">
-                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-600">
-                            <User className="h-3 w-3" />
-                          </div>
-                          <span className="truncate text-xs">{p.user_id}</span>
-                          <Badge variant="outline" className="ml-auto text-[10px]">{p.role}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <ThreadAgentsPanel
+                inviteableProfiles={inviteableProfiles}
+                selectedInviteIDs={selectedInviteIDs}
+                invitingAgent={invitingAgent}
+                onToggleInviteSelection={toggleInviteSelection}
+                onInviteAgent={() => {
+                  void handleInviteAgent();
+                }}
+                agentSessionsWithProfileID={agentSessionsWithProfileID}
+                profileByID={profileByID}
+                highlightedAgentProfileID={highlightedAgentProfileID}
+                agentCardRefs={agentCardRefs}
+                removingAgentID={removingAgentID}
+                onRemoveAgent={(agentSessionID) => {
+                  void handleRemoveAgent(agentSessionID);
+                }}
+                participants={participants}
+                agentStatusColor={agentStatusColor}
+              />
             ) : (
               /* ── Details tab ── */
-              <div className="space-y-4 p-4">
-                {/* Summary */}
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                    onClick={() => setSummaryCollapsed(!summaryCollapsed)}
-                  >
-                    <span>{t("threads.summary", "Summary")}</span>
-                    {summaryCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-                  </button>
-                  {!summaryCollapsed && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] text-muted-foreground">
-                        {t(
-                          "threads.summaryEntryHint",
-                          "Capture decisions, scope, risks, and next actions.",
-                        )}
-                      </p>
-                      <Textarea
-                        value={summaryDraft}
-                        onChange={(e) => setSummaryDraft(e.target.value)}
-                        placeholder={t(
-                          "threads.summaryPlaceholder",
-                          "Capture the current consensus, decisions, scope, risks, and next actions for this thread.",
-                        )}
-                        className="min-h-[100px] resize-y text-xs"
-                      />
-                      <div className="flex justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleSaveSummary}
-                          disabled={savingSummary || summaryDraft.trim() === (thread.summary?.trim() ?? "")}
-                        >
-                          {savingSummary ? (
-                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Save className="mr-1 h-3.5 w-3.5" />
-                          )}
-                          {t("common.save", "Save")}
-                        </Button>
-                      </div>
-                      {!hasSavedSummary(thread) && (
-                        <p className="text-[11px] text-amber-600">
-                          {t("threads.summaryMissingHint", "Save a summary first to create work items.")}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Linked Work Items */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("threads.linkedWorkItems", "Work Items")} ({workItemLinks.length})
-                    </h3>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        className="flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        onClick={handleOpenCreateWorkItem}
-                      >
-                        <Plus className="h-3 w-3" />
-                        {t("threads.createWorkItem", "Create")}
-                      </button>
-                      <button
-                        type="button"
-                        className="flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        onClick={() => setShowLinkWI(!showLinkWI)}
-                      >
-                        <Link2 className="h-3 w-3" />
-                        {t("threads.linkExisting", "Link")}
-                      </button>
-                    </div>
-                  </div>
-
-                  {showCreateWI && (
-                    <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                      <p className="text-[11px] font-medium">{t("threads.summaryToWorkItem", "Create from Summary")}</p>
-                      <Input
-                        placeholder={t("threads.workItemTitle", "Title...")}
-                        className="text-xs"
-                        value={newWITitle}
-                        onChange={(e) => setNewWITitle(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleCreateWorkItem()}
-                      />
-                      <Textarea
-                        placeholder={t("threads.workItemBody", "Body...")}
-                        value={newWIBody}
-                        onChange={(e) => setNewWIBody(e.target.value)}
-                        className="min-h-[80px] resize-y text-xs"
-                      />
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => { setShowCreateWI(false); setNewWITitle(""); setNewWIBody(""); }}
-                        >
-                          {t("common.cancel", "Cancel")}
-                        </Button>
-                        <Button size="sm" className="h-7 text-xs" onClick={handleCreateWorkItem} disabled={!newWITitle.trim() || !newWIBody.trim()}>
-                          {t("common.create", "Create")}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {showLinkWI && (
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder={t("threads.workItemId", "Work item ID...")}
-                        className="text-xs"
-                        value={linkWIId}
-                        onChange={(e) => setLinkWIId(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleLinkWorkItem()}
-                      />
-                      <Button size="sm" className="h-8 text-xs" onClick={handleLinkWorkItem} disabled={!linkWIId.trim()}>
-                        {t("threads.linkBtn", "Link")}
-                      </Button>
-                    </div>
-                  )}
-
-                  {workItemLinks.length === 0 ? (
-                    <p className="py-4 text-center text-[11px] text-muted-foreground">
-                      {t("threads.noLinkedWorkItems", "No linked work items")}
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {orderedWorkItemLinks.map((link) => {
-                        const issue = linkedIssues[link.work_item_id];
-                        const sourceType = readSourceType(issue);
-                        return (
-                          <div
-                            key={link.id}
-                            className={cn(
-                              "rounded-lg border px-3 py-2 text-xs",
-                              link.is_primary ? "border-blue-200 bg-blue-50/50" : "border-border/60",
-                            )}
-                          >
-                            <div className="flex items-center gap-1.5">
-                              {link.is_primary && (
-                                <Badge variant="default" className="text-[9px]">primary</Badge>
-                              )}
-                              <Badge variant="outline" className="text-[9px]">{link.relation_type}</Badge>
-                              {sourceType ? (
-                                <Badge variant="secondary" className="text-[9px]">
-                                  {sourceType === "thread_summary" ? "summary" : sourceType === "thread_manual" ? "manual" : sourceType}
-                                </Badge>
-                              ) : null}
-                              <Link
-                                to={`/work-items/${link.work_item_id}`}
-                                className="min-w-0 flex-1 truncate font-medium text-primary hover:underline"
-                              >
-                                {issue ? issue.title : `#${link.work_item_id}`}
-                              </Link>
-                              {issue && (
-                                <Badge variant="secondary" className="text-[9px]">{issue.status}</Badge>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Thread Metadata */}
-                <div className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("threads.info", "Thread Info")}
-                  </h3>
-                  <div className="space-y-1 rounded-lg border bg-muted/20 p-3 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">ID</span>
-                      <span className="font-mono">{thread.id}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">{t("threads.status", "Status")}</span>
-                      <span>{thread.status}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">{t("threads.owner", "Owner")}</span>
-                      <span>{thread.owner_id || "—"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">{t("threads.updated", "Updated")}</span>
-                      <span>{formatRelativeTime(thread.updated_at)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">{t("threads.messages", "Messages")}</span>
-                      <span>{messages.length}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ThreadDetailsPanel
+                thread={thread}
+                messagesCount={messages.length}
+                summaryCollapsed={summaryCollapsed}
+                summaryDraft={summaryDraft}
+                savingSummary={savingSummary}
+                showSummaryMissingHint={!hasSavedSummary(thread)}
+                showCreateWI={showCreateWI}
+                newWITitle={newWITitle}
+                newWIBody={newWIBody}
+                showLinkWI={showLinkWI}
+                linkWIId={linkWIId}
+                workItemLinks={workItemLinks}
+                orderedWorkItemLinks={orderedWorkItemLinks}
+                linkedIssues={linkedIssues}
+                onSummaryCollapsedChange={setSummaryCollapsed}
+                onSummaryDraftChange={setSummaryDraft}
+                onSaveSummary={handleSaveSummary}
+                onOpenCreateWorkItem={handleOpenCreateWorkItem}
+                onShowCreateWIChange={setShowCreateWI}
+                onNewWITitleChange={setNewWITitle}
+                onNewWIBodyChange={setNewWIBody}
+                onCreateWorkItem={handleCreateWorkItem}
+                onShowLinkWIChange={setShowLinkWI}
+                onLinkWIIdChange={setLinkWIId}
+                onLinkWorkItem={handleLinkWorkItem}
+                onResetCreateWorkItemDraft={() => {
+                  setNewWITitle("");
+                  setNewWIBody("");
+                }}
+              />
             )}
           </div>
         </div>

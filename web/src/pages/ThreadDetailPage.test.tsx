@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
 import { ThreadDetailPage } from "./ThreadDetailPage";
 
+const DEFAULT_MESSAGE_PLACEHOLDER = "Type @ to mention an agent, or just send a message...";
+
 const { mockUseWorkbench } = vi.hoisted(() => ({
   mockUseWorkbench: vi.fn(),
 }));
@@ -102,6 +104,15 @@ function renderPage() {
   );
 }
 
+async function openDetailsTab() {
+  fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+}
+
+async function openSummaryPanel() {
+  await openDetailsTab();
+  fireEvent.click(await screen.findByRole("button", { name: "Summary" }));
+}
+
 describe("ThreadDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -131,6 +142,8 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
+    await openSummaryPanel();
+
     const textarea = await screen.findByDisplayValue("旧摘要");
     fireEvent.change(textarea, { target: { value: "新摘要" } });
     fireEvent.click(screen.getByRole("button", { name: /保存|Save/ }));
@@ -156,14 +169,15 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
+    await openSummaryPanel();
+
     expect(
       await screen.findByText(
-        "Work item creation depends on summary. Save a summary first to turn this discussion into execution.",
+        "Save a summary first to create work items.",
       ),
     ).toBeTruthy();
 
-    const createButtons = await screen.findAllByRole("button", { name: /创建|Create/ });
-    fireEvent.click(createButtons[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     expect(screen.queryByText("Create Work Item from Summary")).toBeNull();
     expect(apiClient.createWorkItemFromThread).not.toHaveBeenCalled();
@@ -190,7 +204,7 @@ describe("ThreadDetailPage", () => {
       });
     });
 
-    const input = screen.getByPlaceholderText("Type a message...");
+    const input = screen.getByPlaceholderText(DEFAULT_MESSAGE_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "实时消息" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -246,9 +260,8 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
-    await screen.findByRole("button", { name: "Invite" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Invite" }));
+    fireEvent.click(await screen.findByText("worker-a"));
+    fireEvent.click(await screen.findByRole("button", { name: "Add (1)" }));
 
     await waitFor(() => {
       expect(apiClient.inviteThreadAgent).toHaveBeenCalledWith(1, { agent_profile_id: "worker-a" });
@@ -261,7 +274,7 @@ describe("ThreadDetailPage", () => {
       expect(apiClient.removeThreadAgent).toHaveBeenCalledWith(1, 11);
     });
     await waitFor(() => {
-      expect(screen.queryByText("worker-a")).toBeNull();
+      expect(screen.queryByTestId("agent-card-worker-a")).toBeNull();
     });
   });
 
@@ -281,7 +294,7 @@ describe("ThreadDetailPage", () => {
 
     await screen.findByText("worker-a");
 
-    const input = screen.getByPlaceholderText("Type a message...");
+    const input = screen.getByPlaceholderText(DEFAULT_MESSAGE_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "@worker-a 请处理这个问题" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -329,9 +342,9 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
-    await screen.findByText("当前为仅 @ 激活：只有输入 @agent-id 开头才会唤起对应 agent，普通消息不会打扰 agent。");
+    await screen.findByText("Mention-only mode: use @agent-id to direct messages to specific agents.");
 
-    const input = screen.getByPlaceholderText("Type a message...");
+    const input = screen.getByPlaceholderText(DEFAULT_MESSAGE_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "普通讨论消息" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -362,14 +375,14 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "广播模式" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Broadcast" }));
 
     await waitFor(() => {
       expect(apiClient.updateThread).toHaveBeenCalledWith(1, {
         metadata: { agent_routing_mode: "broadcast" },
       });
     });
-    expect(await screen.findByText("当前已开启广播模式：普通消息会发给全部 active agents；输入 @agent-id 仍可定向某个 agent。")).toBeTruthy();
+    expect(await screen.findByText("Broadcast mode: messages go to all active agents. Use @agent-id for targeting.")).toBeTruthy();
   });
 
   it("输入 @ 时展示候选并插入 mention", async () => {
@@ -386,7 +399,7 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
-    const input = await screen.findByPlaceholderText("Type a message...");
+    const input = await screen.findByPlaceholderText(DEFAULT_MESSAGE_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "@wor", selectionStart: 4 } });
 
     expect(await screen.findByRole("button", { name: /@worker-a/ })).toBeTruthy();
@@ -394,7 +407,7 @@ describe("ThreadDetailPage", () => {
     fireEvent.mouseDown(screen.getByRole("button", { name: /@worker-a/ }));
 
     expect((input as HTMLInputElement).value).toBe("@worker-a ");
-    expect(await screen.findByText("已识别目标 agent")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "@worker-a" })).toBeTruthy();
   });
 
   it("点击消息里的 mention 会高亮对应 agent 卡片", async () => {
@@ -424,7 +437,7 @@ describe("ThreadDetailPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "@worker-a" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("agent-card-worker-a").className).toContain("border-blue-400");
+      expect(screen.getByTestId("agent-card-worker-a").className).toContain("border-blue-300");
     });
   });
 
@@ -456,6 +469,6 @@ describe("ThreadDetailPage", () => {
 
     const hoverCard = await screen.findByTestId("mention-hover-card-worker-a");
     expect(hoverCard.textContent).toContain("Turns: 0");
-    expect(hoverCard.textContent).toContain("tokens: 0.0k");
+    expect(hoverCard.textContent).toContain("0.0k tokens");
   });
 });

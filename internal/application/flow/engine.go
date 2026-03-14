@@ -182,6 +182,20 @@ func (e *WorkItemEngine) Run(ctx context.Context, workItemID int64) error {
 			}
 			defer e.wsProvider.Release(ctx, ws)
 			ctx = ContextWithWorkspace(ctx, ws)
+
+			// Surface workspace preparation warnings to the user via event bus.
+			if ws.Metadata != nil {
+				if warnings, ok := ws.Metadata["warnings"].([]string); ok && len(warnings) > 0 {
+					e.bus.Publish(ctx, core.Event{
+						Type:       core.EventWorkspaceWarning,
+						WorkItemID: workItemID,
+						Data: map[string]any{
+							"warnings": warnings,
+						},
+						Timestamp: time.Now().UTC(),
+					})
+				}
+			}
 		}
 	}
 

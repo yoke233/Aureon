@@ -36,6 +36,17 @@ func (h *Handler) threadService() *threadapp.Service {
 	})
 }
 
+func (h *Handler) syncThreadWorkspaceContext(ctx context.Context, threadID int64) error {
+	if h == nil {
+		return nil
+	}
+	manager := threadWorkspaceManager{store: h.store, dataDir: h.dataDir}
+	if err := manager.EnsureThreadWorkspace(ctx, threadID); err != nil {
+		return err
+	}
+	return manager.SyncThreadWorkspaceContext(ctx, threadID)
+}
+
 type threadAppTx struct {
 	store core.TransactionalStore
 }

@@ -357,6 +357,10 @@ func (h *Handler) addThreadParticipant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.ID = id
+	if err := h.syncThreadWorkspaceContext(r.Context(), threadID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "SYNC_THREAD_WORKSPACE_FAILED")
+		return
+	}
 	writeJSON(w, http.StatusCreated, p)
 }
 
@@ -412,6 +416,10 @@ func (h *Handler) removeThreadParticipant(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error(), "REMOVE_PARTICIPANT_FAILED")
+		return
+	}
+	if err := h.syncThreadWorkspaceContext(r.Context(), threadID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "SYNC_THREAD_WORKSPACE_FAILED")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -687,6 +695,10 @@ func (h *Handler) inviteThreadAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error(), "INVITE_AGENT_FAILED")
 			return
 		}
+		if err := h.syncThreadWorkspaceContext(r.Context(), threadID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "SYNC_THREAD_WORKSPACE_FAILED")
+			return
+		}
 		writeJSON(w, http.StatusCreated, member)
 		return
 	}
@@ -706,6 +718,10 @@ func (h *Handler) inviteThreadAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	member.ID = id
+	if err := h.syncThreadWorkspaceContext(r.Context(), threadID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "SYNC_THREAD_WORKSPACE_FAILED")
+		return
+	}
 	writeJSON(w, http.StatusCreated, member)
 }
 
@@ -752,6 +768,10 @@ func (h *Handler) removeThreadAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error(), "REMOVE_AGENT_FAILED")
 			return
 		}
+		if err := h.syncThreadWorkspaceContext(r.Context(), threadID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "SYNC_THREAD_WORKSPACE_FAILED")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 		return
 	}
@@ -778,6 +798,10 @@ func (h *Handler) removeThreadAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error(), "REMOVE_AGENT_FAILED")
+		return
+	}
+	if err := h.syncThreadWorkspaceContext(r.Context(), threadID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "SYNC_THREAD_WORKSPACE_FAILED")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})

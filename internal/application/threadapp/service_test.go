@@ -567,6 +567,28 @@ func TestServiceCreateThreadSyncsWorkspace(t *testing.T) {
 	}
 }
 
+func TestServiceCreateThreadRollsBackWhenWorkspaceSyncFails(t *testing.T) {
+	store := newThreadAppTestStore(t)
+	workspace := &workspaceStub{err: errors.New("sync failed")}
+	svc := newSQLiteThreadAppServiceWithWorkspace(store, newSQLiteTxAdapter(store, nil), nil, workspace)
+
+	_, err := svc.CreateThread(context.Background(), CreateThreadInput{
+		Title:   "workspace-fail-thread",
+		OwnerID: "owner-1",
+	})
+	if err == nil {
+		t.Fatal("expected CreateThread to fail when workspace sync fails")
+	}
+
+	threads, err := store.ListThreads(context.Background(), core.ThreadFilter{Limit: 20})
+	if err != nil {
+		t.Fatalf("list threads: %v", err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("expected thread rollback after workspace failure, got %d threads", len(threads))
+	}
+}
+
 func TestServiceCreateThreadContextRef(t *testing.T) {
 	store := newThreadAppTestStore(t)
 	workspace := &workspaceStub{}
@@ -605,6 +627,41 @@ func TestServiceCreateThreadContextRef(t *testing.T) {
 	}
 	if len(workspace.syncCalls) != 1 || workspace.syncCalls[0] != threadID {
 		t.Fatalf("expected workspace sync for thread %d, got %+v", threadID, workspace.syncCalls)
+	}
+}
+
+func TestServiceCreateThreadContextRefRollsBackWhenWorkspaceSyncFails(t *testing.T) {
+	store := newThreadAppTestStore(t)
+	workspace := &workspaceStub{err: errors.New("sync failed")}
+	svc := newSQLiteThreadAppServiceWithWorkspace(store, newSQLiteTxAdapter(store, nil), nil, workspace)
+	ctx := context.Background()
+
+	threadID, _ := store.CreateThread(ctx, &core.Thread{Title: "context-thread"})
+	projectID, _ := store.CreateProject(ctx, &core.Project{Name: "Project Alpha", Kind: core.ProjectGeneral})
+	if _, err := store.CreateResourceBinding(ctx, &core.ResourceBinding{
+		ProjectID: projectID,
+		Kind:      core.ResourceKindLocalFS,
+		URI:       t.TempDir(),
+		Label:     "workspace",
+	}); err != nil {
+		t.Fatalf("create resource binding: %v", err)
+	}
+
+	_, err := svc.CreateThreadContextRef(ctx, CreateThreadContextRefInput{
+		ThreadID:  threadID,
+		ProjectID: projectID,
+		Access:    "read",
+	})
+	if err == nil {
+		t.Fatal("expected CreateThreadContextRef to fail when workspace sync fails")
+	}
+
+	refs, err := store.ListThreadContextRefs(ctx, threadID)
+	if err != nil {
+		t.Fatalf("list context refs: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("expected context ref rollback, got %+v", refs)
 	}
 }
 
@@ -671,5 +728,70 @@ func TestServiceUpdateThreadContextRefRejectsInvalidAccess(t *testing.T) {
 	})
 	if CodeOf(err) != CodeInvalidContextAccess {
 		t.Fatalf("expected %s, got %v", CodeInvalidContextAccess, err)
+	}
+}
+
+func TestServiceDeleteThreadRemovesContextRefs(t *testing.T) {
+	store := newThreadAppTestStore(t)
+	svc := newSQLiteThreadAppService(store, newSQLiteTxAdapter(store, nil), nil)
+	ctx := context.Background()
+
+	threadID, _ := store.CreateThread(ctx, &core.Thread{Title: "context-cleanup"})
+	projectID, _ := store.CreateProject(ctx, &core.Project{Name: "Project Alpha", Kind: core.ProjectGeneral})
+	if _, err := store.CreateResourceBinding(ctx, &core.ResourceBinding{
+		ProjectID: projectID,
+		Kind:      core.ResourceKindLocalFS,
+		URI:       t.TempDir(),
+	}); err != nil {
+		t.Fatalf("create resource binding: %v", err)
+	}
+	if _, err := store.CreateThreadContextRef(ctx, &core.ThreadContextRef{
+		ThreadID:  threadID,
+		ProjectID: projectID,
+		Access:    core.ContextAccessRead,
+	}); err != nil {
+		t.Fatalf("create context ref: %v", err)
+	}
+
+	if err := svc.DeleteThread(ctx, threadID); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+
+	refs, err := store.ListThreadContextRefs(ctx, threadID)
+	if err != nil {
+		t.Fatalf("list context refs after delete: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("expected context refs to be removed, got %+v", refs)
+	}
+}
+
+func TestServiceDeleteThreadContextRefNotFound(t *testing.T) {
+	store := newThreadAppTestStore(t)
+	svc := newSQLiteThreadAppService(store, newSQLiteTxAdapter(store, nil), nil)
+	ctx := context.Background()
+
+	threadID, _ := store.CreateThread(ctx, &core.Thread{Title: "context-thread"})
+	err := svc.DeleteThreadContextRef(ctx, threadID, 9999)
+	if CodeOf(err) != CodeContextRefNotFound {
+		t.Fatalf("expected %s, got %v", CodeContextRefNotFound, err)
+	}
+}
+
+func TestServiceCreateThreadContextRefRequiresResolvableBinding(t *testing.T) {
+	store := newThreadAppTestStore(t)
+	svc := newSQLiteThreadAppService(store, newSQLiteTxAdapter(store, nil), nil)
+	ctx := context.Background()
+
+	threadID, _ := store.CreateThread(ctx, &core.Thread{Title: "context-thread"})
+	projectID, _ := store.CreateProject(ctx, &core.Project{Name: "Project Alpha", Kind: core.ProjectGeneral})
+
+	_, err := svc.CreateThreadContextRef(ctx, CreateThreadContextRefInput{
+		ThreadID:  threadID,
+		ProjectID: projectID,
+		Access:    "read",
+	})
+	if err == nil {
+		t.Fatal("expected CreateThreadContextRef to fail without resolvable binding")
 	}
 }

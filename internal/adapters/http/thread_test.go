@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -999,5 +1000,234 @@ func TestThreadContextRefCRUDAndWorkspaceContextFile(t *testing.T) {
 	}
 	if _, err := h.store.ListThreadContextRefs(context.Background(), thread.ID); err != nil {
 		t.Fatalf("store list context refs: %v", err)
+	}
+}
+
+func TestThreadContextRefRejectsInvalidAccessAndDuplicate(t *testing.T) {
+	dataDir := t.TempDir()
+	_, ts := setupAPIWithDataDir(t, dataDir)
+
+	resp, _ := post(ts, "/threads", map[string]any{"title": "context-thread"})
+	var thread core.Thread
+	decodeJSON(resp, &thread)
+
+	resp, _ = post(ts, "/projects", map[string]any{"name": "Project Alpha", "kind": "general"})
+	var project core.Project
+	decodeJSON(resp, &project)
+
+	resp, _ = post(ts, fmt.Sprintf("/projects/%d/resources", project.ID), map[string]any{
+		"kind":  "local_fs",
+		"uri":   t.TempDir(),
+		"label": "workspace",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating resource, got %d", resp.StatusCode)
+	}
+
+	resp, _ = post(ts, fmt.Sprintf("/threads/%d/context-refs", thread.ID), map[string]any{
+		"project_id": project.ID,
+		"access":     "broken",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 invalid access, got %d", resp.StatusCode)
+	}
+
+	resp, _ = post(ts, fmt.Sprintf("/threads/%d/context-refs", thread.ID), map[string]any{
+		"project_id": project.ID,
+		"access":     "read",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating context ref, got %d", resp.StatusCode)
+	}
+	resp, _ = post(ts, fmt.Sprintf("/threads/%d/context-refs", thread.ID), map[string]any{
+		"project_id": project.ID,
+		"access":     "check",
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 duplicate context ref, got %d", resp.StatusCode)
+	}
+}
+
+func TestThreadContextRefPersistsGrantedByFromHeader(t *testing.T) {
+	dataDir := t.TempDir()
+	h, ts := setupAPIWithDataDir(t, dataDir)
+
+	resp, _ := post(ts, "/threads", map[string]any{"title": "context-thread"})
+	var thread core.Thread
+	decodeJSON(resp, &thread)
+
+	resp, _ = post(ts, "/projects", map[string]any{"name": "Project Alpha", "kind": "general"})
+	var project core.Project
+	decodeJSON(resp, &project)
+
+	resp, _ = post(ts, fmt.Sprintf("/projects/%d/resources", project.ID), map[string]any{
+		"kind":  "local_fs",
+		"uri":   t.TempDir(),
+		"label": "workspace",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating resource, got %d", resp.StatusCode)
+	}
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"project_id": project.ID,
+		"access":     "read",
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+fmt.Sprintf("/threads/%d/context-refs", thread.ID), bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", "tester-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post context ref with header: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	refs, err := h.store.ListThreadContextRefs(context.Background(), thread.ID)
+	if err != nil {
+		t.Fatalf("list context refs: %v", err)
+	}
+	if len(refs) != 1 || refs[0].GrantedBy != "tester-1" {
+		t.Fatalf("expected granted_by tester-1, got %+v", refs)
+	}
+}
+
+func TestThreadDeleteRemovesContextRefs(t *testing.T) {
+	dataDir := t.TempDir()
+	h, ts := setupAPIWithDataDir(t, dataDir)
+
+	resp, _ := post(ts, "/threads", map[string]any{"title": "context-thread"})
+	var thread core.Thread
+	decodeJSON(resp, &thread)
+
+	resp, _ = post(ts, "/projects", map[string]any{"name": "Project Alpha", "kind": "general"})
+	var project core.Project
+	decodeJSON(resp, &project)
+
+	resp, _ = post(ts, fmt.Sprintf("/projects/%d/resources", project.ID), map[string]any{
+		"kind":  "local_fs",
+		"uri":   t.TempDir(),
+		"label": "workspace",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating resource, got %d", resp.StatusCode)
+	}
+	resp, _ = post(ts, fmt.Sprintf("/threads/%d/context-refs", thread.ID), map[string]any{
+		"project_id": project.ID,
+		"access":     "read",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating context ref, got %d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+fmt.Sprintf("/threads/%d", thread.ID), nil)
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 deleting thread, got %d", resp.StatusCode)
+	}
+
+	refs, err := h.store.ListThreadContextRefs(context.Background(), thread.ID)
+	if err != nil {
+		t.Fatalf("list context refs after thread delete: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("expected context refs to be removed, got %+v", refs)
+	}
+}
+
+func TestThreadWorkspaceContextMembersSyncOnParticipantChanges(t *testing.T) {
+	dataDir := t.TempDir()
+	_, ts := setupAPIWithDataDir(t, dataDir)
+
+	resp, _ := post(ts, "/threads", map[string]any{"title": "member-thread", "owner_id": "owner-1"})
+	var thread core.Thread
+	decodeJSON(resp, &thread)
+
+	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), "workspace", ".context.json")
+	readMembers := func() []string {
+		raw, err := os.ReadFile(contextFile)
+		if err != nil {
+			t.Fatalf("read context file: %v", err)
+		}
+		var payload core.ThreadWorkspaceContext
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode context file: %v", err)
+		}
+		return payload.Members
+	}
+
+	members := readMembers()
+	if len(members) != 1 || members[0] != "owner-1" {
+		t.Fatalf("unexpected initial members: %+v", members)
+	}
+
+	resp, _ = post(ts, fmt.Sprintf("/threads/%d/participants", thread.ID), map[string]any{
+		"user_id": "member-2",
+		"role":    "member",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 adding participant, got %d", resp.StatusCode)
+	}
+	members = readMembers()
+	if len(members) != 2 {
+		t.Fatalf("expected 2 members after add, got %+v", members)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+fmt.Sprintf("/threads/%d/participants/member-2", thread.ID), nil)
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 removing participant, got %d", resp.StatusCode)
+	}
+	members = readMembers()
+	if len(members) != 1 || members[0] != "owner-1" {
+		t.Fatalf("unexpected members after removal: %+v", members)
+	}
+}
+
+func TestThreadWorkspaceContextMembersSyncOnAgentLifecycle(t *testing.T) {
+	dataDir := t.TempDir()
+	_, ts := setupAPIWithDataDir(t, dataDir)
+
+	resp, _ := post(ts, "/threads", map[string]any{"title": "agent-member-thread", "owner_id": "owner-1"})
+	var thread core.Thread
+	decodeJSON(resp, &thread)
+
+	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), "workspace", ".context.json")
+	readMembers := func() []string {
+		raw, err := os.ReadFile(contextFile)
+		if err != nil {
+			t.Fatalf("read context file: %v", err)
+		}
+		var payload core.ThreadWorkspaceContext
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode context file: %v", err)
+		}
+		return payload.Members
+	}
+
+	resp, _ = post(ts, fmt.Sprintf("/threads/%d/agents", thread.ID), map[string]any{
+		"agent_profile_id": "worker-claude",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 inviting agent, got %d", resp.StatusCode)
+	}
+	var member core.ThreadMember
+	decodeJSON(resp, &member)
+
+	members := readMembers()
+	if len(members) != 2 {
+		t.Fatalf("expected 2 members after agent invite, got %+v", members)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+fmt.Sprintf("/threads/%d/agents/%d", thread.ID, member.ID), nil)
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 removing agent, got %d", resp.StatusCode)
+	}
+
+	members = readMembers()
+	if len(members) != 2 {
+		t.Fatalf("expected agent snapshot to remain in members after removal, got %+v", members)
 	}
 }

@@ -49,25 +49,71 @@ func (p *GitProvider) Prepare(_ context.Context, _ *core.Project, bindings []*co
 		return nil, fmt.Errorf("resolve git repo for binding %d: %w", b.ID, err)
 	}
 
+	runner := workspacegit.NewRunner(repoPath)
+
+	// Determine the base branch for the new worktree.
+	baseBranch := DefaultBranchFromBinding(b)
+	if baseBranch == "" {
+		baseBranch = workspacegit.DetectDefaultBranch(repoPath)
+	}
+
+	// Determine the start point for the new worktree branch.
+	//
+	// Priority order:
+	//   1. origin/{baseBranch} (after fetch) — latest remote state
+	//   2. local {baseBranch}                — if no remote or fetch failed
+	//   3. HEAD                              — last resort
+	//
+	// Warnings are collected and stored in workspace metadata so the UI
+	// can surface them to the user (e.g. "fetch failed, using local base").
+	var warnings []string
+	startPoint := ""
+	remoteRef := "origin/" + baseBranch
+
+	if runner.HasRemote("origin") {
+		if fetchErr := runner.Fetch("origin"); fetchErr != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"无法从远端拉取最新代码 (git fetch origin): %v。工作区将基于本地缓存的版本创建。",
+				fetchErr,
+			))
+		}
+
+		if runner.RefExists(remoteRef) {
+			startPoint = remoteRef
+		} else {
+			warnings = append(warnings, fmt.Sprintf(
+				"远端分支 %s 不存在，将使用本地分支 %s 作为起点。",
+				remoteRef, baseBranch,
+			))
+		}
+	} else {
+		// Pure local repo — no remote configured.
+		warnings = append(warnings, "该仓库没有配置远端 (origin)，工作区将基于本地分支创建。")
+	}
+
+	// Fall back to local base branch if remote ref not available.
+	if startPoint == "" && runner.RefExists(baseBranch) {
+		startPoint = baseBranch
+	}
+	// If even the local base branch doesn't exist, startPoint stays "" and
+	// WorktreeAdd will create the branch from the current HEAD.
+
 	branchName := fmt.Sprintf("ai-flow/issue-%d", issueID)
 	worktreePath := filepath.Join(repoPath, ".worktrees", fmt.Sprintf("issue-%d", issueID))
 
-	runner := workspacegit.NewRunner(repoPath)
-	if err := runner.WorktreeAdd(worktreePath, branchName); err != nil {
+	if err := runner.WorktreeAdd(worktreePath, branchName, startPoint); err != nil {
 		return nil, fmt.Errorf("create worktree for issue %d: %w", issueID, err)
-	}
-
-	defaultBranch := DefaultBranchFromBinding(b)
-	if defaultBranch == "" {
-		defaultBranch = workspacegit.DetectDefaultBranch(repoPath)
 	}
 
 	metadata := map[string]any{
 		"binding_id":     b.ID,
 		"kind":           core.ResourceKindGit,
 		"branch":         branchName,
-		"default_branch": defaultBranch,
+		"default_branch": baseBranch,
 		"repo_path":      repoPath,
+	}
+	if len(warnings) > 0 {
+		metadata["warnings"] = warnings
 	}
 	MergeSCMBindingMetadata(metadata, b.Config)
 

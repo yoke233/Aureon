@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -183,13 +184,9 @@ func (h *Handler) getWorkItemAttachment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	rb, err := h.store.GetResourceBinding(r.Context(), attID)
+	rb, err := h.loadAttachmentBinding(r.Context(), attID)
 	if err != nil {
-		if err == core.ErrNotFound {
-			writeError(w, http.StatusNotFound, "attachment not found", "NOT_FOUND")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		writeAttachmentLookupError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toAttachmentResponse(rb))
@@ -202,13 +199,9 @@ func (h *Handler) downloadWorkItemAttachment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	rb, err := h.store.GetResourceBinding(r.Context(), attID)
+	rb, err := h.loadAttachmentBinding(r.Context(), attID)
 	if err != nil {
-		if err == core.ErrNotFound {
-			writeError(w, http.StatusNotFound, "attachment not found", "NOT_FOUND")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		writeAttachmentLookupError(w, err)
 		return
 	}
 
@@ -231,13 +224,9 @@ func (h *Handler) deleteWorkItemAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	rb, err := h.store.GetResourceBinding(r.Context(), attID)
+	rb, err := h.loadAttachmentBinding(r.Context(), attID)
 	if err != nil {
-		if err == core.ErrNotFound {
-			writeError(w, http.StatusNotFound, "attachment not found", "NOT_FOUND")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		writeAttachmentLookupError(w, err)
 		return
 	}
 
@@ -263,4 +252,23 @@ func sanitizeFileName(name string) string {
 		name = "file"
 	}
 	return name
+}
+
+func (h *Handler) loadAttachmentBinding(ctx context.Context, attachmentID int64) (*core.ResourceBinding, error) {
+	rb, err := h.store.GetResourceBinding(ctx, attachmentID)
+	if err != nil {
+		return nil, err
+	}
+	if rb == nil || rb.Kind != core.ResourceKindAttachment {
+		return nil, core.ErrNotFound
+	}
+	return rb, nil
+}
+
+func writeAttachmentLookupError(w http.ResponseWriter, err error) {
+	if err == core.ErrNotFound {
+		writeError(w, http.StatusNotFound, "attachment not found", "NOT_FOUND")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
 }

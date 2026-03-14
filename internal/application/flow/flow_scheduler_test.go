@@ -161,7 +161,13 @@ func TestWorkItemScheduler_CancelRunning(t *testing.T) {
 	bus := NewMemBus()
 
 	var cancelledByCtx atomic.Bool
+	started := make(chan struct{})
 	executor := func(ctx context.Context, action *core.Action, run *core.Run) error {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
 		<-ctx.Done()
 		cancelledByCtx.Store(true)
 		return ctx.Err()
@@ -180,6 +186,14 @@ func TestWorkItemScheduler_CancelRunning(t *testing.T) {
 
 	// Wait until running.
 	waitFor(t, func() bool { return sched.RunningCount() == 1 }, 2*time.Second)
+	waitFor(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second)
 
 	// Cancel the running work item.
 	if err := sched.Cancel(ctx, workItemID); err != nil {

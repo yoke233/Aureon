@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -70,13 +72,20 @@ func (h *Handler) triggerInspection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ProjectID  *int64 `json:"project_id,omitempty"`
-		LookbackH  int    `json:"lookback_hours,omitempty"`
+		ProjectID *int64 `json:"project_id,omitempty"`
+		LookbackH int    `json:"lookback_hours,omitempty"`
 	}
 	if r.Body != nil {
 		defer r.Body.Close()
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if errors.Is(err, io.EOF) {
+				goto runInspection
+			}
+			writeError(w, http.StatusBadRequest, "invalid JSON body", "BAD_REQUEST")
+			return
+		}
 	}
+runInspection:
 	if req.LookbackH <= 0 {
 		req.LookbackH = 24
 	}

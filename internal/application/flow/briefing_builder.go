@@ -36,9 +36,9 @@ type ContextRef struct {
 // DefaultInputBuilder assembles input text by reading upstream Deliverables
 // and action configuration.
 type DefaultInputBuilder struct {
-	store     Store
-	registry  core.AgentRegistry // optional: for skills resolution
-	skillsRoot string            // optional: on-disk skills directory
+	store      Store
+	registry   core.AgentRegistry // optional: for skills resolution
+	skillsRoot string             // optional: on-disk skills directory
 }
 
 // InputBuilderOption configures the DefaultInputBuilder.
@@ -127,7 +127,7 @@ func logContextRefs(action *core.Action, refs []ContextRef, finalLen int) {
 
 // buildInputFromRefs constructs the input string from objective, context refs and constraints.
 func buildInputFromRefs(action *core.Action, refs []ContextRef, constraints []string) string {
-	objective := buildObjective(action)
+	objective := truncateText(buildObjective(action), maxInputTotalChars)
 	var sb strings.Builder
 	sb.WriteString(objective)
 
@@ -189,7 +189,7 @@ func buildInputFromRefs(action *core.Action, refs []ContextRef, constraints []st
 		}
 	}
 
-	return strings.TrimSpace(sb.String())
+	return truncateText(strings.TrimSpace(sb.String()), maxInputTotalChars)
 }
 
 // injectWorkItemContext adds the parent WorkItem title and body as a CtxIssueSummary reference.

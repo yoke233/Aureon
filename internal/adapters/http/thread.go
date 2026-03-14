@@ -681,7 +681,7 @@ func (h *Handler) listThreadAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	agents := make([]*core.ThreadMember, 0)
 	for _, m := range allMembers {
-		if m != nil && m.Kind == core.ThreadMemberKindAgent {
+		if m != nil && m.Kind == core.ThreadMemberKindAgent && m.Status != core.ThreadAgentLeft {
 			agents = append(agents, m)
 		}
 	}
@@ -728,8 +728,9 @@ func (h *Handler) removeThreadAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fallback: pure DB delete.
-	if err := h.store.RemoveThreadMember(r.Context(), agentSessionID); err != nil {
+	// Fallback: preserve the participant snapshot and mark the session as left.
+	member.Status = core.ThreadAgentLeft
+	if err := h.store.UpdateThreadMember(r.Context(), member); err != nil {
 		if err == core.ErrNotFound {
 			writeError(w, http.StatusNotFound, "agent session not found", "AGENT_SESSION_NOT_FOUND")
 			return

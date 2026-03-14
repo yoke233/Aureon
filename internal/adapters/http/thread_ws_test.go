@@ -62,6 +62,46 @@ func (s *stubThreadAgentRuntime) ActiveAgentProfileIDs(threadID int64) []string 
 	return out
 }
 
+type stubThreadAgentRegistry struct {
+	profiles map[string]*core.AgentProfile
+}
+
+func (s *stubThreadAgentRegistry) GetProfile(_ context.Context, id string) (*core.AgentProfile, error) {
+	return s.ResolveByID(context.Background(), id)
+}
+
+func (s *stubThreadAgentRegistry) ListProfiles(_ context.Context) ([]*core.AgentProfile, error) {
+	out := make([]*core.AgentProfile, 0, len(s.profiles))
+	for _, profile := range s.profiles {
+		out = append(out, profile)
+	}
+	return out, nil
+}
+
+func (s *stubThreadAgentRegistry) CreateProfile(context.Context, *core.AgentProfile) error {
+	return nil
+}
+
+func (s *stubThreadAgentRegistry) UpdateProfile(context.Context, *core.AgentProfile) error {
+	return nil
+}
+
+func (s *stubThreadAgentRegistry) DeleteProfile(context.Context, string) error {
+	return nil
+}
+
+func (s *stubThreadAgentRegistry) ResolveForAction(context.Context, *core.Action) (*core.AgentProfile, error) {
+	return nil, core.ErrProfileNotFound
+}
+
+func (s *stubThreadAgentRegistry) ResolveByID(_ context.Context, id string) (*core.AgentProfile, error) {
+	profile, ok := s.profiles[id]
+	if !ok {
+		return nil, core.ErrProfileNotFound
+	}
+	return profile, nil
+}
+
 func TestAPI_WebSocket_ThreadSend(t *testing.T) {
 	_, ts := setupAPI(t)
 
@@ -310,6 +350,94 @@ func TestAPI_WebSocket_ThreadSend_BroadcastModeRoutesToAllActiveAgents(t *testin
 	time.Sleep(100 * time.Millisecond)
 	if len(threadPool.sendCalls) != 2 {
 		t.Fatalf("send calls = %d, want 2 in broadcast mode", len(threadPool.sendCalls))
+	}
+}
+
+func TestAPI_WebSocket_ThreadSend_AutoModeRoutesToBestMatchingAgent(t *testing.T) {
+	h, ts := setupAPI(t)
+	threadPool := &stubThreadAgentRuntime{activeProfileIDs: []string{"worker-a", "worker-b"}}
+	h.threadPool = threadPool
+	h.registry = &stubThreadAgentRegistry{
+		profiles: map[string]*core.AgentProfile{
+			"worker-a": {
+				ID:           "worker-a",
+				Name:         "frontend specialist",
+				Capabilities: []string{"react", "ui"},
+				Skills:       []string{"tailwind"},
+				Role:         "worker",
+			},
+			"worker-b": {
+				ID:           "worker-b",
+				Name:         "backend specialist",
+				Capabilities: []string{"go", "api"},
+				Skills:       []string{"sql"},
+				Role:         "worker",
+			},
+		},
+	}
+
+	resp, err := post(ts, "/threads", map[string]any{
+		"title": "ws-auto-thread",
+		"metadata": map[string]any{
+			"agent_routing_mode": "auto",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	var thread core.Thread
+	if err := decodeJSON(resp, &thread); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	wsURL := "ws" + ts.URL[4:] + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"type": "thread.send",
+		"data": map[string]any{
+			"request_id": "req-auto",
+			"thread_id":  thread.ID,
+			"message":    "请负责 react 和 ui 的同学看一下这个页面",
+			"sender_id":  "user-1",
+		},
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var ack struct {
+		Type string `json:"type"`
+	}
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if ack.Type != "thread.ack" {
+		t.Fatalf("ack type = %q, want thread.ack", ack.Type)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if len(threadPool.sendCalls) != 1 {
+		t.Fatalf("send calls = %d, want 1", len(threadPool.sendCalls))
+	}
+	if threadPool.sendCalls[0].profileID != "worker-a" {
+		t.Fatalf("profile_id = %q, want worker-a", threadPool.sendCalls[0].profileID)
+	}
+
+	msgs, err := h.store.ListThreadMessages(context.Background(), thread.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want 1", len(msgs))
+	}
+	autoRoutedTo, ok := msgs[0].Metadata["auto_routed_to"].([]any)
+	if !ok || len(autoRoutedTo) != 1 || autoRoutedTo[0] != "worker-a" {
+		t.Fatalf("message metadata auto_routed_to = %#v, want [worker-a]", msgs[0].Metadata["auto_routed_to"])
 	}
 }
 

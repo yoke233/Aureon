@@ -144,13 +144,27 @@ func (r *ConfigRegistry) Resolve(ctx context.Context, action *core.Action) (stri
 // the driver's max. Must be called with mu held.
 func (r *ConfigRegistry) validateProfileLocked(p *core.AgentProfile) error {
 	profileCaps := p.EffectiveCapabilities()
-	if !p.Driver.CapabilitiesMax.Covers(profileCaps) {
+	if driverCapabilitiesConfigured(p) && !p.Driver.CapabilitiesMax.Covers(profileCaps) {
 		return fmt.Errorf("%w: profile %q exceeds driver capabilities_max", core.ErrCapabilityOverflow, p.ID)
 	}
 	if err := skillset.ValidateProfileSkills(p.Skills); err != nil {
 		return err
 	}
 	return nil
+}
+
+func driverCapabilitiesConfigured(p *core.AgentProfile) bool {
+	if p == nil {
+		return false
+	}
+	if p.Driver.LaunchCommand != "" {
+		return true
+	}
+	if len(p.Driver.LaunchArgs) > 0 || len(p.Driver.Env) > 0 {
+		return true
+	}
+	max := p.Driver.CapabilitiesMax
+	return max.FSRead || max.FSWrite || max.Terminal
 }
 
 // ---------- clone helpers ----------

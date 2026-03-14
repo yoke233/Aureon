@@ -41,9 +41,10 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 	}
 
 	filter := core.EventFilter{
-		RunID:  &execID,
-		Limit:  queryInt(r, "limit", 500),
-		Offset: queryInt(r, "offset", 0),
+		RunID:    &execID,
+		Category: core.EventCategoryDomain,
+		Limit:    queryInt(r, "limit", 500),
+		Offset:   queryInt(r, "offset", 0),
 	}
 	events, err := h.store.ListEvents(r.Context(), filter)
 	if err != nil {
@@ -133,6 +134,9 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 	}
 	for _, signal := range signals {
 		if signal == nil || signal.RunID != execID {
+			continue
+		}
+		if signal.Type == core.SignalProbeRequest || signal.Type == core.SignalProbeResponse {
 			continue
 		}
 		items = append(items, executionAuditTimelineRow{

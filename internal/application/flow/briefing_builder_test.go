@@ -16,8 +16,8 @@ import (
 type stubInputStore struct {
 	panicStore
 	workItems map[int64]*core.WorkItem
-	actions   map[int64][]*core.Action          // keyed by WorkItemID
-	runs      map[int64]*core.Run               // keyed by ActionID (latest run with result)
+	actions   map[int64][]*core.Action // keyed by WorkItemID
+	runs      map[int64]*core.Run      // keyed by ActionID (latest run with result)
 	projects  map[int64]*core.Project
 	bindings  map[int64][]*core.ResourceBinding // keyed by ProjectID
 }
@@ -89,10 +89,30 @@ func (panicStore) CreateResourceBinding(context.Context, *core.ResourceBinding) 
 func (panicStore) GetResourceBinding(context.Context, int64) (*core.ResourceBinding, error) {
 	panic("not implemented")
 }
+func (panicStore) ListResourceBindingsByIssue(context.Context, int64, string) ([]*core.ResourceBinding, error) {
+	panic("not implemented")
+}
 func (panicStore) ListResourceBindings(context.Context, int64) ([]*core.ResourceBinding, error) {
 	panic("not implemented")
 }
+func (panicStore) UpdateResourceBinding(context.Context, *core.ResourceBinding) error {
+	panic("not implemented")
+}
 func (panicStore) DeleteResourceBinding(context.Context, int64) error { panic("not implemented") }
+
+func (panicStore) CreateActionResource(context.Context, *core.ActionResource) (int64, error) {
+	panic("not implemented")
+}
+func (panicStore) GetActionResource(context.Context, int64) (*core.ActionResource, error) {
+	panic("not implemented")
+}
+func (panicStore) ListActionResources(context.Context, int64) ([]*core.ActionResource, error) {
+	panic("not implemented")
+}
+func (panicStore) ListActionResourcesByDirection(context.Context, int64, core.ActionResourceDirection) ([]*core.ActionResource, error) {
+	panic("not implemented")
+}
+func (panicStore) DeleteActionResource(context.Context, int64) error { panic("not implemented") }
 
 func (panicStore) CreateWorkItem(context.Context, *core.WorkItem) (int64, error) {
 	panic("not implemented")
@@ -126,10 +146,12 @@ func (panicStore) ListActionsByWorkItem(context.Context, int64) ([]*core.Action,
 func (panicStore) UpdateActionStatus(context.Context, int64, core.ActionStatus) error {
 	panic("not implemented")
 }
-func (panicStore) UpdateAction(context.Context, *core.Action) error { panic("not implemented") }
-func (panicStore) DeleteAction(context.Context, int64) error                   { panic("not implemented") }
-func (panicStore) BatchCreateActions(context.Context, []*core.Action) error    { panic("not implemented") }
-func (panicStore) UpdateActionDependsOn(context.Context, int64, []int64) error { panic("not implemented") }
+func (panicStore) UpdateAction(context.Context, *core.Action) error         { panic("not implemented") }
+func (panicStore) DeleteAction(context.Context, int64) error                { panic("not implemented") }
+func (panicStore) BatchCreateActions(context.Context, []*core.Action) error { panic("not implemented") }
+func (panicStore) UpdateActionDependsOn(context.Context, int64, []int64) error {
+	panic("not implemented")
+}
 
 func (panicStore) CreateRun(context.Context, *core.Run) (int64, error) {
 	panic("not implemented")
@@ -193,6 +215,21 @@ func (panicStore) ListPendingHumanActions(context.Context, int64) ([]*core.Actio
 	panic("not implemented")
 }
 func (panicStore) ListAllPendingHumanActions(context.Context) ([]*core.Action, error) {
+	panic("not implemented")
+}
+func (panicStore) ListProbeSignalsByRun(context.Context, int64) ([]*core.ActionSignal, error) {
+	panic("not implemented")
+}
+func (panicStore) GetLatestProbeSignal(context.Context, int64) (*core.ActionSignal, error) {
+	panic("not implemented")
+}
+func (panicStore) GetActiveProbeSignal(context.Context, int64) (*core.ActionSignal, error) {
+	panic("not implemented")
+}
+func (panicStore) UpdateProbeSignal(context.Context, *core.ActionSignal) error {
+	panic("not implemented")
+}
+func (panicStore) GetRunProbeRoute(context.Context, int64) (*core.RunProbeRoute, error) {
 	panic("not implemented")
 }
 
@@ -590,7 +627,7 @@ func (r *stubRegistry) ListProfiles(_ context.Context) ([]*core.AgentProfile, er
 }
 func (r *stubRegistry) CreateProfile(_ context.Context, _ *core.AgentProfile) error { return nil }
 func (r *stubRegistry) UpdateProfile(_ context.Context, _ *core.AgentProfile) error { return nil }
-func (r *stubRegistry) DeleteProfile(_ context.Context, _ string) error              { return nil }
+func (r *stubRegistry) DeleteProfile(_ context.Context, _ string) error             { return nil }
 func (r *stubRegistry) ResolveForAction(_ context.Context, action *core.Action) (*core.AgentProfile, error) {
 	role := strings.TrimSpace(action.AgentRole)
 	for _, p := range r.profiles {

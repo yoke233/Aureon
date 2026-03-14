@@ -80,7 +80,7 @@ func (h *Handler) activeThreadAgentParticipantIDs(ctx context.Context, threadID 
 		if m == nil {
 			continue
 		}
-		if m.Kind == core.ThreadMemberKindAgent || strings.EqualFold(strings.TrimSpace(m.Role), core.ThreadMemberKindAgent) {
+		if (m.Kind == core.ThreadMemberKindAgent || strings.EqualFold(strings.TrimSpace(m.Role), core.ThreadMemberKindAgent)) && threadAgentSessionIsActive(m.Status) {
 			active[m.UserID] = true
 		}
 	}
@@ -126,7 +126,7 @@ func (h *Handler) validateReplyToThreadMessage(ctx context.Context, threadID int
 	return &threadMessageAPIError{Code: "REPLY_TO_NOT_FOUND", Message: "reply_to_msg_id not found"}
 }
 
-func (h *Handler) resolveThreadMessageRecipients(ctx context.Context, thread *core.Thread, targetAgentID string) ([]string, error) {
+func (h *Handler) resolveThreadMessageRecipients(ctx context.Context, thread *core.Thread, message string, targetAgentID string) ([]string, error) {
 	targetAgentID = strings.TrimSpace(targetAgentID)
 	if h.threadPool == nil {
 		if targetAgentID != "" {
@@ -161,7 +161,7 @@ func (h *Handler) resolveThreadMessageRecipients(ctx context.Context, thread *co
 
 	if routingMode == "auto" {
 		// Auto-routing: match message content against agent capabilities/name/role.
-		matched := h.autoRouteMessage(ctx, strings.TrimSpace(targetAgentID), activeProfileIDs, agentParticipants, useParticipantFilter)
+		matched := h.autoRouteMessage(ctx, strings.TrimSpace(message), activeProfileIDs, agentParticipants, useParticipantFilter)
 		if len(matched) > 0 {
 			return matched, nil
 		}
@@ -288,7 +288,7 @@ func (h *Handler) createThreadMessageAndRoute(ctx context.Context, input threadM
 
 	var recipients []string
 	if role == "human" {
-		recipients, err = h.resolveThreadMessageRecipients(ctx, thread, input.TargetAgentID)
+		recipients, err = h.resolveThreadMessageRecipients(ctx, thread, content, input.TargetAgentID)
 		if err != nil {
 			return nil, nil, err
 		}

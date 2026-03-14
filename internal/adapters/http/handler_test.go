@@ -21,6 +21,7 @@ import (
 	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
 	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
 	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
+	inspectionapp "github.com/yoke233/ai-workflow/internal/application/inspection"
 	"github.com/yoke233/ai-workflow/internal/audit"
 	"github.com/yoke233/ai-workflow/internal/core"
 	"github.com/yoke233/ai-workflow/internal/platform/config"
@@ -665,6 +666,76 @@ func TestAPI_CreateIssue_DoesNotAutoBootstrapWithoutEnabledSCMFlow(t *testing.T)
 	}
 	if len(steps) != 0 {
 		t.Fatalf("expected 0 auto-bootstrapped steps, got %d", len(steps))
+	}
+}
+
+func TestAPI_AttachmentRoutesRejectNonAttachmentBindings(t *testing.T) {
+	_, ts := setupAPI(t)
+
+	projectResp, err := post(ts, "/projects", map[string]any{
+		"name": "attachment-safety-project",
+	})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	var project core.Project
+	if err := decodeJSON(projectResp, &project); err != nil {
+		t.Fatalf("decode project: %v", err)
+	}
+
+	resourceResp, err := post(ts, fmt.Sprintf("/projects/%d/resources", project.ID), map[string]any{
+		"kind":  "local_fs",
+		"uri":   t.TempDir(),
+		"label": "workspace",
+	})
+	if err != nil {
+		t.Fatalf("create resource: %v", err)
+	}
+	if resourceResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 creating resource, got %d", resourceResp.StatusCode)
+	}
+	var binding core.ResourceBinding
+	if err := decodeJSON(resourceResp, &binding); err != nil {
+		t.Fatalf("decode resource: %v", err)
+	}
+
+	resp, err := get(ts, fmt.Sprintf("/attachments/%d", binding.ID))
+	if err != nil {
+		t.Fatalf("get attachment: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for non-attachment binding, got %d", resp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+fmt.Sprintf("/attachments/%d", binding.ID), nil)
+	if err != nil {
+		t.Fatalf("build delete request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("delete attachment: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 deleting non-attachment binding, got %d", resp.StatusCode)
+	}
+}
+
+func TestAPI_TriggerInspectionRejectsInvalidJSON(t *testing.T) {
+	h, ts := setupAPI(t)
+	h.inspectionEngine = inspectionapp.New(h.store, h.bus)
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/inspections/trigger", bytes.NewBufferString("{"))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post inspection trigger: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON, got %d", resp.StatusCode)
 	}
 }
 

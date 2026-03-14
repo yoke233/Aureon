@@ -961,7 +961,6 @@ func TestIntegration_GenerateSteps_Unavailable(t *testing.T) {
 func TestIntegration_GateRejectReworkApprove(t *testing.T) {
 	var gateRuns int32
 	var execRuns int32
-	var store core.Store // captured by executor closure
 
 	executor := func(ctx context.Context, step *core.Action, exec *core.Run) error {
 		if step.Type == core.ActionGate {
@@ -985,7 +984,6 @@ func TestIntegration_GateRejectReworkApprove(t *testing.T) {
 	}
 
 	env := setupIntegration(t, executor)
-	store = env.store
 	ts := env.server
 
 	// 1. Create project.
@@ -1080,7 +1078,6 @@ func TestIntegration_GateRejectReworkApprove(t *testing.T) {
 
 func TestIntegration_GateReworkLimitBlocked(t *testing.T) {
 	var gateRuns int32
-	var store core.Store // captured by executor closure
 
 	executor := func(ctx context.Context, step *core.Action, exec *core.Run) error {
 		if step.Type == core.ActionGate {
@@ -1095,7 +1092,6 @@ func TestIntegration_GateReworkLimitBlocked(t *testing.T) {
 	}
 
 	env := setupIntegration(t, executor)
-	store = env.store
 	ts := env.server
 
 	// Create issue with exec → gate (max_rework_rounds=2).
@@ -1165,10 +1161,10 @@ func TestIntegration_GateSignalRejectThenApprove(t *testing.T) {
 					WorkItemID: step.WorkItemID,
 					RunID:      exec.ID,
 					Type:       core.SignalReject,
-					Source:    core.SignalSourceAgent,
-					Payload:   map[string]any{"reason": "no error handling in auth module"},
-					Actor:     "agent",
-					CreatedAt: time.Now().UTC(),
+					Source:     core.SignalSourceAgent,
+					Payload:    map[string]any{"reason": "no error handling in auth module"},
+					Actor:      "agent",
+					CreatedAt:  time.Now().UTC(),
 				})
 				return err
 			}
@@ -1179,9 +1175,9 @@ func TestIntegration_GateSignalRejectThenApprove(t *testing.T) {
 				RunID:      exec.ID,
 				Type:       core.SignalApprove,
 				Source:     core.SignalSourceAgent,
-				Payload:   map[string]any{"reason": "error handling added, LGTM"},
-				Actor:     "agent",
-				CreatedAt: time.Now().UTC(),
+				Payload:    map[string]any{"reason": "error handling added, LGTM"},
+				Actor:      "agent",
+				CreatedAt:  time.Now().UTC(),
 			})
 			return err
 		}
@@ -1277,9 +1273,9 @@ func TestIntegration_StepDecisionAPI(t *testing.T) {
 				RunID:      exec.ID,
 				Type:       core.SignalApprove,
 				Source:     core.SignalSourceHuman,
-				Payload:   map[string]any{"reason": "looks good to me"},
-				Actor:     "human",
-				CreatedAt: time.Now().UTC(),
+				Payload:    map[string]any{"reason": "looks good to me"},
+				Actor:      "human",
+				CreatedAt:  time.Now().UTC(),
 			})
 			return err
 		}

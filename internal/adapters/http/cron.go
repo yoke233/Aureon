@@ -15,11 +15,12 @@ type setupCronRequest struct {
 }
 
 type cronStatusResponse struct {
-	IssueID      int64  `json:"issue_id"`
-	Enabled      bool   `json:"enabled"`
-	IsTemplate   bool   `json:"is_template"`
-	Schedule     string `json:"schedule,omitempty"`
-	MaxInstances int    `json:"max_instances,omitempty"`
+	WorkItemID    int64  `json:"work_item_id"`
+	IssueID       int64  `json:"issue_id"`
+	Enabled       bool   `json:"enabled"`
+	IsTemplate    bool   `json:"is_template"`
+	Schedule      string `json:"schedule,omitempty"`
+	MaxInstances  int    `json:"max_instances,omitempty"`
 	LastTriggered string `json:"last_triggered,omitempty"`
 }
 
@@ -67,6 +68,7 @@ func (h *Handler) setupWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, cronStatusResponse{
+		WorkItemID:   issueID,
 		IssueID:      issueID,
 		Enabled:      true,
 		IsTemplate:   true,
@@ -113,6 +115,7 @@ func (h *Handler) disableWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, cronStatusResponse{
+		WorkItemID: issueID,
 		IssueID:    issueID,
 		Enabled:    false,
 		IsTemplate: metaTemplateID == "true",
@@ -138,7 +141,7 @@ func (h *Handler) getWorkItemCronStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	resp := cronStatusResponse{IssueID: issueID}
+	resp := cronStatusResponse{WorkItemID: issueID, IssueID: issueID}
 	if issue.Metadata != nil {
 		if v, ok := issue.Metadata[cronapp.MetaEnabled].(string); ok {
 			resp.Enabled = v == "true"
@@ -186,6 +189,7 @@ func (h *Handler) listCronWorkItems(w http.ResponseWriter, r *http.Request) {
 		metaLastTriggered, _ := iss.Metadata[cronapp.MetaLastTriggered].(string)
 
 		resp := cronStatusResponse{
+			WorkItemID:    iss.ID,
 			IssueID:       iss.ID,
 			Enabled:       metaEnabled == "true",
 			IsTemplate:    true,

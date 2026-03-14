@@ -19,6 +19,7 @@ import {
   ChevronsUpDown,
   Sparkles,
   Coins,
+  ShieldCheck,
   LogOut,
   Globe,
   PanelLeftClose,
@@ -42,6 +43,7 @@ const navSections = [
     items: [
       { to: "/templates", icon: FileStack, labelKey: "nav.templates" },
       { to: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
+      { to: "/inspections", icon: ShieldCheck, labelKey: "nav.inspections" },
       { to: "/usage", icon: Coins, labelKey: "nav.usage" },
       { to: "/projects", icon: FolderOpen, labelKey: "nav.projects" },
     ],

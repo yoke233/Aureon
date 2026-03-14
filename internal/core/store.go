@@ -92,6 +92,7 @@ type Store interface {
 	FeatureEntryStore
 	ActionSignalStore
 	NotificationStore
+	InspectionStore
 	Close() error
 }
 

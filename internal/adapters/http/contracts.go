@@ -24,6 +24,7 @@ type Store interface {
 	core.FeatureEntryStore
 	core.ActionSignalStore
 	core.NotificationStore
+	core.InspectionStore
 	Close() error
 }
 

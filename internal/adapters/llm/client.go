@@ -25,8 +25,14 @@ type ToolDef struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+const (
+	ProviderOpenAIResponse       = "openai_response"
+	ProviderOpenAIChatCompletion = "openai_chat_completion"
+)
+
 // Config configures the LLM client.
 type Config struct {
+	Provider   string
 	BaseURL    string
 	APIKey     string
 	Model      string
@@ -38,7 +44,8 @@ type Config struct {
 // Client is a reusable OpenAI-compatible LLM client.
 type Client struct {
 	client     openai.Client
-	model      shared.ResponsesModel
+	provider   string
+	model      string
 	maxRetries int
 	minBackoff time.Duration
 	maxBackoff time.Duration
@@ -51,6 +58,10 @@ func New(cfg Config) (*Client, error) {
 	}
 	if strings.TrimSpace(cfg.Model) == "" {
 		return nil, fmt.Errorf("llm: model is required")
+	}
+	provider := normalizeProvider(cfg.Provider)
+	if provider == "" {
+		return nil, fmt.Errorf("llm: unsupported provider %q", strings.TrimSpace(cfg.Provider))
 	}
 
 	opts := []option.RequestOption{option.WithAPIKey(cfg.APIKey)}
@@ -69,7 +80,8 @@ func New(cfg Config) (*Client, error) {
 
 	return &Client{
 		client:     openai.NewClient(opts...),
-		model:      shared.ResponsesModel(strings.TrimSpace(cfg.Model)),
+		provider:   provider,
+		model:      strings.TrimSpace(cfg.Model),
 		maxRetries: max(0, cfg.MaxRetries),
 		minBackoff: minBackoff,
 		maxBackoff: maxBackoff,
@@ -104,27 +116,55 @@ func (c *Client) Complete(ctx context.Context, prompt string, tools []ToolDef) (
 	}
 
 	return c.doWithRetry(ctx, func(ctx context.Context) (string, error) {
-		resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
-			Model: c.model,
-			Input: responses.ResponseNewParamsInputUnion{
-				OfString: openai.String(prompt),
-			},
-			Temperature: openai.Float(0),
-			Text: responses.ResponseTextConfigParam{
-				Format: responses.ResponseFormatTextConfigUnionParam{
-					OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-						Name:        name,
-						Schema:      schema,
-						Strict:      openai.Bool(true),
-						Description: openai.String(strings.TrimSpace(tool.Description)),
+		switch c.provider {
+		case ProviderOpenAIChatCompletion:
+			resp, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+				Model: shared.ChatModel(c.model),
+				Messages: []openai.ChatCompletionMessageParamUnion{
+					openai.UserMessage(prompt),
+				},
+				Temperature: openai.Float(0),
+				ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+					OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{
+						JSONSchema: shared.ResponseFormatJSONSchemaJSONSchemaParam{
+							Name:        name,
+							Schema:      schema,
+							Strict:      openai.Bool(true),
+							Description: openai.String(strings.TrimSpace(tool.Description)),
+						},
 					},
 				},
-			},
-		})
-		if err != nil {
-			return "", err
+			})
+			if err != nil {
+				return "", err
+			}
+			if len(resp.Choices) == 0 {
+				return "", fmt.Errorf("llm: chat completion returned zero choices")
+			}
+			return resp.Choices[0].Message.Content, nil
+		default:
+			resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
+				Model: shared.ResponsesModel(c.model),
+				Input: responses.ResponseNewParamsInputUnion{
+					OfString: openai.String(prompt),
+				},
+				Temperature: openai.Float(0),
+				Text: responses.ResponseTextConfigParam{
+					Format: responses.ResponseFormatTextConfigUnionParam{
+						OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
+							Name:        name,
+							Schema:      schema,
+							Strict:      openai.Bool(true),
+							Description: openai.String(strings.TrimSpace(tool.Description)),
+						},
+					},
+				},
+			})
+			if err != nil {
+				return "", err
+			}
+			return resp.OutputText(), nil
 		}
-		return resp.OutputText(), nil
 	})
 }
 
@@ -138,23 +178,41 @@ func (c *Client) CompleteText(ctx context.Context, prompt string) (string, error
 		return "", fmt.Errorf("llm: prompt is empty")
 	}
 
-	raw, err := c.doWithRetry(ctx, func(ctx context.Context) (string, error) {
-		resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
-			Model: c.model,
-			Input: responses.ResponseNewParamsInputUnion{
-				OfString: openai.String(prompt),
-			},
-			Temperature: openai.Float(0),
-		})
-		if err != nil {
-			return "", err
+	raw, err := c.doTextWithRetry(ctx, func(ctx context.Context) (string, error) {
+		switch c.provider {
+		case ProviderOpenAIChatCompletion:
+			resp, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+				Model: shared.ChatModel(c.model),
+				Messages: []openai.ChatCompletionMessageParamUnion{
+					openai.UserMessage(prompt),
+				},
+				Temperature: openai.Float(0),
+			})
+			if err != nil {
+				return "", err
+			}
+			if len(resp.Choices) == 0 {
+				return "", fmt.Errorf("llm: chat completion returned zero choices")
+			}
+			return resp.Choices[0].Message.Content, nil
+		default:
+			resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
+				Model: shared.ResponsesModel(c.model),
+				Input: responses.ResponseNewParamsInputUnion{
+					OfString: openai.String(prompt),
+				},
+				Temperature: openai.Float(0),
+			})
+			if err != nil {
+				return "", err
+			}
+			return resp.OutputText(), nil
 		}
-		return resp.OutputText(), nil
 	})
 	if err != nil {
 		return "", err
 	}
-	return string(raw), nil
+	return raw, nil
 }
 
 // doWithRetry runs fn with exponential backoff retries.
@@ -191,6 +249,36 @@ func (c *Client) doWithRetry(ctx context.Context, fn func(ctx context.Context) (
 		sleepBackoff(ctx, backoffDelay(attempt, c.minBackoff, c.maxBackoff))
 	}
 	return nil, fmt.Errorf("llm: failed after %d attempt(s): %w", maxAttempts, lastErr)
+}
+
+func (c *Client) doTextWithRetry(ctx context.Context, fn func(ctx context.Context) (string, error)) (string, error) {
+	maxAttempts := c.maxRetries + 1
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		out, err := fn(ctx)
+		if err == nil {
+			out = strings.TrimSpace(out)
+			out = StripCodeFences(out)
+			if out == "" {
+				lastErr = fmt.Errorf("llm: returned empty output")
+			} else {
+				return out, nil
+			}
+		} else {
+			lastErr = err
+		}
+
+		if attempt == maxAttempts || !IsRetryable(lastErr) {
+			break
+		}
+		sleepBackoff(ctx, backoffDelay(attempt, c.minBackoff, c.maxBackoff))
+	}
+	return "", fmt.Errorf("llm: failed after %d attempt(s): %w", maxAttempts, lastErr)
 }
 
 // IsRetryable returns true for errors worth retrying (network, 429, 5xx).
@@ -258,4 +346,15 @@ func cloneMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func normalizeProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", ProviderOpenAIResponse:
+		return ProviderOpenAIResponse
+	case ProviderOpenAIChatCompletion:
+		return ProviderOpenAIChatCompletion
+	default:
+		return ""
+	}
 }

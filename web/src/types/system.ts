@@ -22,8 +22,8 @@ export interface UpdateSandboxSupportRequest {
 export interface LLMConfigItem {
   id: string;
   type: "openai_chat_completion" | "openai_response" | "anthropic";
-  base_url: string;
-  api_key: string;
+  base_url?: string;
+  api_key?: string;
   model: string;
 }
 

@@ -2,6 +2,55 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "AuditConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "fallback_dir": {
+          "type": "string"
+        },
+        "retention_days": {
+          "type": "integer"
+        },
+        "redaction_level": {
+          "type": "string"
+        },
+        "otlp": {
+          "$ref": "#/$defs/AuditOTLPConfig"
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled",
+        "fallback_dir",
+        "retention_days",
+        "redaction_level",
+        "otlp"
+      ]
+    },
+    "AuditOTLPConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled",
+        "endpoint",
+        "headers"
+      ]
+    },
     "CapabilitiesConfig": {
       "properties": {
         "fs_read": {
@@ -47,6 +96,9 @@
         "log": {
           "$ref": "#/$defs/LogConfig"
         },
+        "audit": {
+          "$ref": "#/$defs/AuditConfig"
+        },
         "llm_filter": {
           "$ref": "#/$defs/LLMFilterConfig"
         },
@@ -63,6 +115,7 @@
         "store",
         "context",
         "log",
+        "audit",
         "llm_filter",
         "runtime"
       ]
@@ -371,15 +424,11 @@
       "properties": {
         "max_retries": {
           "type": "integer"
-        },
-        "openai": {
-          "$ref": "#/$defs/RuntimeOpenAIConfig"
         }
       },
       "type": "object",
       "required": [
-        "max_retries",
-        "openai"
+        "max_retries"
       ]
     },
     "RuntimeConfig": {
@@ -420,6 +469,9 @@
         },
         "cron": {
           "$ref": "#/$defs/RuntimeCronConfig"
+        },
+        "inspection": {
+          "$ref": "#/$defs/RuntimeInspectionConfig"
         }
       },
       "type": "object",
@@ -433,7 +485,8 @@
         "prompts",
         "session_manager",
         "execution_probe",
-        "cron"
+        "cron",
+        "inspection"
       ]
     },
     "RuntimeCronConfig": {
@@ -601,6 +654,31 @@
         "idle_after",
         "timeout",
         "max_attempts"
+      ]
+    },
+    "RuntimeInspectionConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string",
+          "examples": [
+            "2h",
+            "30m",
+            "10s",
+            "500ms"
+          ]
+        },
+        "lookback_hours": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled",
+        "interval",
+        "lookback_hours"
       ]
     },
     "RuntimeLLMConfig": {
@@ -809,25 +887,6 @@
         "embedded",
         "embedded_data_dir",
         "stream_prefix"
-      ]
-    },
-    "RuntimeOpenAIConfig": {
-      "properties": {
-        "base_url": {
-          "type": "string"
-        },
-        "api_key": {
-          "type": "string"
-        },
-        "model": {
-          "type": "string"
-        }
-      },
-      "type": "object",
-      "required": [
-        "base_url",
-        "api_key",
-        "model"
       ]
     },
     "RuntimePRMergeStatePromptConfig": {

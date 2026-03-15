@@ -75,9 +75,9 @@ type RuntimeConfig struct {
 
 // RuntimeInspectionConfig configures the self-evolving inspection system.
 type RuntimeInspectionConfig struct {
-	Enabled    bool     `toml:"enabled"        yaml:"enabled" json:"enabled"`
-	Interval   Duration `toml:"interval"       yaml:"interval" json:"interval"`             // how often to run (default "24h")
-	LookbackH  int      `toml:"lookback_hours" yaml:"lookback_hours" json:"lookback_hours"` // hours of data to inspect (default 24)
+	Enabled   bool     `toml:"enabled"        yaml:"enabled" json:"enabled"`
+	Interval  Duration `toml:"interval"       yaml:"interval" json:"interval"`             // how often to run (default "24h")
+	LookbackH int      `toml:"lookback_hours" yaml:"lookback_hours" json:"lookback_hours"` // hours of data to inspect (default 24)
 }
 
 // RuntimeCronConfig configures the cron trigger for scheduled flows.
@@ -269,8 +269,7 @@ type RuntimeSessionConfig struct {
 type RuntimeCollectorConfig struct {
 	// MaxRetries controls how many additional attempts the collector makes
 	// for transient OpenAI API errors. 0 means no retry.
-	MaxRetries int                 `toml:"max_retries" yaml:"max_retries"`
-	OpenAI     RuntimeOpenAIConfig `toml:"openai"       yaml:"openai"`
+	MaxRetries int `toml:"max_retries" yaml:"max_retries"`
 }
 
 // RuntimeLLMConfig stores editable LLM provider endpoints in config.toml.
@@ -285,13 +284,6 @@ type RuntimeLLMEntryConfig struct {
 	BaseURL string `toml:"base_url" yaml:"base_url" json:"base_url"`
 	APIKey  string `toml:"api_key"  yaml:"api_key" json:"api_key"`
 	Model   string `toml:"model"    yaml:"model" json:"model"`
-}
-
-// RuntimeOpenAIConfig configures the OpenAI client used by the runtime collector.
-type RuntimeOpenAIConfig struct {
-	BaseURL string `toml:"base_url" yaml:"base_url"`
-	APIKey  string `toml:"api_key"  yaml:"api_key"`
-	Model   string `toml:"model"    yaml:"model"`
 }
 
 type RunConfig struct {
@@ -519,19 +511,12 @@ type RuntimeMCPLayer struct {
 }
 
 type RuntimeCollectorLayer struct {
-	MaxRetries *int                `toml:"max_retries" yaml:"max_retries"`
-	OpenAI     *RuntimeOpenAILayer `toml:"openai"      yaml:"openai"`
+	MaxRetries *int `toml:"max_retries" yaml:"max_retries"`
 }
 
 type RuntimeLLMLayer struct {
 	DefaultConfigID *string                  `toml:"default_config_id" yaml:"default_config_id"`
 	Configs         *[]RuntimeLLMEntryConfig `toml:"configs"           yaml:"configs"`
-}
-
-type RuntimeOpenAILayer struct {
-	BaseURL *string `toml:"base_url" yaml:"base_url"`
-	APIKey  *string `toml:"api_key"  yaml:"api_key"`
-	Model   *string `toml:"model"    yaml:"model"`
 }
 
 type RunLayer struct {

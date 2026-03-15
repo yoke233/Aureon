@@ -42,8 +42,6 @@ describe("LLMConfigPage", () => {
           {
             id: "openai-prod",
             type: "openai_response",
-            base_url: "https://api.example.com/v1",
-            api_key: "sk-prod",
             model: "gpt-4.1-mini",
           },
         ],
@@ -54,8 +52,6 @@ describe("LLMConfigPage", () => {
           {
             id: "llm-config-2",
             type: "anthropic",
-            base_url: "https://api.anthropic.com",
-            api_key: "sk-ant",
             model: "claude-3-7-sonnet-latest",
           },
         ],
@@ -79,9 +75,6 @@ describe("LLMConfigPage", () => {
     fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("配置 ID"), {
       target: { value: "claude-backup" },
     });
-    fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("BASE_URL"), {
-      target: { value: "https://api.anthropic.com" },
-    });
     fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("MODEL"), {
       target: { value: "claude-3-7-sonnet-latest" },
     });
@@ -100,8 +93,6 @@ describe("LLMConfigPage", () => {
           {
             id: "claude-backup",
             type: "anthropic",
-            base_url: "https://api.anthropic.com",
-            api_key: "",
             model: "claude-3-7-sonnet-latest",
           },
         ],

@@ -19,8 +19,6 @@ const PROVIDER_OPTIONS = [
 const EMPTY_ITEM = (index: number): LLMConfigItem => ({
   id: `llm-config-${index}`,
   type: "openai_response",
-  base_url: "",
-  api_key: "",
   model: "",
 });
 
@@ -181,12 +179,12 @@ export function LLMConfigPage() {
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-sm font-medium">{t("llmConfig.fieldBaseUrl")}</div>
-              <p className="mt-1 text-sm text-muted-foreground">{t("llmConfig.baseUrlHint")}</p>
+              <div className="text-sm font-medium">{t("llmConfig.fieldConfigId")}</div>
+              <p className="mt-1 text-sm text-muted-foreground">{t("llmConfig.configIdPlaceholder")}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-sm font-medium">{t("llmConfig.fieldApiKey")}</div>
-              <p className="mt-1 text-sm text-muted-foreground">{t("llmConfig.apiKeyHint")}</p>
+              <div className="text-sm font-medium">{t("llmConfig.fieldType")}</div>
+              <p className="mt-1 text-sm text-muted-foreground">{t("llmConfig.providerCardDesc")}</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="text-sm font-medium">{t("llmConfig.fieldModel")}</div>
@@ -221,7 +219,7 @@ export function LLMConfigPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
+              <CardContent className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
                 <label className="space-y-2 xl:col-span-1">
                   <span className="text-sm font-medium">{t("llmConfig.fieldConfigId")}</span>
                   <Input
@@ -237,24 +235,6 @@ export function LLMConfigPage() {
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </Select>
-                </label>
-                <label className="space-y-2 xl:col-span-1">
-                  <span className="text-sm font-medium">{t("llmConfig.fieldBaseUrl")}</span>
-                  <Input
-                    value={item.base_url}
-                    onChange={(event) => updateConfig(index, { base_url: event.target.value })}
-                    placeholder={t("llmConfig.baseUrlPlaceholder")}
-                  />
-                </label>
-                <label className="space-y-2 xl:col-span-1">
-                  <span className="text-sm font-medium">{t("llmConfig.fieldApiKey")}</span>
-                  <Input
-                    type="password"
-                    value={item.api_key}
-                    onChange={(event) => updateConfig(index, { api_key: event.target.value })}
-                    placeholder={t("llmConfig.apiKeyPlaceholder")}
-                    autoComplete="off"
-                  />
                 </label>
                 <label className="space-y-2 xl:col-span-1">
                   <span className="text-sm font-medium">{t("llmConfig.fieldModel")}</span>

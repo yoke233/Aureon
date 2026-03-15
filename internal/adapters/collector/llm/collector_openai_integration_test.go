@@ -1,9 +1,13 @@
+//go:build real
+// +build real
+
 package llm
 
 import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,15 +34,16 @@ func TestOpenAICollector_Real(t *testing.T) {
 		t.Fatalf("load config: %v", err)
 	}
 
-	ocfg := cfg.Runtime.Collector.OpenAI
-	if ocfg.APIKey == "" || ocfg.Model == "" {
-		t.Skip("runtime.collector.openai.api_key and model are required")
+	llmEntry, ok := pickCollectorLLMConfig(cfg.Runtime.LLM)
+	if !ok {
+		t.Skip("runtime.llm has no usable openai-compatible config")
 	}
 
 	completer, err := NewOpenAICompleter(OpenAICompleterConfig{
-		BaseURL:    ocfg.BaseURL,
-		APIKey:     ocfg.APIKey,
-		Model:      ocfg.Model,
+		Provider:   llmEntry.Type,
+		BaseURL:    llmEntry.BaseURL,
+		APIKey:     llmEntry.APIKey,
+		Model:      llmEntry.Model,
 		MaxRetries: cfg.Runtime.Collector.MaxRetries,
 	})
 	if err != nil {
@@ -94,4 +99,37 @@ func findRepoRoot(t *testing.T) (string, bool) {
 		dir = parent
 	}
 	return "", false
+}
+
+func pickCollectorLLMConfig(cfg config.RuntimeLLMConfig) (config.RuntimeLLMEntryConfig, bool) {
+	wantID := strings.TrimSpace(os.Getenv("AI_WORKFLOW_REAL_COLLECTOR_LLM_CONFIG_ID"))
+	if wantID == "" {
+		wantID = strings.TrimSpace(cfg.DefaultConfigID)
+	}
+	if wantID != "" {
+		for _, item := range cfg.Configs {
+			if strings.TrimSpace(item.ID) != wantID {
+				continue
+			}
+			if isCollectorLLMTypeSupported(item.Type) && strings.TrimSpace(item.APIKey) != "" && strings.TrimSpace(item.Model) != "" {
+				return item, true
+			}
+			return config.RuntimeLLMEntryConfig{}, false
+		}
+	}
+	for _, item := range cfg.Configs {
+		if isCollectorLLMTypeSupported(item.Type) && strings.TrimSpace(item.APIKey) != "" && strings.TrimSpace(item.Model) != "" {
+			return item, true
+		}
+	}
+	return config.RuntimeLLMEntryConfig{}, false
+}
+
+func isCollectorLLMTypeSupported(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", "openai_response", "openai_chat_completion":
+		return true
+	default:
+		return false
+	}
 }

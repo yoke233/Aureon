@@ -81,7 +81,7 @@ func (s RuntimeControlService) Update(ctx context.Context, req UpdateRequest) (R
 	next := normalizeConfig(current.LLM)
 
 	if req.Configs != nil {
-		next.Configs = cloneEntries(*req.Configs)
+		next.Configs = mergeEntries(next.Configs, *req.Configs)
 	}
 	if req.DefaultConfigID != nil {
 		next.DefaultConfigID = strings.TrimSpace(*req.DefaultConfigID)
@@ -112,7 +112,7 @@ func buildReport(cfg config.RuntimeLLMConfig) Report {
 	cfg = normalizeConfig(cfg)
 	return Report{
 		DefaultConfigID: cfg.DefaultConfigID,
-		Configs:         cloneEntries(cfg.Configs),
+		Configs:         publicEntries(cfg.Configs),
 	}
 }
 
@@ -125,6 +125,9 @@ func normalizeConfig(cfg config.RuntimeLLMConfig) config.RuntimeLLMConfig {
 		cfg.Configs[i].BaseURL = strings.TrimSpace(cfg.Configs[i].BaseURL)
 		cfg.Configs[i].APIKey = strings.TrimSpace(cfg.Configs[i].APIKey)
 		cfg.Configs[i].Model = strings.TrimSpace(cfg.Configs[i].Model)
+		if cfg.Configs[i].BaseURL == "" {
+			cfg.Configs[i].BaseURL = defaultBaseURLForProvider(cfg.Configs[i].Type)
+		}
 	}
 	if cfg.DefaultConfigID == "" && len(cfg.Configs) > 0 {
 		cfg.DefaultConfigID = cfg.Configs[0].ID
@@ -161,6 +164,61 @@ func cloneEntries(in []config.RuntimeLLMEntryConfig) []config.RuntimeLLMEntryCon
 	out := make([]config.RuntimeLLMEntryConfig, len(in))
 	copy(out, in)
 	return out
+}
+
+func mergeEntries(current []config.RuntimeLLMEntryConfig, incoming []config.RuntimeLLMEntryConfig) []config.RuntimeLLMEntryConfig {
+	current = normalizeConfig(config.RuntimeLLMConfig{Configs: current}).Configs
+	incoming = cloneEntries(incoming)
+
+	currentByID := make(map[string]config.RuntimeLLMEntryConfig, len(current))
+	for _, item := range current {
+		currentByID[item.ID] = item
+	}
+
+	for i := range incoming {
+		incoming[i].ID = strings.TrimSpace(incoming[i].ID)
+		incoming[i].Type = normalizeProviderType(incoming[i].Type)
+		incoming[i].BaseURL = strings.TrimSpace(incoming[i].BaseURL)
+		incoming[i].APIKey = strings.TrimSpace(incoming[i].APIKey)
+		incoming[i].Model = strings.TrimSpace(incoming[i].Model)
+
+		if existing, ok := currentByID[incoming[i].ID]; ok {
+			if incoming[i].BaseURL == "" {
+				incoming[i].BaseURL = existing.BaseURL
+			}
+			if incoming[i].APIKey == "" {
+				incoming[i].APIKey = existing.APIKey
+			}
+			if incoming[i].Model == "" {
+				incoming[i].Model = existing.Model
+			}
+		}
+		if incoming[i].BaseURL == "" {
+			incoming[i].BaseURL = defaultBaseURLForProvider(incoming[i].Type)
+		}
+	}
+
+	return incoming
+}
+
+func publicEntries(in []config.RuntimeLLMEntryConfig) []config.RuntimeLLMEntryConfig {
+	out := cloneEntries(in)
+	for i := range out {
+		out[i].BaseURL = ""
+		out[i].APIKey = ""
+	}
+	return out
+}
+
+func defaultBaseURLForProvider(provider string) string {
+	switch normalizeProviderType(provider) {
+	case ProviderAnthropic:
+		return "https://api.anthropic.com"
+	case ProviderOpenAIChatCompletion, ProviderOpenAIResponse:
+		return "https://api.openai.com/v1"
+	default:
+		return ""
+	}
 }
 
 func normalizeProviderType(provider string) string {

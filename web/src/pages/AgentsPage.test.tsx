@@ -77,8 +77,6 @@ describe("AgentsPage", () => {
           {
             id: "openai-prod",
             type: "openai_response",
-            base_url: "https://api.example.com/v1",
-            api_key: "sk-secret",
             model: "gpt-4.1-mini",
           },
         ],
@@ -98,8 +96,6 @@ describe("AgentsPage", () => {
           {
             id: "openai-prod",
             type: "openai_response",
-            base_url: "https://api.example.com/v1",
-            api_key: "sk-secret",
             model: "gpt-4.1",
           },
         ],
@@ -124,8 +120,6 @@ describe("AgentsPage", () => {
           {
             id: "openai-prod",
             type: "openai_response",
-            base_url: "https://api.example.com/v1",
-            api_key: "sk-secret",
             model: "gpt-4.1",
           },
         ],
@@ -162,8 +156,6 @@ describe("AgentsPage", () => {
           {
             id: "claude-backup",
             type: "anthropic",
-            base_url: "https://api.anthropic.com",
-            api_key: "sk-ant",
             model: "claude-3-7-sonnet-latest",
           },
         ],

@@ -222,17 +222,6 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 			if collector.MaxRetries != nil {
 				cfg.Runtime.Collector.MaxRetries = *collector.MaxRetries
 			}
-			if openaiCfg := collector.OpenAI; openaiCfg != nil {
-				if openaiCfg.BaseURL != nil {
-					cfg.Runtime.Collector.OpenAI.BaseURL = *openaiCfg.BaseURL
-				}
-				if openaiCfg.APIKey != nil {
-					cfg.Runtime.Collector.OpenAI.APIKey = *openaiCfg.APIKey
-				}
-				if openaiCfg.Model != nil {
-					cfg.Runtime.Collector.OpenAI.Model = *openaiCfg.Model
-				}
-			}
 		}
 		if llm := runtime.LLM; llm != nil {
 			if llm.DefaultConfigID != nil {

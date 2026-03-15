@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
+	"github.com/yoke233/ai-workflow/internal/adapters/llm"
 	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
 	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
 	"github.com/yoke233/ai-workflow/internal/core"
@@ -58,6 +59,61 @@ func TestBuildWorkItemEngineUsesDefaultConcurrencyWhenUnset(t *testing.T) {
 	engine := buildWorkItemEngine(store, bus, noopActionExecutor, nil, nil, &cfg, "", SCMTokens{}, nil)
 	if got := engine.MaxConcurrency(); got != 4 {
 		t.Fatalf("engine.MaxConcurrency() = %d, want 4", got)
+	}
+}
+
+func TestResolveFlowLLMConfigPrefersRuntimeLLMDefault(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Runtime.Collector.MaxRetries = 3
+	cfg.Runtime.LLM.DefaultConfigID = "openai-chat-default"
+	cfg.Runtime.LLM.Configs = []config.RuntimeLLMEntryConfig{
+		{
+			ID:      "openai-chat-default",
+			Type:    llm.ProviderOpenAIChatCompletion,
+			BaseURL: "https://example.test/v1",
+			APIKey:  "chat-key",
+			Model:   "chat-model",
+		},
+	}
+
+	got, source, ok := resolveFlowLLMConfig(&cfg)
+	if !ok {
+		t.Fatalf("resolveFlowLLMConfig() ok = false, want true")
+	}
+	if source != "runtime.llm" {
+		t.Fatalf("source = %q, want runtime.llm", source)
+	}
+	if got.Provider != llm.ProviderOpenAIChatCompletion {
+		t.Fatalf("Provider = %q, want %q", got.Provider, llm.ProviderOpenAIChatCompletion)
+	}
+	if got.APIKey != "chat-key" || got.Model != "chat-model" {
+		t.Fatalf("got = %#v, want runtime.llm credentials", got)
+	}
+	if got.MaxRetries != 3 {
+		t.Fatalf("MaxRetries = %d, want 3", got.MaxRetries)
+	}
+}
+
+func TestResolveFlowLLMConfigReturnsFalseWhenNoUsableConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Defaults()
+	cfg.Runtime.LLM.DefaultConfigID = "openai-chat-default"
+	cfg.Runtime.LLM.Configs = []config.RuntimeLLMEntryConfig{
+		{
+			ID:      "openai-chat-default",
+			Type:    llm.ProviderOpenAIChatCompletion,
+			BaseURL: "https://example.test/v1",
+			APIKey:  "",
+			Model:   "chat-model",
+		},
+	}
+
+	_, _, ok := resolveFlowLLMConfig(&cfg)
+	if ok {
+		t.Fatalf("resolveFlowLLMConfig() ok = true, want false")
 	}
 }
 

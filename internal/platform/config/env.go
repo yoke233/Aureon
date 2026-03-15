@@ -71,22 +71,13 @@ func ApplyEnvOverrides(cfg *Config) error {
 		cfg.GitHub.Token = v
 	}
 
-	// Runtime collector OpenAI overrides (optional)
+	// Runtime collector overrides (optional)
 	if v, ok := os.LookupEnv("AI_WORKFLOW_RUNTIME_COLLECTOR_MAX_RETRIES"); ok {
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil {
 			return fmt.Errorf("invalid AI_WORKFLOW_RUNTIME_COLLECTOR_MAX_RETRIES: %w", err)
 		}
 		cfg.Runtime.Collector.MaxRetries = n
-	}
-	if v, ok := os.LookupEnv("AI_WORKFLOW_RUNTIME_COLLECTOR_OPENAI_BASE_URL"); ok {
-		cfg.Runtime.Collector.OpenAI.BaseURL = v
-	}
-	if v, ok := os.LookupEnv("AI_WORKFLOW_RUNTIME_COLLECTOR_OPENAI_API_KEY"); ok {
-		cfg.Runtime.Collector.OpenAI.APIKey = v
-	}
-	if v, ok := os.LookupEnv("AI_WORKFLOW_RUNTIME_COLLECTOR_OPENAI_MODEL"); ok {
-		cfg.Runtime.Collector.OpenAI.Model = v
 	}
 
 	return nil

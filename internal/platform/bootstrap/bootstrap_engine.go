@@ -55,25 +55,68 @@ func buildFlowStack(base *bootstrapBase, bootstrapCfg *config.Config, scmTokens 
 }
 
 func buildCollectorClient(bootstrapCfg *config.Config) *llm.Client {
-	if bootstrapCfg == nil {
+	cfg, source, ok := resolveFlowLLMConfig(bootstrapCfg)
+	if !ok {
 		return nil
 	}
-	openaiCfg := bootstrapCfg.Runtime.Collector.OpenAI
-	if strings.TrimSpace(openaiCfg.APIKey) == "" || strings.TrimSpace(openaiCfg.Model) == "" {
-		return nil
-	}
-	client, err := llm.New(llm.Config{
-		BaseURL:    openaiCfg.BaseURL,
-		APIKey:     openaiCfg.APIKey,
-		Model:      openaiCfg.Model,
-		MaxRetries: bootstrapCfg.Runtime.Collector.MaxRetries,
-	})
+	client, err := llm.New(cfg)
 	if err != nil {
-		slog.Warn("bootstrap: LLM client disabled (invalid openai config)", "error", err)
+		slog.Warn("bootstrap: LLM client disabled (invalid config)", "source", source, "error", err)
 		return nil
 	}
-	slog.Info("bootstrap: LLM client enabled (collector + DAG generator)")
+	slog.Info("bootstrap: LLM client enabled (collector + DAG generator)", "source", source)
 	return client
+}
+
+func resolveFlowLLMConfig(bootstrapCfg *config.Config) (llm.Config, string, bool) {
+	if bootstrapCfg == nil {
+		return llm.Config{}, "", false
+	}
+	maxRetries := bootstrapCfg.Runtime.Collector.MaxRetries
+	if cfg, ok := resolveRuntimeLLMConfig(bootstrapCfg.Runtime.LLM, maxRetries); ok {
+		return cfg, "runtime.llm", true
+	}
+	return llm.Config{}, "", false
+}
+
+func resolveRuntimeLLMConfig(cfg config.RuntimeLLMConfig, maxRetries int) (llm.Config, bool) {
+	defaultID := strings.TrimSpace(cfg.DefaultConfigID)
+	if defaultID != "" {
+		for _, item := range cfg.Configs {
+			if strings.TrimSpace(item.ID) != defaultID {
+				continue
+			}
+			return llmConfigFromRuntimeEntry(item, maxRetries)
+		}
+		return llm.Config{}, false
+	}
+	for _, item := range cfg.Configs {
+		if llmCfg, ok := llmConfigFromRuntimeEntry(item, maxRetries); ok {
+			return llmCfg, true
+		}
+	}
+	return llm.Config{}, false
+}
+
+func llmConfigFromRuntimeEntry(item config.RuntimeLLMEntryConfig, maxRetries int) (llm.Config, bool) {
+	provider := strings.ToLower(strings.TrimSpace(item.Type))
+	switch provider {
+	case "", llm.ProviderOpenAIResponse, llm.ProviderOpenAIChatCompletion:
+	default:
+		return llm.Config{}, false
+	}
+	apiKey := strings.TrimSpace(item.APIKey)
+	model := strings.TrimSpace(item.Model)
+	if apiKey == "" || model == "" {
+		return llm.Config{}, false
+	}
+	return llm.Config{
+		Provider:   provider,
+		BaseURL:    strings.TrimSpace(item.BaseURL),
+		APIKey:     apiKey,
+		Model:      model,
+		MaxRetries: maxRetries,
+	}, true
 }
 
 func buildActionExecutor(

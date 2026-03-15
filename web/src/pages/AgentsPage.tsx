@@ -41,8 +41,6 @@ const PROVIDER_OPTIONS = [
 const EMPTY_ITEM = (index: number): LLMConfigItem => ({
   id: `llm-config-${index}`,
   type: "openai_response",
-  base_url: "",
-  api_key: "",
   model: "",
 });
 
@@ -501,7 +499,7 @@ export function AgentsPage() {
                 <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{t("llmConfig.activeConfig")}</div>
                   <div className="mt-1 text-sm font-semibold text-slate-900">{defaultConfigID || "-"}</div>
-                  <div className="text-xs text-slate-500">{activeConfig?.base_url || t("common.notFilled")}</div>
+                  <div className="text-xs text-slate-500">{activeConfig?.type || t("common.notFilled")}</div>
                 </div>
               </div>
 
@@ -510,8 +508,6 @@ export function AgentsPage() {
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.16em]">{t("llmConfig.fieldConfigId")}</TableHead>
                     <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.16em]">{t("llmConfig.fieldType")}</TableHead>
-                    <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.16em]">{t("llmConfig.fieldBaseUrl")}</TableHead>
-                    <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.16em]">{t("llmConfig.fieldApiKey")}</TableHead>
                     <TableHead className="h-10 px-3 text-[11px] uppercase tracking-[0.16em]">{t("llmConfig.fieldModel")}</TableHead>
                     <TableHead className="h-10 px-3 text-right text-[11px] uppercase tracking-[0.16em]">{t("common.operations")}</TableHead>
                   </TableRow>
@@ -519,7 +515,7 @@ export function AgentsPage() {
                 <TableBody>
                   {configs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="px-3 py-10 text-center text-muted-foreground">{t("llmConfig.emptyState")}</TableCell>
+                      <TableCell colSpan={4} className="px-3 py-10 text-center text-muted-foreground">{t("llmConfig.emptyState")}</TableCell>
                     </TableRow>
                   ) : (
                     configs.map((item, index) => {
@@ -547,24 +543,6 @@ export function AgentsPage() {
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
                             </Select>
-                          </TableCell>
-                          <TableCell className="px-3 py-3">
-                            <Input
-                              value={item.base_url}
-                              onChange={(event) => updateConfig(index, { base_url: event.target.value })}
-                              placeholder={t("llmConfig.baseUrlPlaceholder")}
-                              className="h-9 min-w-[190px]"
-                            />
-                          </TableCell>
-                          <TableCell className="px-3 py-3">
-                            <Input
-                              type="password"
-                              value={item.api_key}
-                              onChange={(event) => updateConfig(index, { api_key: event.target.value })}
-                              placeholder={t("llmConfig.apiKeyPlaceholder")}
-                              autoComplete="off"
-                              className="h-9 min-w-[160px]"
-                            />
                           </TableCell>
                           <TableCell className="px-3 py-3">
                             <Input

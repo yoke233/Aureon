@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -315,6 +316,31 @@ func (s *Store) DeleteThreadMessagesByThread(ctx context.Context, threadID int64
 	return s.orm.WithContext(ctx).
 		Where("thread_id = ?", threadID).
 		Delete(&ThreadMessageModel{}).Error
+}
+
+func (s *Store) DeleteResourcesByThread(ctx context.Context, threadID int64) error {
+	if s == nil || s.orm == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	messageSubQuery := s.orm.WithContext(ctx).
+		Model(&ThreadMessageModel{}).
+		Select("id").
+		Where("thread_id = ?", threadID)
+
+	var models []ResourceModel
+	if err := s.orm.WithContext(ctx).
+		Where("message_id IN (?)", messageSubQuery).
+		Find(&models).Error; err != nil {
+		return err
+	}
+	for _, model := range models {
+		if model.StorageKind == "local" && model.URI != "" {
+			_ = os.Remove(model.URI)
+		}
+	}
+	return s.orm.WithContext(ctx).
+		Where("message_id IN (?)", messageSubQuery).
+		Delete(&ResourceModel{}).Error
 }
 
 // ---------------------------------------------------------------------------

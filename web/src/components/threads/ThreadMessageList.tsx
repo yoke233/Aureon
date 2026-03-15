@@ -14,6 +14,7 @@ interface ThreadMessageListProps {
   focusAgentProfile: (profileID: string) => void;
   readTargetAgentID: (metadata: Record<string, unknown> | undefined) => string | null;
   readAutoRoutedTo: (metadata: Record<string, unknown> | undefined) => string[];
+  readWorkItemTrackID: (metadata: Record<string, unknown> | undefined) => number | null;
   formatRelativeTime: (value: string) => string;
 }
 
@@ -27,6 +28,7 @@ export function ThreadMessageList({
   focusAgentProfile,
   readTargetAgentID,
   readAutoRoutedTo,
+  readWorkItemTrackID,
   formatRelativeTime,
 }: ThreadMessageListProps) {
   const { t } = useTranslation();
@@ -47,12 +49,18 @@ export function ThreadMessageList({
         const isSystem = msg.role === "system";
         const targetAgent = readTargetAgentID(msg.metadata);
         const autoRoutedTo = readAutoRoutedTo(msg.metadata);
+        const workItemTrackID = readWorkItemTrackID(msg.metadata);
         const profile = isAgent ? profileByID.get(msg.sender_id) : undefined;
 
         if (isSystem) {
           return (
             <div key={msg.id} className="flex justify-center">
               <div className="flex items-center gap-2 rounded-full border border-border/40 bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">
+                {workItemTrackID ? (
+                  <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-foreground/70">
+                    Track #{workItemTrackID}
+                  </span>
+                ) : null}
                 <Bot className="h-3 w-3" />
                 <span>{msg.content}</span>
               </div>
@@ -83,6 +91,11 @@ export function ThreadMessageList({
                 {targetAgent ? (
                   <span className="rounded bg-blue-50 px-1 py-px text-[10px] text-blue-600">
                     @{targetAgent}
+                  </span>
+                ) : null}
+                {workItemTrackID ? (
+                  <span className="rounded bg-amber-50 px-1 py-px text-[10px] text-amber-700">
+                    Track #{workItemTrackID}
                   </span>
                 ) : null}
                 <span>{formatRelativeTime(msg.created_at)}</span>

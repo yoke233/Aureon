@@ -301,6 +301,7 @@ func (h *Handler) createThreadMessageAndRoute(ctx context.Context, input threadM
 		"thread_id":  message.ThreadID,
 		"message_id": message.ID,
 		"message":    message.Content,
+		"content":    message.Content,
 		"sender_id":  message.SenderID,
 		"role":       message.Role,
 	}
@@ -316,6 +317,9 @@ func (h *Handler) createThreadMessageAndRoute(ctx context.Context, input threadM
 			routedIDs[i] = pid
 		}
 		eventData["auto_routed_to"] = routedIDs
+	}
+	if len(message.Metadata) > 0 {
+		eventData["metadata"] = cloneAnyMap(message.Metadata)
 	}
 
 	h.bus.Publish(ctx, core.Event{

@@ -60,6 +60,11 @@ function readAutoRoutedTo(metadata: Record<string, unknown> | undefined): string
   return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim());
 }
 
+function readWorkItemTrackID(metadata: Record<string, unknown> | undefined): number | null {
+  const value = metadata?.work_item_track_id;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function parseMentionTarget(message: string, activeAgentProfileIDs: string[]): { targetAgentID: string | null; error: string | null } {
   const trimmed = message.trim();
   const match = trimmed.match(/^@([A-Za-z0-9._:-]+)\s+(.+)$/s);
@@ -435,6 +440,9 @@ export function ThreadDetailPage() {
       if (Array.isArray(payload.auto_routed_to) && payload.auto_routed_to.length > 0) {
         msgMetadata.auto_routed_to = payload.auto_routed_to;
       }
+      if (payload.metadata && typeof payload.metadata === "object") {
+        Object.assign(msgMetadata, payload.metadata);
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -580,6 +588,15 @@ export function ThreadDetailPage() {
     const unsubscribeTrackUpdated = wsClient.subscribe<ThreadEventPayload>("thread.track.updated", (payload) => {
       void syncTrackFromPayload(payload);
     });
+    const unsubscribeTrackPlanningStarted = wsClient.subscribe<ThreadEventPayload>("thread.track.planning_started", (payload) => {
+      void syncTrackFromPayload(payload);
+    });
+    const unsubscribeTrackPlanningCompleted = wsClient.subscribe<ThreadEventPayload>("thread.track.planning_completed", (payload) => {
+      void syncTrackFromPayload(payload);
+    });
+    const unsubscribeTrackReviewStarted = wsClient.subscribe<ThreadEventPayload>("thread.track.review_started", (payload) => {
+      void syncTrackFromPayload(payload);
+    });
     const unsubscribeTrackStateChanged = wsClient.subscribe<ThreadEventPayload>("thread.track.state_changed", (payload) => {
       void syncTrackFromPayload(payload);
     });
@@ -615,6 +632,9 @@ export function ThreadDetailPage() {
       unsubscribeThreadAgentThinking();
       unsubscribeTrackCreated();
       unsubscribeTrackUpdated();
+      unsubscribeTrackPlanningStarted();
+      unsubscribeTrackPlanningCompleted();
+      unsubscribeTrackReviewStarted();
       unsubscribeTrackStateChanged();
       unsubscribeTrackReviewApproved();
       unsubscribeTrackReviewRejected();
@@ -1445,6 +1465,7 @@ export function ThreadDetailPage() {
               focusAgentProfile={focusAgentProfile}
               readTargetAgentID={readTargetAgentID}
               readAutoRoutedTo={readAutoRoutedTo}
+              readWorkItemTrackID={readWorkItemTrackID}
               formatRelativeTime={formatRelativeTime}
             />
           </div>

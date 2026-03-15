@@ -304,6 +304,73 @@ func TestServiceReviewLifecycle(t *testing.T) {
 	}
 }
 
+func TestServiceWritesTrackTimelineMessages(t *testing.T) {
+	store := newWorkItemTrackAppTestStore(t)
+	ctx := context.Background()
+	bus := &recordingBus{}
+
+	threadID, err := store.CreateThread(ctx, &core.Thread{Title: "thread-a"})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	svc := newSQLiteWorkItemTrackServiceWithDeps(store, sqliteTxAdapter{base: store}, bus, nil)
+	track, err := svc.StartTrack(ctx, StartTrackInput{
+		ThreadID:  threadID,
+		Title:     "track-messages",
+		Objective: "timeline",
+	})
+	if err != nil {
+		t.Fatalf("StartTrack: %v", err)
+	}
+	if _, err := svc.SubmitForReview(ctx, SubmitForReviewInput{TrackID: track.ID}); err != nil {
+		t.Fatalf("SubmitForReview: %v", err)
+	}
+	if _, err := svc.ApproveReview(ctx, ApproveReviewInput{TrackID: track.ID}); err != nil {
+		t.Fatalf("ApproveReview: %v", err)
+	}
+
+	msgs, err := store.ListThreadMessages(ctx, threadID, 20, 0)
+	if err != nil {
+		t.Fatalf("ListThreadMessages: %v", err)
+	}
+	if len(msgs) < 3 {
+		t.Fatalf("expected at least 3 timeline messages, got %d", len(msgs))
+	}
+
+	foundTrackMessage := false
+	for _, msg := range msgs {
+		if msg == nil || msg.Role != "system" {
+			continue
+		}
+		if trackID, ok := msg.Metadata["work_item_track_id"].(int64); ok && trackID == track.ID {
+			foundTrackMessage = true
+			break
+		}
+		if trackID, ok := msg.Metadata["work_item_track_id"].(float64); ok && int64(trackID) == track.ID {
+			foundTrackMessage = true
+			break
+		}
+	}
+	if !foundTrackMessage {
+		t.Fatalf("expected system timeline message with work_item_track_id=%d, got %+v", track.ID, msgs)
+	}
+
+	sawPlanningCompleted := false
+	sawReviewStarted := false
+	for _, event := range bus.events {
+		switch event.Type {
+		case core.EventThreadTrackPlanningCompleted:
+			sawPlanningCompleted = true
+		case core.EventThreadTrackReviewStarted:
+			sawReviewStarted = true
+		}
+	}
+	if !sawPlanningCompleted || !sawReviewStarted {
+		t.Fatalf("expected planning/review events, got %+v", bus.events)
+	}
+}
+
 func TestServiceConfirmRunCreatesDefaultAction(t *testing.T) {
 	store := newWorkItemTrackAppTestStore(t)
 	ctx := context.Background()

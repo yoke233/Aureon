@@ -3,6 +3,7 @@ package workitemtrackapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -22,6 +23,10 @@ type Service struct {
 	tx       Tx
 	bus      EventPublisher
 	executor WorkItemExecutor
+}
+
+type threadMessageWriter interface {
+	CreateThreadMessage(ctx context.Context, msg *core.ThreadMessage) (int64, error)
 }
 
 func New(cfg Config) *Service {
@@ -81,6 +86,7 @@ func (s *Service) StartTrack(ctx context.Context, input StartTrackInput) (*core.
 		return nil, err
 	}
 	s.publishTrackEvent(ctx, core.EventThreadTrackCreated, track, nil)
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackCreated, track, nil)
 	return track, nil
 }
 
@@ -118,16 +124,18 @@ func (s *Service) AttachThreadContext(ctx context.Context, input AttachThreadCon
 	}
 	link.ID = id
 	if track, trackErr := s.store.GetWorkItemTrack(ctx, input.TrackID); trackErr == nil {
-		s.publishTrackEvent(ctx, core.EventThreadTrackUpdated, track, map[string]any{
+		extra := map[string]any{
 			"linked_thread_id":     input.ThreadID,
 			"linked_relation_type": string(link.RelationType),
-		})
+		}
+		s.publishTrackEvent(ctx, core.EventThreadTrackUpdated, track, extra)
+		s.appendTrackTimelineMessage(ctx, core.EventThreadTrackUpdated, track, extra)
 	}
 	return link, nil
 }
 
 func (s *Service) SubmitForReview(ctx context.Context, input SubmitForReviewInput) (*core.WorkItemTrack, error) {
-	return s.updateTrack(ctx, input.TrackID, core.EventThreadTrackUpdated, func(track *core.WorkItemTrack) error {
+	track, err := s.updateTrack(ctx, input.TrackID, core.EventThreadTrackReviewStarted, func(track *core.WorkItemTrack) error {
 		switch track.Status {
 		case core.WorkItemTrackReviewing:
 			return nil
@@ -147,10 +155,16 @@ func (s *Service) SubmitForReview(ctx context.Context, input SubmitForReviewInpu
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	s.publishTrackEvent(ctx, core.EventThreadTrackPlanningCompleted, track, nil)
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackReviewStarted, track, nil)
+	return track, nil
 }
 
 func (s *Service) ApproveReview(ctx context.Context, input ApproveReviewInput) (*core.WorkItemTrack, error) {
-	return s.updateTrack(ctx, input.TrackID, core.EventThreadTrackReviewApproved, func(track *core.WorkItemTrack) error {
+	track, err := s.updateTrack(ctx, input.TrackID, core.EventThreadTrackReviewApproved, func(track *core.WorkItemTrack) error {
 		if track.Status == core.WorkItemTrackAwaitingConfirmation {
 			return nil
 		}
@@ -169,10 +183,15 @@ func (s *Service) ApproveReview(ctx context.Context, input ApproveReviewInput) (
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackReviewApproved, track, nil)
+	return track, nil
 }
 
 func (s *Service) RejectReview(ctx context.Context, input RejectReviewInput) (*core.WorkItemTrack, error) {
-	return s.updateTrack(ctx, input.TrackID, core.EventThreadTrackReviewRejected, func(track *core.WorkItemTrack) error {
+	track, err := s.updateTrack(ctx, input.TrackID, core.EventThreadTrackReviewRejected, func(track *core.WorkItemTrack) error {
 		if track.Status == core.WorkItemTrackPlanning && track.ReviewerStatus == "rejected" {
 			return nil
 		}
@@ -191,10 +210,16 @@ func (s *Service) RejectReview(ctx context.Context, input RejectReviewInput) (*c
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	s.publishTrackEvent(ctx, core.EventThreadTrackPlanningStarted, track, nil)
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackReviewRejected, track, nil)
+	return track, nil
 }
 
 func (s *Service) PauseTrack(ctx context.Context, input PauseTrackInput) (*core.WorkItemTrack, error) {
-	return s.updateTrack(ctx, input.TrackID, core.EventThreadTrackStateChanged, func(track *core.WorkItemTrack) error {
+	track, err := s.updateTrack(ctx, input.TrackID, core.EventThreadTrackStateChanged, func(track *core.WorkItemTrack) error {
 		if track.Status == core.WorkItemTrackPaused {
 			return nil
 		}
@@ -205,10 +230,15 @@ func (s *Service) PauseTrack(ctx context.Context, input PauseTrackInput) (*core.
 		track.AwaitingUserConfirmation = false
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackStateChanged, track, nil)
+	return track, nil
 }
 
 func (s *Service) CancelTrack(ctx context.Context, input CancelTrackInput) (*core.WorkItemTrack, error) {
-	return s.updateTrack(ctx, input.TrackID, core.EventThreadTrackStateChanged, func(track *core.WorkItemTrack) error {
+	track, err := s.updateTrack(ctx, input.TrackID, core.EventThreadTrackStateChanged, func(track *core.WorkItemTrack) error {
 		if track.Status == core.WorkItemTrackCancelled {
 			return nil
 		}
@@ -219,6 +249,11 @@ func (s *Service) CancelTrack(ctx context.Context, input CancelTrackInput) (*cor
 		track.AwaitingUserConfirmation = false
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackStateChanged, track, nil)
+	return track, nil
 }
 
 func (s *Service) MaterializeWorkItem(ctx context.Context, input MaterializeWorkItemInput) (*MaterializeWorkItemResult, error) {
@@ -320,10 +355,12 @@ func (s *Service) MaterializeWorkItem(ctx context.Context, input MaterializeWork
 		WorkItem: workItem,
 		Links:    links,
 	}
-	s.publishTrackEvent(ctx, core.EventThreadTrackMaterialized, track, map[string]any{
+	extra := map[string]any{
 		"work_item_id": workItem.ID,
 		"link_count":   len(links),
-	})
+	}
+	s.publishTrackEvent(ctx, core.EventThreadTrackMaterialized, track, extra)
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackMaterialized, track, extra)
 	return result, nil
 }
 
@@ -407,6 +444,10 @@ func (s *Service) ConfirmRun(ctx context.Context, input ConfirmRunInput) (*Confi
 		}
 		return nil, err
 	}
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackRunConfirmed, updatedTrack, map[string]any{
+		"work_item_id": refreshedWorkItem.ID,
+		"run_status":   status,
+	})
 
 	return &ConfirmRunResult{
 		Track:    updatedTrack,
@@ -446,6 +487,9 @@ func (s *Service) SyncTrackStatusFromWorkItem(ctx context.Context, workItemID in
 		}
 		if changed && next != nil {
 			updated = append(updated, next)
+			s.appendTrackTimelineMessage(ctx, core.EventThreadTrackStateChanged, next, map[string]any{
+				"work_item_id": workItemID,
+			})
 		}
 	}
 	return updated, nil
@@ -536,23 +580,7 @@ func (s *Service) publishTrackEvent(ctx context.Context, eventType core.EventTyp
 		return
 	}
 
-	threadLinks, err := s.store.ListWorkItemTrackThreads(ctx, track.ID)
-	if err != nil {
-		return
-	}
-
-	threadIDs := make(map[int64]struct{}, len(threadLinks)+1)
-	for _, link := range threadLinks {
-		if link == nil || link.ThreadID <= 0 {
-			continue
-		}
-		threadIDs[link.ThreadID] = struct{}{}
-	}
-	if track.PrimaryThreadID != nil && *track.PrimaryThreadID > 0 {
-		threadIDs[*track.PrimaryThreadID] = struct{}{}
-	}
-
-	for threadID := range threadIDs {
+	for _, threadID := range s.collectTrackThreadIDs(ctx, track) {
 		data := map[string]any{
 			"thread_id": threadID,
 			"track_id":  track.ID,
@@ -572,6 +600,139 @@ func (s *Service) publishTrackEvent(ctx context.Context, eventType core.EventTyp
 			Data:      data,
 			Timestamp: time.Now().UTC(),
 		})
+	}
+}
+
+func (s *Service) appendTrackTimelineMessage(ctx context.Context, eventType core.EventType, track *core.WorkItemTrack, extra map[string]any) {
+	writer, ok := s.store.(threadMessageWriter)
+	if !ok || track == nil {
+		return
+	}
+	content := buildTrackTimelineMessage(eventType, track, extra)
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+
+	metadata := map[string]any{
+		"work_item_track_id": track.ID,
+		"track_event":        string(eventType),
+	}
+	for k, v := range extra {
+		metadata[k] = v
+	}
+
+	for _, threadID := range s.collectTrackThreadIDs(ctx, track) {
+		msg := &core.ThreadMessage{
+			ThreadID: threadID,
+			SenderID: "system",
+			Role:     "system",
+			Content:  content,
+			Metadata: cloneMetadata(metadata),
+		}
+		id, err := writer.CreateThreadMessage(ctx, msg)
+		if err != nil {
+			continue
+		}
+		msg.ID = id
+		if s.bus != nil {
+			s.bus.Publish(ctx, core.Event{
+				Type: core.EventThreadMessage,
+				Data: map[string]any{
+					"thread_id":  msg.ThreadID,
+					"message_id": msg.ID,
+					"message":    msg.Content,
+					"content":    msg.Content,
+					"sender_id":  msg.SenderID,
+					"role":       msg.Role,
+					"metadata":   cloneMetadata(msg.Metadata),
+				},
+				Timestamp: time.Now().UTC(),
+			})
+		}
+	}
+}
+
+func (s *Service) collectTrackThreadIDs(ctx context.Context, track *core.WorkItemTrack) []int64 {
+	threadIDs := make(map[int64]struct{})
+	threadLinks, err := s.store.ListWorkItemTrackThreads(ctx, track.ID)
+	if err == nil {
+		for _, link := range threadLinks {
+			if link == nil || link.ThreadID <= 0 {
+				continue
+			}
+			threadIDs[link.ThreadID] = struct{}{}
+		}
+	}
+	if track.PrimaryThreadID != nil && *track.PrimaryThreadID > 0 {
+		threadIDs[*track.PrimaryThreadID] = struct{}{}
+	}
+
+	out := make([]int64, 0, len(threadIDs))
+	for threadID := range threadIDs {
+		out = append(out, threadID)
+	}
+	return out
+}
+
+func buildTrackTimelineMessage(eventType core.EventType, track *core.WorkItemTrack, extra map[string]any) string {
+	title := strings.TrimSpace(track.Title)
+	if title == "" {
+		title = fmt.Sprintf("Track #%d", track.ID)
+	}
+
+	switch eventType {
+	case core.EventThreadTrackCreated:
+		return fmt.Sprintf("任务轨道“%s”已创建。", title)
+	case core.EventThreadTrackUpdated:
+		if linkedThreadID, ok := readInt64(extra, "linked_thread_id"); ok {
+			relation, _ := extra["linked_relation_type"].(string)
+			relation = strings.TrimSpace(relation)
+			if relation == "" {
+				relation = "source"
+			}
+			return fmt.Sprintf("线程 #%d 已作为 %s 关联到任务轨道“%s”。", linkedThreadID, relation, title)
+		}
+		return fmt.Sprintf("任务轨道“%s”已更新。", title)
+	case core.EventThreadTrackReviewStarted:
+		return fmt.Sprintf("任务轨道“%s”已进入送审。", title)
+	case core.EventThreadTrackReviewApproved:
+		return fmt.Sprintf("任务轨道“%s”审核已通过，等待确认。", title)
+	case core.EventThreadTrackReviewRejected:
+		return fmt.Sprintf("任务轨道“%s”审核被打回，已回到规划阶段。", title)
+	case core.EventThreadTrackMaterialized:
+		if workItemID, ok := readInt64(extra, "work_item_id"); ok {
+			return fmt.Sprintf("任务轨道“%s”已生成 WorkItem #%d。", title, workItemID)
+		}
+		return fmt.Sprintf("任务轨道“%s”已生成正式 WorkItem。", title)
+	case core.EventThreadTrackRunConfirmed:
+		if workItemID, ok := readInt64(extra, "work_item_id"); ok {
+			return fmt.Sprintf("任务轨道“%s”已确认执行，WorkItem #%d 已进入运行流程。", title, workItemID)
+		}
+		return fmt.Sprintf("任务轨道“%s”已确认执行。", title)
+	case core.EventThreadTrackStateChanged:
+		return fmt.Sprintf("任务轨道“%s”状态已变更为 %s。", title, track.Status)
+	default:
+		return ""
+	}
+}
+
+func readInt64(data map[string]any, key string) (int64, bool) {
+	if data == nil {
+		return 0, false
+	}
+	value, ok := data[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case int64:
+		return typed, true
+	case int:
+		return int64(typed), true
+	case float64:
+		return int64(typed), true
+	default:
+		return 0, false
 	}
 }
 

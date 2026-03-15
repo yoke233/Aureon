@@ -186,6 +186,7 @@ export interface WsClientMessage {
   sender_id?: string;
   target_agent_id?: string;
   reply_to_msg_id?: number;
+  metadata?: Record<string, unknown>;
   attachments?: ChatAttachment[];
   work_dir?: string;
   project_id?: number;

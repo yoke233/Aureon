@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -15,7 +17,6 @@ import (
 type createThreadRequest struct {
 	Title    string         `json:"title"`
 	OwnerID  string         `json:"owner_id,omitempty"`
-	Summary  string         `json:"summary,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
@@ -23,7 +24,6 @@ type updateThreadRequest struct {
 	Title    *string        `json:"title,omitempty"`
 	Status   *string        `json:"status,omitempty"`
 	OwnerID  *string        `json:"owner_id,omitempty"`
-	Summary  *string        `json:"summary,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
@@ -98,6 +98,13 @@ func registerThreadRoutes(r chi.Router, h *Handler) {
 	r.Patch("/threads/{threadID}/context-refs/{refID}", h.updateThreadContextRef)
 	r.Delete("/threads/{threadID}/context-refs/{refID}", h.deleteThreadContextRef)
 
+	r.Post("/threads/{threadID}/attachments", h.uploadThreadAttachment)
+	r.Get("/threads/{threadID}/attachments", h.listThreadAttachments)
+	r.Get("/threads/{threadID}/attachments/{attachmentID}", h.downloadThreadAttachment)
+	r.Delete("/threads/{threadID}/attachments/{attachmentID}", h.deleteThreadAttachment)
+
+	r.Get("/threads/{threadID}/files", h.listThreadFiles)
+
 	r.Get("/work-items/{issueID}/threads", h.listThreadsByWorkItem)
 }
 
@@ -116,7 +123,6 @@ func (h *Handler) createThread(w http.ResponseWriter, r *http.Request) {
 	result, err := h.threadService().CreateThread(r.Context(), threadapp.CreateThreadInput{
 		Title:    title,
 		OwnerID:  strings.TrimSpace(req.OwnerID),
-		Summary:  strings.TrimSpace(req.Summary),
 		Metadata: req.Metadata,
 	})
 	if err != nil {
@@ -216,9 +222,6 @@ func (h *Handler) updateThread(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.OwnerID != nil {
 		thread.OwnerID = strings.TrimSpace(*req.OwnerID)
-	}
-	if req.Summary != nil {
-		thread.Summary = strings.TrimSpace(*req.Summary)
 	}
 	if req.Metadata != nil {
 		thread.Metadata = req.Metadata
@@ -688,18 +691,22 @@ func (h *Handler) inviteThreadAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If runtime pool is available, delegate to it for real ACP session.
+	// If runtime pool is available, delegate to it. InviteAgent returns
+	// immediately with status=booting; the actual ACP boot runs in the
+	// background and publishes WS events on completion/failure.
 	if h.threadPool != nil {
 		member, err := h.threadPool.InviteAgent(r.Context(), threadID, profileID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error(), "INVITE_AGENT_FAILED")
 			return
 		}
-		if err := h.syncThreadWorkspaceContext(r.Context(), threadID); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error(), "SYNC_THREAD_WORKSPACE_FAILED")
-			return
-		}
-		writeJSON(w, http.StatusCreated, member)
+		// Best-effort workspace sync (non-blocking for the response).
+		go func() {
+			if err := h.syncThreadWorkspaceContext(context.Background(), threadID); err != nil {
+				slog.Warn("invite agent: sync thread workspace failed", "thread_id", threadID, "error", err)
+			}
+		}()
+		writeJSON(w, http.StatusAccepted, member)
 		return
 	}
 
@@ -739,7 +746,8 @@ func (h *Handler) listThreadAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	agents := make([]*core.ThreadMember, 0)
 	for _, m := range allMembers {
-		if m != nil && m.Kind == core.ThreadMemberKindAgent && m.Status != core.ThreadAgentLeft {
+		if m != nil && m.Kind == core.ThreadMemberKindAgent &&
+			m.Status != core.ThreadAgentLeft && m.Status != core.ThreadAgentFailed {
 			agents = append(agents, m)
 		}
 	}

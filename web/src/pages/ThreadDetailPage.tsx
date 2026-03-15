@@ -4,19 +4,17 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   Bot,
-  ExternalLink,
   Loader2,
   MessageSquare,
+  Paperclip,
   Send,
-  Settings2,
   Users,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ThreadAgentsPanel } from "@/components/threads/ThreadAgentsPanel";
-import { ThreadDetailsPanel } from "@/components/threads/ThreadDetailsPanel";
+import { ThreadSidebar } from "@/components/threads/ThreadSidebar";
 import { ThreadMessageList } from "@/components/threads/ThreadMessageList";
 import { InvitePickerDialog } from "@/components/threads/InvitePickerDialog";
 import { cn } from "@/lib/utils";
@@ -30,22 +28,18 @@ import type {
   ThreadWorkItemLink,
   ThreadAgentSession,
   Issue,
+  ThreadAttachment,
+  ThreadFileRef,
+  MessageFileRef,
   WorkItemTrack,
 } from "@/types/apiV2";
 import type { ThreadAckPayload, ThreadEventPayload } from "@/types/ws";
 
 /* ── helper functions (unchanged) ── */
 
-function hasSavedSummary(thread: Thread | null): boolean {
-  return Boolean(thread?.summary?.trim());
-}
 
 function deriveWorkItemTitle(thread: Thread): string {
-  const firstMeaningfulLine = (thread.summary ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^[-*#\d.)\s]+/, "").trim())
-    .find((line) => line.length > 0);
-  const title = firstMeaningfulLine || thread.title.trim();
+  const title = thread.title.trim();
   return title.length > 80 ? `${title.slice(0, 77)}...` : title;
 }
 
@@ -65,19 +59,22 @@ function readWorkItemTrackID(metadata: Record<string, unknown> | undefined): num
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function parseMentionTarget(message: string, activeAgentProfileIDs: string[]): { targetAgentID: string | null; error: string | null } {
+function parseMentionTarget(message: string, activeAgentProfileIDs: string[]): { targetAgentID: string | null; broadcast: boolean; error: string | null } {
   const trimmed = message.trim();
   const match = trimmed.match(/^@([A-Za-z0-9._:-]+)\s+(.+)$/s);
   if (!match) {
-    return { targetAgentID: null, error: null };
+    return { targetAgentID: null, broadcast: false, error: null };
   }
 
   const targetAgentID = match[1].trim();
+  if (targetAgentID === "all") {
+    return { targetAgentID: null, broadcast: true, error: null };
+  }
   if (!activeAgentProfileIDs.includes(targetAgentID)) {
-    return { targetAgentID: null, error: `未找到活跃 agent：${targetAgentID}` };
+    return { targetAgentID: null, broadcast: false, error: `未找到活跃 agent：${targetAgentID}` };
   }
 
-  return { targetAgentID, error: null };
+  return { targetAgentID, broadcast: false, error: null };
 }
 
 function readAgentRoutingMode(thread: Thread | null): "mention_only" | "broadcast" | "auto" {
@@ -138,6 +135,26 @@ function splitMessageMentions(content: string): Array<{ type: "text" | "mention"
     parts.push({ type: "text", value: content.slice(lastIndex) });
   }
   return parts.length > 0 ? parts : [{ type: "text", value: content }];
+}
+
+function detectHashDraft(message: string, caretPosition: number | null): { start: number; end: number; query: string } | null {
+  if (caretPosition == null || caretPosition < 0) return null;
+  const left = message.slice(0, caretPosition);
+  const leftMatch = left.match(/(^|\s)#([^\s#]*)$/);
+  if (!leftMatch) return null;
+  const prefixLength = leftMatch[1]?.length ?? 0;
+  const fullMatchLength = leftMatch[0]?.length ?? 0;
+  const start = left.length - fullMatchLength + prefixLength;
+  const right = message.slice(caretPosition);
+  const rightMatch = right.match(/^[^\s#]*/);
+  const end = caretPosition + (rightMatch?.[0]?.length ?? 0);
+  return { start, end, query: message.slice(start + 1, end) };
+}
+
+function replaceHashDraft(message: string, draft: { start: number; end: number }, fileName: string): { nextMessage: string; caretPosition: number } {
+  const replacement = `#${fileName} `;
+  const nextMessage = `${message.slice(0, draft.start)}${replacement}${message.slice(draft.end)}`;
+  return { nextMessage, caretPosition: draft.start + replacement.length };
 }
 
 function readCommittedMentionTarget(message: string, activeAgentProfileIDs: string[]): string | null {
@@ -241,7 +258,6 @@ function canConfirmTrackExecution(track: WorkItemTrack): boolean {
   return track.status === "awaiting_confirmation" || track.status === "materialized";
 }
 
-type SidebarTab = "agents" | "details";
 type ThreadAgentSessionWithProfileID = ThreadAgentSession & { agent_profile_id: string };
 
 export function ThreadDetailPage() {
@@ -264,14 +280,14 @@ export function ThreadDetailPage() {
   const [linkedIssues, setLinkedIssues] = useState<Record<number, Issue>>({});
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [summaryDraft, setSummaryDraft] = useState("");
-  const [savingSummary, setSavingSummary] = useState(false);
   const [showCreateWI, setShowCreateWI] = useState(false);
   const [newWITitle, setNewWITitle] = useState("");
   const [newWIBody, setNewWIBody] = useState("");
   const [showLinkWI, setShowLinkWI] = useState(false);
   const [linkWIId, setLinkWIId] = useState("");
   const [agentSessions, setAgentSessions] = useState<ThreadAgentSession[]>([]);
+  const [attachments, setAttachments] = useState<ThreadAttachment[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [availableProfiles, setAvailableProfiles] = useState<AgentProfile[]>([]);
   const [selectedInviteIDs, setSelectedInviteIDs] = useState<Set<string>>(new Set());
   const [invitingAgent, setInvitingAgent] = useState(false);
@@ -279,17 +295,19 @@ export function ThreadDetailPage() {
   const [savingRoutingMode, setSavingRoutingMode] = useState(false);
   const [mentionDraft, setMentionDraft] = useState<{ start: number; end: number; query: string } | null>(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
+  const [hashDraft, setHashDraft] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [selectedHashIndex, setSelectedHashIndex] = useState(0);
+  const [fileCandidates, setFileCandidates] = useState<ThreadFileRef[]>([]);
+  const [selectedFileRefs, setSelectedFileRefs] = useState<MessageFileRef[]>([]);
   const [highlightedAgentProfileID, setHighlightedAgentProfileID] = useState<string | null>(null);
   const [hoveredMentionProfileID, setHoveredMentionProfileID] = useState<string | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("agents");
-  const [summaryCollapsed, setSummaryCollapsed] = useState(true);
   const [thinkingAgentIDs, setThinkingAgentIDs] = useState<Set<string>>(new Set());
   const [invitePickerCandidates, setInvitePickerCandidates] = useState<AgentProfile[]>([]);
   const [invitePickerSelected, setInvitePickerSelected] = useState<Set<string>>(new Set());
   const [invitePickerBusy, setInvitePickerBusy] = useState(false);
   const pendingThreadRequestIdRef = useRef<string | null>(null);
   const syntheticMessageIDRef = useRef(-1);
-  const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
   const agentCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -309,26 +327,30 @@ export function ThreadDetailPage() {
   const committedMentionTargetID = readCommittedMentionTarget(newMessage, activeAgentProfileIDs);
   const committedMentionProfile = committedMentionTargetID ? profileByID.get(committedMentionTargetID) : undefined;
   const committedMentionSession = committedMentionTargetID ? agentSessionByProfileID.get(committedMentionTargetID) : undefined;
-  const mentionCandidates = activeAgentProfileIDs
-    .map((profileID) => {
-      const profile = profileByID.get(profileID);
-      const session = agentSessionByProfileID.get(profileID);
-      return {
-        id: profileID,
-        label: profile?.name ? `${profile.name} (${profileID})` : profileID,
-        status: session?.status ?? "active",
-      };
-    })
-    .filter((candidate) => {
-      if (!mentionDraft) {
-        return false;
-      }
-      const query = mentionDraft.query.trim().toLowerCase();
-      return query === ""
+  const mentionCandidates = (() => {
+    if (!mentionDraft) return [];
+    const query = mentionDraft.query.trim().toLowerCase();
+    const agents = activeAgentProfileIDs
+      .map((profileID) => {
+        const profile = profileByID.get(profileID);
+        const session = agentSessionByProfileID.get(profileID);
+        return {
+          id: profileID,
+          label: profile?.name ? `${profile.name} (${profileID})` : profileID,
+          status: session?.status ?? ("active" as string),
+        };
+      })
+      .filter((candidate) =>
+        query === ""
         || candidate.id.toLowerCase().includes(query)
-        || candidate.label.toLowerCase().includes(query);
-    })
-    .slice(0, 6);
+        || candidate.label.toLowerCase().includes(query),
+      );
+    // Prepend @all option when there are multiple active agents.
+    const allEntry = { id: "all", label: "All agents (broadcast)", status: "active" as string };
+    const showAll = activeAgentProfileIDs.length > 1
+      && (query === "" || "all".includes(query));
+    return (showAll ? [allEntry, ...agents] : agents).slice(0, 8);
+  })();
   const selectedMentionCandidate = mentionCandidates[selectedMentionIndex];
   const orderedWorkItemLinks = [...workItemLinks].sort((a, b) => {
     if (a.is_primary === b.is_primary) {
@@ -352,7 +374,7 @@ export function ThreadDetailPage() {
       setTracksLoading(true);
       setError(null);
       try {
-        const [th, msgs, parts, links, trackItems, agents, profiles] = await Promise.all([
+        const [th, msgs, parts, links, trackItems, agents, profiles, atts] = await Promise.all([
           apiClient.getThread(id),
           apiClient.listThreadMessages(id, { limit: 100 }),
           apiClient.listThreadParticipants(id),
@@ -360,16 +382,17 @@ export function ThreadDetailPage() {
           apiClient.listThreadTracks(id),
           apiClient.listThreadAgents(id),
           apiClient.listProfiles(),
+          apiClient.listThreadAttachments(id),
         ]);
         if (!cancelled) {
           setThread(th);
-          setSummaryDraft(th.summary ?? "");
           setMessages(msgs);
           setParticipants(parts);
           setWorkItemLinks(links);
           setTracks(trackItems);
           setAgentSessions(agents);
           setAvailableProfiles(profiles);
+          setAttachments(atts);
           const issueMap: Record<number, Issue> = {};
           const issueResults = await Promise.allSettled(
             links.map((l) => apiClient.getWorkItem(l.work_item_id)),
@@ -652,9 +675,20 @@ export function ThreadDetailPage() {
   /* ── handlers (unchanged) ── */
 
   const updateMentionDraft = (value: string, caretPosition: number | null) => {
-    const nextDraft = detectMentionDraft(value, caretPosition);
-    setMentionDraft(nextDraft);
+    const nextMention = detectMentionDraft(value, caretPosition);
+    setMentionDraft(nextMention);
     setSelectedMentionIndex(0);
+
+    const nextHash = nextMention ? null : detectHashDraft(value, caretPosition);
+    setHashDraft(nextHash);
+    setSelectedHashIndex(0);
+    if (nextHash && id) {
+      apiClient.searchThreadFiles(id, nextHash.query || undefined, "all", 8)
+        .then(setFileCandidates)
+        .catch(() => setFileCandidates([]));
+    } else if (!nextHash) {
+      setFileCandidates([]);
+    }
   };
 
   const handleMessageInputChange = (value: string, caretPosition: number | null) => {
@@ -676,17 +710,43 @@ export function ThreadDetailPage() {
 
   const focusAgentProfile = (profileID: string) => {
     setHighlightedAgentProfileID(profileID);
-    setSidebarTab("agents");
     const node = agentCardRefs.current[profileID];
     if (node) {
       node.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   };
 
+  const applyHashCandidate = (file: ThreadFileRef) => {
+    if (!hashDraft) return;
+    // Remove the #query text from input (don't insert #filename — show chip instead).
+    const nextMessage = newMessage.slice(0, hashDraft.start) + newMessage.slice(hashDraft.end);
+    const caretPosition = hashDraft.start;
+    setNewMessage(nextMessage);
+    setHashDraft(null);
+    setSelectedHashIndex(0);
+    setFileCandidates([]);
+    setSelectedFileRefs((prev) => {
+      if (prev.some((r) => r.path === file.path)) return prev;
+      return [...prev, { source: file.source, name: file.name, path: file.path }];
+    });
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus();
+      messageInputRef.current?.setSelectionRange(caretPosition, caretPosition);
+    });
+  };
+
+  const removeFileRef = (path: string) => {
+    setSelectedFileRefs((prev) => prev.filter((r) => r.path !== path));
+  };
+
   const clearMentionComposerState = () => {
     setNewMessage("");
     setMentionDraft(null);
     setSelectedMentionIndex(0);
+    setHashDraft(null);
+    setSelectedHashIndex(0);
+    setFileCandidates([]);
+    setSelectedFileRefs([]);
   };
 
   const handleSend = async () => {
@@ -703,9 +763,8 @@ export function ThreadDetailPage() {
         setError(null);
         try {
           await apiClient.inviteThreadAgent(id, { agent_profile_id: profile.id });
-          const sessions = await apiClient.listThreadAgents(id);
-          setAgentSessions(sessions);
-          // Inject a local system message to confirm.
+          // Agent is now booting — WS events (agent_booted/agent_joined/agent_failed)
+          // will drive the UI updates via refreshAgentSessions().
           setMessages((prev) => [
             ...prev,
             {
@@ -713,7 +772,7 @@ export function ThreadDetailPage() {
               thread_id: id,
               sender_id: "system",
               role: "system",
-              content: `已邀请 ${profile.name ?? profile.id} 加入对话`,
+              content: `已邀请 ${profile.name ?? profile.id} 加入对话，正在初始化...`,
               created_at: new Date().toISOString(),
             },
           ]);
@@ -740,14 +799,24 @@ export function ThreadDetailPage() {
     try {
       const requestId = `thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       pendingThreadRequestIdRef.current = requestId;
+      const sendMetadata: Record<string, unknown> = {};
+      if (selectedFileRefs.length > 0) {
+        sendMetadata.file_refs = selectedFileRefs;
+      }
+      if (mention.broadcast) {
+        sendMetadata.broadcast = true;
+      }
       wsClient.send({
         type: "thread.send",
         data: {
           request_id: requestId,
           thread_id: id,
-          message: newMessage.trim(),
+          message: mention.broadcast
+            ? newMessage.trim().replace(/^@all\s+/i, "")
+            : newMessage.trim(),
           sender_id: thread?.owner_id || "human",
           target_agent_id: mention.targetAgentID ?? undefined,
+          metadata: Object.keys(sendMetadata).length > 0 ? sendMetadata : undefined,
         },
       });
     } catch (e) {
@@ -770,9 +839,7 @@ export function ThreadDetailPage() {
       for (const profileID of ids) {
         await apiClient.inviteThreadAgent(id, { agent_profile_id: profileID });
       }
-      const sessions = await apiClient.listThreadAgents(id);
-      setAgentSessions(sessions);
-      // Inject system message.
+      // Agents are now booting — WS events will drive UI updates.
       const names = ids.map((pid) => {
         const p = invitePickerCandidates.find((c) => c.id === pid);
         return p?.name ?? pid;
@@ -784,7 +851,7 @@ export function ThreadDetailPage() {
           thread_id: id,
           sender_id: "system",
           role: "system",
-          content: `已邀请 ${names.join(", ")} 加入对话`,
+          content: `已邀请 ${names.join(", ")} 加入对话，正在初始化...`,
           created_at: new Date().toISOString(),
         },
       ]);
@@ -798,29 +865,9 @@ export function ThreadDetailPage() {
     }
   };
 
-  const handleSaveSummary = async () => {
-    if (!thread || !id) return;
-    setSavingSummary(true);
-    setError(null);
-    try {
-      const updated = await apiClient.updateThread(id, { summary: summaryDraft.trim() });
-      setThread(updated);
-      setSummaryDraft(updated.summary ?? "");
-      if (showCreateWI) {
-        const nextSummary = updated.summary?.trim() ?? "";
-        setNewWIBody(nextSummary);
-        setNewWITitle(nextSummary ? deriveWorkItemTitle(updated) : "");
-      }
-    } catch (e) {
-      setError(getErrorMessage(e));
-    } finally {
-      setSavingSummary(false);
-    }
-  };
-
   const handleOpenCreateWorkItem = () => {
     if (!thread) return;
-    if (!hasSavedSummary(thread)) {
+    if (!thread.summary?.trim()) {
       setError("请先生成或填写 summary，再创建 WorkItem。");
       setShowCreateWI(false);
       return;
@@ -883,7 +930,7 @@ export function ThreadDetailPage() {
     try {
       const track = await apiClient.createThreadTrack(id, {
         title: deriveWorkItemTitle(thread),
-        objective: summaryDraft.trim() || thread.summary?.trim() || thread.title.trim(),
+        objective: thread.summary?.trim() || thread.title.trim(),
         created_by: thread.owner_id ?? undefined,
         metadata: {
           source: "thread_detail_page",
@@ -1066,6 +1113,26 @@ export function ThreadDetailPage() {
       setError(getErrorMessage(e));
     } finally {
       setRemovingAgentID(null);
+    }
+  };
+
+  const handleUploadAttachment = async (file: File) => {
+    if (!id) return;
+    try {
+      const att = await apiClient.uploadThreadAttachment(id, file);
+      setAttachments((prev) => [att, ...prev]);
+    } catch (e) {
+      setError(getErrorMessage(e));
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: number) => {
+    if (!id) return;
+    try {
+      await apiClient.deleteThreadAttachment(id, attachmentId);
+      setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+    } catch (e) {
+      setError(getErrorMessage(e));
     }
   };
 
@@ -1276,178 +1343,6 @@ export function ThreadDetailPage() {
         onConfirm={handleInvitePickerConfirm}
       />
 
-      <div className="border-b bg-muted/10 px-5 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-              Thread WorkItem Track
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>{tracks.length} tracks</span>
-              {tracksLoading ? (
-                <span className="inline-flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  加载中
-                </span>
-              ) : null}
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => void handleStartTrack()}
-            disabled={startingTrack || !thread}
-          >
-            {startingTrack ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-            开始孵化
-          </Button>
-        </div>
-
-        {orderedTracks.length === 0 ? (
-          <div className="mt-3 rounded-lg border border-dashed bg-background/70 px-3 py-3 text-xs text-muted-foreground">
-            当前 thread 还没有 Track。可先保存 summary，再点击“开始孵化”创建第一条任务轨道。
-          </div>
-        ) : (
-          <div className="mt-3 flex flex-col gap-2">
-            {orderedTracks.map((track) => {
-              const linkedIssue = track.work_item_id ? linkedIssues[track.work_item_id] : undefined;
-              const materializing = materializingTrackID === track.id;
-              const submitting = trackActionBusyKey === `submit-${track.id}`;
-              const approving = trackActionBusyKey === `approve-${track.id}`;
-              const rejecting = trackActionBusyKey === `reject-${track.id}`;
-              const pausing = trackActionBusyKey === `pause-${track.id}`;
-              const cancelling = trackActionBusyKey === `cancel-${track.id}`;
-              const confirming = trackActionBusyKey === `confirm-${track.id}`;
-              return (
-                <div
-                  key={track.id}
-                  className="rounded-xl border bg-background/80 px-3 py-3"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-sm font-semibold text-foreground">{track.title}</span>
-                        <Badge
-                          variant="outline"
-                          className={cn("text-[10px] normal-case", trackStatusTone(track.status))}
-                        >
-                          {track.status}
-                        </Badge>
-                        {track.work_item_id ? (
-                          <Badge variant="secondary" className="text-[10px]">
-                            WorkItem #{track.work_item_id}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {track.latest_summary?.trim() || track.objective?.trim() || "暂无轨道摘要"}
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-                        <span>Track #{track.id}</span>
-                        <span>更新于 {formatRelativeTime(track.updated_at)}</span>
-                        {linkedIssue ? <span>{linkedIssue.title}</span> : null}
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => void handleSubmitTrackReview(track)}
-                        disabled={!canSubmitTrackReview(track) || submitting}
-                      >
-                        {submitting ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                        送审
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => void handleApproveTrackReview(track)}
-                        disabled={track.status !== "reviewing" || approving}
-                      >
-                        {approving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                        审核通过
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => void handleRejectTrackReview(track)}
-                        disabled={track.status !== "reviewing" || rejecting}
-                      >
-                        {rejecting ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                        打回
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => void handleMaterializeTrack(track)}
-                        disabled={!canMaterializeTrack(track) || materializing}
-                      >
-                        {materializing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                        生成待办
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => void handleConfirmTrackRun(track)}
-                        disabled={!canConfirmTrackExecution(track) || confirming}
-                      >
-                        {confirming ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                        生成并执行
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => void handlePauseTrack(track)}
-                        disabled={pausing || ["done", "cancelled", "failed"].includes(track.status)}
-                      >
-                        {pausing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                        暂停
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-xs text-rose-600 hover:text-rose-700"
-                        onClick={() => void handleCancelTrack(track)}
-                        disabled={cancelling || ["done", "cancelled", "failed"].includes(track.status)}
-                      >
-                        {cancelling ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                        取消
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-xs"
-                        onClick={() => handleOpenTrackWorkItem(track)}
-                        disabled={!track.work_item_id}
-                      >
-                        <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                        查看关联 WorkItem
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
       {/* ── Main content: chat + sidebar ── */}
       <div className="flex min-h-0 flex-1">
@@ -1498,8 +1393,44 @@ export function ThreadDetailPage() {
               {/* Input container */}
               <div className="relative">
                 {/* Mention autocomplete popup */}
+                {/* # file mention popup */}
+                {hashDraft && fileCandidates.length > 0 ? (
+                  <div className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-xl border bg-white dark:bg-zinc-900 shadow-lg">
+                    <div className="border-b px-3 py-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        Select file
+                      </span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto py-1">
+                      {fileCandidates.map((file, index) => (
+                        <button
+                          key={file.path}
+                          type="button"
+                          className={cn(
+                            "flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors",
+                            index === selectedHashIndex ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-accent/50",
+                          )}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            applyHashCandidate(file);
+                          }}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="font-medium truncate">{file.name}</span>
+                          </div>
+                          <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                            {file.source}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* @ agent mention popup */}
                 {mentionDraft && mentionCandidates.length > 0 ? (
-                  <div className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-xl border bg-popover shadow-lg">
+                  <div className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-xl border bg-white dark:bg-zinc-900 shadow-lg">
                     <div className="border-b px-3 py-1.5">
                       <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                         {t("threads.mentionCandidates", "Select agent")}
@@ -1512,7 +1443,7 @@ export function ThreadDetailPage() {
                           type="button"
                           className={cn(
                             "flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors",
-                            index === selectedMentionIndex ? "bg-accent" : "hover:bg-accent/50",
+                            index === selectedMentionIndex ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-accent/50",
                           )}
                           onMouseDown={(e) => {
                             e.preventDefault();
@@ -1520,24 +1451,49 @@ export function ThreadDetailPage() {
                           }}
                         >
                           <div className="flex items-center gap-2">
-                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                              <Bot className="h-3 w-3" />
+                            <div className={cn(
+                              "flex h-6 w-6 items-center justify-center rounded-full",
+                              candidate.id === "all" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700",
+                            )}>
+                              {candidate.id === "all" ? <Users className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
                             </div>
                             <span className="font-medium">@{candidate.id}</span>
+                            {candidate.id === "all" && (
+                              <span className="text-xs text-muted-foreground">广播给所有 agent</span>
+                            )}
                           </div>
+                          {candidate.id !== "all" && (
                           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                             <span className={cn("h-1.5 w-1.5 rounded-full", agentStatusColor(candidate.status))} />
                             {candidate.status}
                           </span>
+                          )}
                         </button>
                       ))}
                     </div>
                   </div>
                 ) : null}
 
-                <div className="flex items-center gap-2 rounded-xl border bg-muted/30 px-3 py-2 transition-colors focus-within:border-blue-300 focus-within:bg-background focus-within:ring-2 focus-within:ring-blue-100">
-                  <Input
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border bg-muted/30 px-3 py-2 transition-colors focus-within:border-blue-300 focus-within:bg-background focus-within:ring-2 focus-within:ring-blue-100">
+                  {selectedFileRefs.map((ref) => (
+                    <span
+                      key={ref.path}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 text-xs text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700"
+                    >
+                      <Paperclip className="h-3 w-3" />
+                      {ref.name}
+                      <button
+                        type="button"
+                        className="ml-0.5 rounded-sm hover:bg-blue-200 dark:hover:bg-blue-800"
+                        onClick={() => removeFileRef(ref.path)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <textarea
                     ref={messageInputRef}
+                    rows={2}
                     placeholder={
                       thread.status !== "active"
                         ? t("threads.threadClosed", "Thread is closed")
@@ -1545,17 +1501,47 @@ export function ThreadDetailPage() {
                           ? t("threads.messagePlaceholderAuto", "Type a message (auto-routed to the best-fit agent)...")
                           : agentRoutingMode === "broadcast"
                             ? t("threads.messagePlaceholderBroadcast", "Type a message (broadcasts to all agents)...")
-                            : t("threads.messagePlaceholder", "Type @ to mention an agent, or just send a message...")
+                            : t("threads.messagePlaceholder", "Type @ to mention an agent, # to reference a file...")
                     }
-                    className="h-auto flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
+                    className="flex-1 resize-none border-0 bg-transparent p-0 text-sm shadow-none outline-none focus:ring-0"
                     value={newMessage}
                     onChange={(e) => handleMessageInputChange(e.target.value, e.target.selectionStart)}
                     onClick={(e) => updateMentionDraft(e.currentTarget.value, e.currentTarget.selectionStart)}
-                    onKeyUp={(e) => updateMentionDraft(e.currentTarget.value, e.currentTarget.selectionStart)}
+                    onKeyUp={(e) => {
+                      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Tab") return;
+                      updateMentionDraft(e.currentTarget.value, e.currentTarget.selectionStart);
+                    }}
                     onBlur={() => {
-                      window.setTimeout(() => setMentionDraft(null), 120);
+                      window.setTimeout(() => {
+                        setMentionDraft(null);
+                        setHashDraft(null);
+                        setFileCandidates([]);
+                      }, 120);
                     }}
                     onKeyDown={(e) => {
+                      if (hashDraft && fileCandidates.length > 0) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setSelectedHashIndex((prev) => (prev + 1) % fileCandidates.length);
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setSelectedHashIndex((prev) => (prev - 1 + fileCandidates.length) % fileCandidates.length);
+                          return;
+                        }
+                        if (e.key === "Enter" || e.key === "Tab") {
+                          e.preventDefault();
+                          const selected = fileCandidates[selectedHashIndex];
+                          if (selected) applyHashCandidate(selected);
+                          return;
+                        }
+                        if (e.key === "Escape") {
+                          setHashDraft(null);
+                          setFileCandidates([]);
+                          return;
+                        }
+                      }
                       if (mentionDraft && mentionCandidates.length > 0) {
                         if (e.key === "ArrowDown") {
                           e.preventDefault();
@@ -1567,7 +1553,7 @@ export function ThreadDetailPage() {
                           setSelectedMentionIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
                           return;
                         }
-                        if (e.key === "Enter") {
+                        if (e.key === "Enter" || e.key === "Tab") {
                           e.preventDefault();
                           if (selectedMentionCandidate) {
                             applyMentionCandidate(selectedMentionCandidate.id);
@@ -1579,13 +1565,49 @@ export function ThreadDetailPage() {
                           return;
                         }
                       }
+                      if (e.key === "Backspace" && selectedFileRefs.length > 0) {
+                        const input = e.currentTarget;
+                        if (input.selectionStart === 0 && input.selectionEnd === 0) {
+                          e.preventDefault();
+                          setSelectedFileRefs((prev) => prev.slice(0, -1));
+                          return;
+                        }
+                      }
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         void handleSend();
                       }
                     }}
+                    onPaste={(e) => {
+                      const items = Array.from(e.clipboardData.items);
+                      const files = items
+                        .filter((item) => item.kind === "file")
+                        .map((item) => item.getAsFile())
+                        .filter((f): f is File => f !== null);
+                      if (files.length > 0) {
+                        e.preventDefault();
+                        files.forEach((f) => void handleUploadAttachment(f));
+                      }
+                    }}
                     disabled={sending || thread.status !== "active"}
                   />
+                  <input
+                    type="file"
+                    className="hidden"
+                    id="chat-file-upload"
+                    multiple
+                    onChange={(e) => {
+                      Array.from(e.target.files ?? []).forEach((f) => void handleUploadAttachment(f));
+                      e.target.value = "";
+                    }}
+                  />
+                  <label
+                    htmlFor="chat-file-upload"
+                    className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    title={t("threads.uploadFile", "Upload file")}
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </label>
                   <Button
                     size="icon"
                     className="h-8 w-8 shrink-0 rounded-lg"
@@ -1608,97 +1630,52 @@ export function ThreadDetailPage() {
         </div>
 
         {/* ── Sidebar ── */}
-        <div className="flex w-80 shrink-0 flex-col border-l bg-muted/10">
-          {/* Tab bar */}
-          <div className="flex shrink-0 border-b">
-            <button
-              type="button"
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors",
-                sidebarTab === "agents"
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setSidebarTab("agents")}
-            >
-              <Bot className="h-3.5 w-3.5" />
-              {t("threads.agents", "Agents")}
-              {agentSessions.length > 0 && (
-                <span className="rounded-full bg-muted px-1.5 text-[10px]">{agentSessions.length}</span>
-              )}
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors",
-                sidebarTab === "details"
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setSidebarTab("details")}
-            >
-              <Settings2 className="h-3.5 w-3.5" />
-              {t("threads.details", "Details")}
-            </button>
-          </div>
-
-          {/* Tab content */}
-          <div className="flex-1 overflow-y-auto">
-            {sidebarTab === "agents" ? (
-              <ThreadAgentsPanel
-                inviteableProfiles={inviteableProfiles}
-                selectedInviteIDs={selectedInviteIDs}
-                invitingAgent={invitingAgent}
-                onToggleInviteSelection={toggleInviteSelection}
-                onInviteAgent={() => {
-                  void handleInviteAgent();
-                }}
-                agentSessionsWithProfileID={agentSessionsWithProfileID}
-                profileByID={profileByID}
-                highlightedAgentProfileID={highlightedAgentProfileID}
-                agentCardRefs={agentCardRefs}
-                removingAgentID={removingAgentID}
-                onRemoveAgent={(agentSessionID) => {
-                  void handleRemoveAgent(agentSessionID);
-                }}
-                participants={participants}
-                agentStatusColor={agentStatusColor}
-              />
-            ) : (
-              /* ── Details tab ── */
-              <ThreadDetailsPanel
-                thread={thread}
-                messagesCount={messages.length}
-                summaryCollapsed={summaryCollapsed}
-                summaryDraft={summaryDraft}
-                savingSummary={savingSummary}
-                showSummaryMissingHint={!hasSavedSummary(thread)}
-                showCreateWI={showCreateWI}
-                newWITitle={newWITitle}
-                newWIBody={newWIBody}
-                showLinkWI={showLinkWI}
-                linkWIId={linkWIId}
-                workItemLinks={workItemLinks}
-                orderedWorkItemLinks={orderedWorkItemLinks}
-                linkedIssues={linkedIssues}
-                onSummaryCollapsedChange={setSummaryCollapsed}
-                onSummaryDraftChange={setSummaryDraft}
-                onSaveSummary={handleSaveSummary}
-                onOpenCreateWorkItem={handleOpenCreateWorkItem}
-                onShowCreateWIChange={setShowCreateWI}
-                onNewWITitleChange={setNewWITitle}
-                onNewWIBodyChange={setNewWIBody}
-                onCreateWorkItem={handleCreateWorkItem}
-                onShowLinkWIChange={setShowLinkWI}
-                onLinkWIIdChange={setLinkWIId}
-                onLinkWorkItem={handleLinkWorkItem}
-                onResetCreateWorkItemDraft={() => {
-                  setNewWITitle("");
-                  setNewWIBody("");
-                }}
-              />
-            )}
-          </div>
+        <div className="w-80 shrink-0 border-l">
+          <ThreadSidebar
+            thread={thread}
+            messagesCount={messages.length}
+            inviteableProfiles={inviteableProfiles}
+            selectedInviteIDs={selectedInviteIDs}
+            invitingAgent={invitingAgent}
+            onToggleInviteSelection={toggleInviteSelection}
+            onInviteAgent={() => { void handleInviteAgent(); }}
+            onClearInviteSelection={() => setSelectedInviteIDs(new Set())}
+            agentSessionsWithProfileID={agentSessionsWithProfileID}
+            profileByID={profileByID}
+            highlightedAgentProfileID={highlightedAgentProfileID}
+            agentCardRefs={agentCardRefs}
+            removingAgentID={removingAgentID}
+            onRemoveAgent={(id) => { void handleRemoveAgent(id); }}
+            agentStatusColor={agentStatusColor}
+            participants={participants}
+            tracks={tracks}
+            tracksLoading={tracksLoading}
+            startingTrack={startingTrack}
+            onStartTrack={() => { void handleStartTrack(); }}
+            trackStatusTone={trackStatusTone}
+            workItemLinks={workItemLinks}
+            orderedWorkItemLinks={orderedWorkItemLinks}
+            linkedIssues={linkedIssues}
+            showCreateWI={showCreateWI}
+            newWITitle={newWITitle}
+            newWIBody={newWIBody}
+            showLinkWI={showLinkWI}
+            linkWIId={linkWIId}
+            onOpenCreateWorkItem={handleOpenCreateWorkItem}
+            onShowCreateWIChange={setShowCreateWI}
+            onNewWITitleChange={setNewWITitle}
+            onNewWIBodyChange={setNewWIBody}
+            onCreateWorkItem={handleCreateWorkItem}
+            onShowLinkWIChange={setShowLinkWI}
+            onLinkWIIdChange={setLinkWIId}
+            onLinkWorkItem={handleLinkWorkItem}
+            onResetCreateWorkItemDraft={() => { setNewWITitle(""); setNewWIBody(""); }}
+            attachments={attachments}
+            attachmentsLoading={attachmentsLoading}
+            onUploadAttachment={(file) => { void handleUploadAttachment(file); }}
+            onDeleteAttachment={(attId) => { void handleDeleteAttachment(attId); }}
+            getAttachmentDownloadUrl={apiClient.getThreadAttachmentDownloadUrl}
+          />
         </div>
       </div>
     </div>

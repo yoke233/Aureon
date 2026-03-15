@@ -142,7 +142,6 @@ func TestModelConversions(t *testing.T) {
 		Title:     "thread",
 		Status:    core.ThreadActive,
 		OwnerID:   "owner",
-		Summary:   "summary",
 		Metadata:  map[string]any{"env": "dev"},
 		CreatedAt: now,
 		UpdatedAt: now,

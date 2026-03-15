@@ -1,32 +1,66 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { Plus, Search, MessagesSquare, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Link, useNavigate } from "react-router-dom";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  ArrowRight,
+  Clock,
+  Loader2,
+  MessageCircle,
+  MessagesSquare,
+  Search,
+  Send,
+  User,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useWorkbench } from "@/contexts/WorkbenchContext";
 import { formatRelativeTime, getErrorMessage } from "@/lib/v2Workbench";
+import { cn } from "@/lib/utils";
 import type { Thread } from "@/types/apiV2";
+
+/* ── status helpers ── */
+
+function statusColor(status: string) {
+  switch (status) {
+    case "active":
+      return "bg-emerald-400";
+    case "closed":
+      return "bg-slate-300";
+    case "archived":
+      return "bg-amber-300";
+    default:
+      return "bg-slate-300";
+  }
+}
+
+function statusVariant(status: string): "default" | "secondary" | "outline" {
+  switch (status) {
+    case "active":
+      return "default";
+    case "closed":
+      return "secondary";
+    case "archived":
+      return "outline";
+    default:
+      return "default";
+  }
+}
+
+/* ── page ── */
 
 export function ThreadsPage() {
   const { t } = useTranslation();
   const { apiClient } = useWorkbench();
-  const [search, setSearch] = useState("");
+  const navigate = useNavigate();
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
   const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
+  const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  /* ── load threads ── */
 
   useEffect(() => {
     let cancelled = false;
@@ -43,8 +77,12 @@ export function ThreadsPage() {
       }
     };
     void load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [apiClient]);
+
+  /* ── filter ── */
 
   const filtered = useMemo(() => {
     if (!search.trim()) return threads;
@@ -52,132 +90,201 @@ export function ThreadsPage() {
     return threads.filter(
       (th) =>
         th.title.toLowerCase().includes(q) ||
+        (th.summary ?? "").toLowerCase().includes(q) ||
         String(th.id).includes(q),
     );
   }, [threads, search]);
 
+  /* ── create thread from first message ── */
+
   const handleCreate = async () => {
-    if (!newTitle.trim()) return;
+    const message = draft.trim();
+    if (!message) return;
+    setCreating(true);
+    setError(null);
     try {
-      const created = await apiClient.createThread({ title: newTitle.trim() });
-      setThreads((prev) => [created, ...prev]);
-      setNewTitle("");
-      setShowCreate(false);
+      // Create thread with first message as title (truncated).
+      const title = message.length > 80 ? message.slice(0, 77) + "..." : message;
+      const created = await apiClient.createThread({ title });
+      // Post the first message into the new thread.
+      await apiClient.createThreadMessage(created.id, {
+        content: message,
+        role: "human",
+        sender_id: "human",
+      });
+      // Navigate directly to the thread.
+      navigate(`/threads/${created.id}`);
     } catch (e) {
       setError(getErrorMessage(e));
+      setCreating(false);
     }
   };
 
-  const statusVariant = (status: string) => {
-    switch (status) {
-      case "active": return "default";
-      case "closed": return "secondary";
-      case "archived": return "outline";
-      default: return "default";
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void handleCreate();
     }
   };
+
+  /* ── stats ── */
+
+  const activeCount = threads.filter((th) => th.status === "active").length;
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">
+    <div className="mx-auto max-w-4xl px-6 py-8">
+      {/* ── Header ── */}
+      <div className="mb-8">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">
           {t("nav.threads")}
         </h1>
-        <Button size="sm" onClick={() => setShowCreate(!showCreate)}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          {t("threads.create", "New Thread")}
-        </Button>
+        <p className="mt-1 text-sm text-slate-500">
+          {activeCount > 0
+            ? `${activeCount} ${t("threads.activeThreads", "active")}`
+            : t("threads.noActiveThreads", "Start a conversation")}
+        </p>
       </div>
 
-      {showCreate && (
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder={t("threads.titlePlaceholder", "Thread title...")}
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              />
-              <Button onClick={handleCreate} disabled={!newTitle.trim()}>
-                {t("threads.createBtn", "Create")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ── Composer: first message creates thread ── */}
+      <div className="group relative mb-8">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow focus-within:border-slate-300 focus-within:shadow-md">
+          <textarea
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={t("threads.composerPlaceholder", "Start a new discussion...")}
+            rows={2}
+            disabled={creating}
+            className={cn(
+              "w-full resize-none rounded-xl bg-transparent px-4 pt-4 pb-12 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none",
+              creating && "opacity-60",
+            )}
+          />
+          <div className="absolute bottom-3 right-3 flex items-center gap-2">
+            <span className="text-[11px] text-slate-400 opacity-0 transition-opacity group-focus-within:opacity-100">
+              Enter {t("threads.toSend", "to send")}
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleCreate()}
+              disabled={creating || !draft.trim()}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg transition-all",
+                draft.trim()
+                  ? "bg-slate-900 text-white hover:bg-slate-800"
+                  : "bg-slate-100 text-slate-400",
+              )}
+            >
+              {creating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Search ── */}
+      {threads.length > 0 && (
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder={t("threads.search", "Search threads...")}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-200"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       )}
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder={t("threads.search", "Search threads...")}
-          className="pl-9"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
-
+      {/* ── Error ── */}
       {error && (
-        <div className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="mb-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
         </div>
       )}
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <MessagesSquare className="h-4 w-4" />
-            {t("nav.threads")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : filtered.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              {t("threads.empty", "No threads yet")}
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-16">ID</TableHead>
-                  <TableHead>{t("threads.title", "Title")}</TableHead>
-                  <TableHead className="w-24">{t("threads.status", "Status")}</TableHead>
-                  <TableHead className="w-32">{t("threads.owner", "Owner")}</TableHead>
-                  <TableHead className="w-40">{t("threads.updated", "Updated")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((th) => (
-                  <TableRow key={th.id}>
-                    <TableCell className="font-mono text-xs">{th.id}</TableCell>
-                    <TableCell>
-                      <Link
-                        to={`/threads/${th.id}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {th.title}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(th.status)}>{th.status}</Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {th.owner_id || "—"}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatRelativeTime(th.updated_at)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {/* ── Thread list ── */}
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
+            <MessagesSquare className="h-5 w-5 text-slate-400" />
+          </div>
+          <p className="mt-4 text-sm font-medium text-slate-600">
+            {search.trim()
+              ? t("threads.noResults", "No matching threads")
+              : t("threads.emptyState", "No discussions yet")}
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            {search.trim()
+              ? t("threads.tryDifferentSearch", "Try a different search term")
+              : t("threads.emptyHint", "Type a message above to start your first thread")}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((th) => (
+            <Link
+              key={th.id}
+              to={`/threads/${th.id}`}
+              className="group/card flex items-start gap-4 rounded-xl border border-slate-150 bg-white px-5 py-4 transition-all hover:border-slate-300 hover:shadow-sm"
+            >
+              {/* Left: status dot + icon */}
+              <div className="relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition-colors group-hover/card:bg-slate-200">
+                <MessageCircle className="h-4 w-4" />
+                <span
+                  className={cn(
+                    "absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white",
+                    statusColor(th.status),
+                  )}
+                />
+              </div>
+
+              {/* Center: title + summary + meta */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-slate-900 group-hover/card:text-slate-950">
+                    {th.title}
+                  </span>
+                  {th.status !== "active" && (
+                    <Badge variant={statusVariant(th.status)} className="text-[9px]">
+                      {th.status}
+                    </Badge>
+                  )}
+                </div>
+                {th.summary && (
+                  <p className="mt-0.5 truncate text-xs text-slate-500">
+                    {th.summary}
+                  </p>
+                )}
+                <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-400">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {formatRelativeTime(th.updated_at)}
+                  </span>
+                  {th.owner_id && (
+                    <span className="flex items-center gap-1">
+                      <User className="h-3 w-3" />
+                      {th.owner_id}
+                    </span>
+                  )}
+                  <span className="font-mono text-slate-300">#{th.id}</span>
+                </div>
+              </div>
+
+              {/* Right: arrow */}
+              <ArrowRight className="mt-2 h-4 w-4 shrink-0 text-slate-300 transition-all group-hover/card:translate-x-0.5 group-hover/card:text-slate-500" />
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

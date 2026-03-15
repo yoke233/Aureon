@@ -60,6 +60,17 @@ type WorkItemExecutor interface {
 	RunWorkItem(ctx context.Context, workItemID int64) error
 }
 
+// LeadDispatcher invites the lead agent into a thread and sends a kick-off
+// message so the agent starts planning. Implementations may be nil when the
+// runtime is not available; callers must nil-check.
+type LeadDispatcher interface {
+	DispatchLeadToThread(ctx context.Context, threadID int64, kickoffMessage string) error
+}
+
+type StartPlanningInput struct {
+	TrackID int64
+}
+
 type StartTrackInput struct {
 	ThreadID  int64
 	Title     string

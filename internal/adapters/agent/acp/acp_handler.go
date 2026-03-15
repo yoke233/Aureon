@@ -46,7 +46,6 @@ type ThreadMount struct {
 type ThreadWorkspaceConfig struct {
 	ThreadID     int64
 	WorkspaceDir string
-	ArchiveDir   string
 	Mounts       []ThreadMount
 }
 
@@ -169,7 +168,6 @@ func (h *ACPHandler) SetThreadWorkspace(cfg ThreadWorkspaceConfig) {
 	copied := ThreadWorkspaceConfig{
 		ThreadID:     cfg.ThreadID,
 		WorkspaceDir: strings.TrimSpace(cfg.WorkspaceDir),
-		ArchiveDir:   strings.TrimSpace(cfg.ArchiveDir),
 		Mounts:       make([]ThreadMount, 0, len(cfg.Mounts)),
 	}
 	for _, mount := range cfg.Mounts {
@@ -703,7 +701,6 @@ const (
 
 const (
 	pathZoneWorkspace = "workspace"
-	pathZoneArchive   = "archive"
 	pathZoneMount     = "mount"
 )
 
@@ -831,17 +828,6 @@ func (h *ACPHandler) resolveThreadScopedPath(scope *ThreadWorkspaceConfig, rawPa
 		return resolvedPath{}, false, nil
 	}
 
-	if rel, ok := trimThreadPrefix(normalized, "archive/"); ok {
-		archiveDir := strings.TrimSpace(scope.ArchiveDir)
-		if archiveDir == "" {
-			return resolvedPath{}, true, fmt.Errorf("archive path %q is not configured", rawPath)
-		}
-		if op != accessRead {
-			return resolvedPath{}, true, fmt.Errorf("path %q is read-only", rawPath)
-		}
-		return resolveUnderRoot(archiveDir, rel, pathZoneArchive, nil)
-	}
-
 	if mountName, rel, ok := splitMountAlias(normalized); ok {
 		for i := range scope.Mounts {
 			mount := scope.Mounts[i]
@@ -893,12 +879,6 @@ func resolveUnderRoot(root string, rel string, zone string, mount *ThreadMount) 
 		cleanRel = ""
 	}
 	switch zone {
-	case pathZoneArchive:
-		if cleanRel != "" {
-			cleanRel = "archive/" + cleanRel
-		} else {
-			cleanRel = "archive"
-		}
 	case pathZoneMount:
 		if mount != nil {
 			prefix := "mounts/" + mount.Alias
@@ -950,9 +930,6 @@ func normalizeThreadAlias(rawPath string) string {
 		normalized = strings.TrimPrefix(normalized, "./")
 	}
 	if strings.HasPrefix(normalized, "../mounts/") {
-		normalized = strings.TrimPrefix(normalized, "../")
-	}
-	if strings.HasPrefix(normalized, "../archive/") {
 		normalized = strings.TrimPrefix(normalized, "../")
 	}
 	return strings.TrimPrefix(normalized, "/")

@@ -41,6 +41,7 @@ func registerWorkItemTrackRoutes(r chi.Router, h *Handler) {
 	r.Get("/threads/{threadID}/tracks", h.listWorkItemTracksByThread)
 	r.Get("/tracks/{trackID}", h.getWorkItemTrack)
 	r.Post("/tracks/{trackID}/threads", h.attachWorkItemTrackThread)
+	r.Post("/tracks/{trackID}/start-planning", h.startWorkItemTrackPlanning)
 	r.Post("/tracks/{trackID}/submit-review", h.submitWorkItemTrackReview)
 	r.Post("/tracks/{trackID}/approve-review", h.approveWorkItemTrackReview)
 	r.Post("/tracks/{trackID}/reject-review", h.rejectWorkItemTrackReview)
@@ -137,6 +138,23 @@ func (h *Handler) attachWorkItemTrackThread(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusCreated, link)
+}
+
+func (h *Handler) startWorkItemTrackPlanning(w http.ResponseWriter, r *http.Request) {
+	trackID, ok := urlParamInt64(r, "trackID")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid track ID", "BAD_ID")
+		return
+	}
+
+	track, err := h.workItemTrackService().StartPlanning(r.Context(), workitemtrackapp.StartPlanningInput{
+		TrackID: trackID,
+	})
+	if err != nil {
+		writeWorkItemTrackAppFailure(w, err, "START_PLANNING_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, track)
 }
 
 func (h *Handler) materializeWorkItemTrack(w http.ResponseWriter, r *http.Request) {

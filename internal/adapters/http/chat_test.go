@@ -155,10 +155,10 @@ func TestChatRoutes_CrystallizeThread(t *testing.T) {
 
 	resp, err := post(ts, "/chat/sessions/chat-1/crystallize-thread", map[string]any{
 		"owner_id":             "human-1",
-		"thread_summary":       "确定由 thread 汇总后创建 work item。",
 		"participant_user_ids": []string{"human-2", "human-2"},
 		"create_work_item":     true,
 		"work_item_title":      "实现 thread 结晶接口",
+		"work_item_body":       "确定由 thread 汇总后创建 work item。",
 	})
 	if err != nil {
 		t.Fatalf("crystallize thread: %v", err)
@@ -182,7 +182,7 @@ func TestChatRoutes_CrystallizeThread(t *testing.T) {
 	}
 }
 
-func TestChatRoutes_CrystallizeThreadRollsBackOnWorkItemFailure(t *testing.T) {
+func TestChatRoutes_CrystallizeThreadUsesThreadTitleAsFallbackBody(t *testing.T) {
 	svc := &stubLeadChatService{
 		detailResp: &chatapp.SessionDetail{
 			SessionSummary: chatapp.SessionSummary{
@@ -191,26 +191,29 @@ func TestChatRoutes_CrystallizeThreadRollsBackOnWorkItemFailure(t *testing.T) {
 			},
 		},
 	}
-	h, ts := setupAPIWithLead(t, svc)
+	_, ts := setupAPIWithLead(t, svc)
 
 	resp, err := post(ts, "/chat/sessions/chat-2/crystallize-thread", map[string]any{
 		"owner_id":         "human-1",
 		"create_work_item": true,
-		"work_item_title":  "应该失败",
+		"work_item_title":  "需要创建的任务",
 	})
 	if err != nil {
 		t.Fatalf("crystallize thread: %v", err)
 	}
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
 
-	threads, err := h.store.ListThreads(context.Background(), core.ThreadFilter{Limit: 10})
-	if err != nil {
-		t.Fatalf("list threads: %v", err)
+	var got crystallizeChatSessionResponse
+	if err := decodeJSON(resp, &got); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-	if len(threads) != 0 {
-		t.Fatalf("expected no threads after rollback, got %d", len(threads))
+	if got.WorkItem == nil {
+		t.Fatal("expected work item to be created")
+	}
+	if got.WorkItem.Body != "无摘要讨论" {
+		t.Fatalf("expected work item body to fall back to thread title, got %q", got.WorkItem.Body)
 	}
 }
 

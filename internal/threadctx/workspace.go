@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,9 +18,7 @@ import (
 )
 
 const (
-	contextFileName      = ".context.json"
-	archiveManifestName  = ".manifest.json"
-	defaultArchiveRetain = 7
+	contextFileName = ".context.json"
 )
 
 type Store interface {
@@ -29,15 +26,15 @@ type Store interface {
 	GetProject(ctx context.Context, id int64) (*core.Project, error)
 	ListThreadMembers(ctx context.Context, threadID int64) ([]*core.ThreadMember, error)
 	ListThreadContextRefs(ctx context.Context, threadID int64) ([]*core.ThreadContextRef, error)
+	ListThreadAttachments(ctx context.Context, threadID int64) ([]*core.ThreadAttachment, error)
 	ListResourceSpaces(ctx context.Context, projectID int64) ([]*core.ResourceSpace, error)
 }
 
 type PathsInfo struct {
-	ThreadDir    string
-	WorkspaceDir string
-	MountsDir    string
-	ArchiveDir   string
-	ContextFile  string
+	ThreadDir      string
+	ProjectsDir    string
+	AttachmentsDir string
+	ContextFile    string
 }
 
 type ResolvedMount struct {
@@ -52,13 +49,11 @@ var slugSanitizer = regexp.MustCompile(`[^a-z0-9-]`)
 
 func Paths(dataDir string, threadID int64) PathsInfo {
 	threadDir := filepath.Join(strings.TrimSpace(dataDir), "threads", strconv.FormatInt(threadID, 10))
-	workspaceDir := filepath.Join(threadDir, "workspace")
 	return PathsInfo{
-		ThreadDir:    threadDir,
-		WorkspaceDir: workspaceDir,
-		MountsDir:    filepath.Join(threadDir, "mounts"),
-		ArchiveDir:   filepath.Join(threadDir, "archive"),
-		ContextFile:  filepath.Join(workspaceDir, contextFileName),
+		ThreadDir:      threadDir,
+		ProjectsDir:    filepath.Join(threadDir, "projects"),
+		AttachmentsDir: filepath.Join(threadDir, "attachments"),
+		ContextFile:    filepath.Join(threadDir, contextFileName),
 	}
 }
 
@@ -67,7 +62,7 @@ func EnsureLayout(dataDir string, threadID int64) (PathsInfo, error) {
 		return PathsInfo{}, nil
 	}
 	paths := Paths(dataDir, threadID)
-	for _, dir := range []string{paths.ThreadDir, paths.WorkspaceDir, paths.MountsDir, paths.ArchiveDir} {
+	for _, dir := range []string{paths.ThreadDir, paths.ProjectsDir, paths.AttachmentsDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return PathsInfo{}, fmt.Errorf("create thread workspace dir %q: %w", dir, err)
 		}
@@ -100,15 +95,12 @@ func SyncContextFile(ctx context.Context, store Store, dataDir string, threadID 
 	if err != nil {
 		return nil, err
 	}
-	if err := SyncDailyArchive(paths, nowUTC()); err != nil {
-		return nil, err
-	}
 
 	payload, err := BuildWorkspaceContext(ctx, store, dataDir, threadID)
 	if err != nil {
 		return nil, err
 	}
-	if err := syncMountAliasDirs(paths.MountsDir, payload, resolvedMountTargets(ctx, store, threadID)); err != nil {
+	if err := syncMountAliasDirs(paths.ProjectsDir, payload, resolvedMountTargets(ctx, store, threadID)); err != nil {
 		return nil, err
 	}
 
@@ -140,17 +132,10 @@ func BuildWorkspaceContext(ctx context.Context, store Store, dataDir string, thr
 		return nil, err
 	}
 
-	archives := []core.ThreadWorkspaceArchiveSnapshot(nil)
-	if strings.TrimSpace(dataDir) != "" {
-		archives = listArchiveSnapshots(Paths(dataDir, threadID).ArchiveDir)
-	}
-
 	payload := &core.ThreadWorkspaceContext{
 		ThreadID:  threadID,
 		Workspace: ".",
 		Mounts:    map[string]core.ThreadWorkspaceMount{},
-		Archive:   "../archive",
-		Archives:  archives,
 		UpdatedAt: nowUTC(),
 	}
 
@@ -177,7 +162,7 @@ func BuildWorkspaceContext(ctx context.Context, store Store, dataDir string, thr
 			continue
 		}
 		payload.Mounts[mount.Slug] = core.ThreadWorkspaceMount{
-			Path:          filepath.ToSlash(filepath.Join("..", "mounts", mount.Slug)),
+			Path:          filepath.ToSlash(filepath.Join("projects", mount.Slug)),
 			ProjectID:     mount.Project.ID,
 			Access:        mount.Access,
 			CheckCommands: append([]string(nil), mount.CheckCommands...),
@@ -187,9 +172,23 @@ func BuildWorkspaceContext(ctx context.Context, store Store, dataDir string, thr
 	if len(payload.Mounts) == 0 {
 		payload.Mounts = nil
 	}
-	if len(payload.Archives) == 0 {
-		payload.Archives = nil
+
+	// Populate attachments.
+	attachments, err := store.ListThreadAttachments(ctx, threadID)
+	if err == nil && len(attachments) > 0 {
+		for _, att := range attachments {
+			if att == nil {
+				continue
+			}
+			payload.Attachments = append(payload.Attachments, core.ThreadWorkspaceAttachmentRef{
+				FileName:    att.FileName,
+				FilePath:    filepath.ToSlash(filepath.Join("attachments", filepath.Base(att.FilePath))),
+				IsDirectory: att.IsDirectory,
+				Note:        att.Note,
+			})
+		}
 	}
+
 	return payload, nil
 }
 
@@ -402,171 +401,3 @@ func ensureMountAliasPath(aliasPath string, targetPath string) error {
 	return os.MkdirAll(aliasPath, 0o755)
 }
 
-func SyncDailyArchive(paths PathsInfo, now time.Time) error {
-	if strings.TrimSpace(paths.WorkspaceDir) == "" || strings.TrimSpace(paths.ArchiveDir) == "" {
-		return nil
-	}
-	if now.IsZero() {
-		now = nowUTC()
-	}
-	if err := pruneArchiveSnapshots(paths.ArchiveDir, now, defaultArchiveRetain); err != nil {
-		return fmt.Errorf("prune thread archive snapshots: %w", err)
-	}
-	meaningful, err := workspaceHasMeaningfulFiles(paths.WorkspaceDir)
-	if err != nil {
-		return fmt.Errorf("scan thread workspace for archive: %w", err)
-	}
-	if !meaningful {
-		return nil
-	}
-
-	snapshotDir := filepath.Join(paths.ArchiveDir, now.Format("2006-01-02"))
-	if err := os.RemoveAll(snapshotDir); err != nil {
-		return fmt.Errorf("reset archive snapshot dir %q: %w", snapshotDir, err)
-	}
-	manifest, err := copyWorkspaceSnapshot(paths.WorkspaceDir, snapshotDir)
-	if err != nil {
-		return err
-	}
-	manifest.Date = now.Format("2006-01-02")
-	manifest.GeneratedAt = now.UTC()
-	manifestPath := filepath.Join(snapshotDir, archiveManifestName)
-	body, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode archive manifest: %w", err)
-	}
-	if err := os.WriteFile(manifestPath, append(body, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write archive manifest: %w", err)
-	}
-	return nil
-}
-
-type archiveManifest struct {
-	Date        string    `json:"date"`
-	GeneratedAt time.Time `json:"generated_at"`
-	Files       []string  `json:"files"`
-}
-
-func workspaceHasMeaningfulFiles(workspaceDir string) (bool, error) {
-	found := false
-	err := filepath.WalkDir(workspaceDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == workspaceDir || d.IsDir() {
-			return nil
-		}
-		if filepath.Base(path) == contextFileName {
-			return nil
-		}
-		found = true
-		return io.EOF
-	})
-	if err != nil && err != io.EOF {
-		return false, err
-	}
-	return found, nil
-}
-
-func copyWorkspaceSnapshot(workspaceDir string, snapshotDir string) (*archiveManifest, error) {
-	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create archive snapshot dir %q: %w", snapshotDir, err)
-	}
-	manifest := &archiveManifest{Files: []string{}}
-	err := filepath.WalkDir(workspaceDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(workspaceDir, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		target := filepath.Join(snapshotDir, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, raw, 0o644); err != nil {
-			return err
-		}
-		manifest.Files = append(manifest.Files, filepath.ToSlash(rel))
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("copy workspace snapshot: %w", err)
-	}
-	sort.Strings(manifest.Files)
-	return manifest, nil
-}
-
-func pruneArchiveSnapshots(archiveDir string, now time.Time, retainDays int) error {
-	if retainDays <= 0 {
-		retainDays = defaultArchiveRetain
-	}
-	entries, err := os.ReadDir(archiveDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	cutoff := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -(retainDays - 1))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		snapshotDate, err := time.Parse("2006-01-02", entry.Name())
-		if err != nil {
-			continue
-		}
-		if snapshotDate.Before(cutoff) {
-			if err := os.RemoveAll(filepath.Join(archiveDir, entry.Name())); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func listArchiveSnapshots(archiveDir string) []core.ThreadWorkspaceArchiveSnapshot {
-	entries, err := os.ReadDir(archiveDir)
-	if err != nil {
-		return nil
-	}
-	snapshots := make([]core.ThreadWorkspaceArchiveSnapshot, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if _, err := time.Parse("2006-01-02", entry.Name()); err != nil {
-			continue
-		}
-		snapshot := core.ThreadWorkspaceArchiveSnapshot{
-			Date: entry.Name(),
-			Path: filepath.ToSlash(filepath.Join("..", "archive", entry.Name())),
-		}
-		manifestPath := filepath.Join(archiveDir, entry.Name(), archiveManifestName)
-		raw, err := os.ReadFile(manifestPath)
-		if err == nil {
-			var manifest archiveManifest
-			if json.Unmarshal(raw, &manifest) == nil {
-				snapshot.Manifest = filepath.ToSlash(filepath.Join("..", "archive", entry.Name(), archiveManifestName))
-				snapshot.FileCount = len(manifest.Files)
-			}
-		}
-		snapshots = append(snapshots, snapshot)
-	}
-	sort.Slice(snapshots, func(i, j int) bool {
-		return snapshots[i].Date > snapshots[j].Date
-	})
-	return snapshots
-}

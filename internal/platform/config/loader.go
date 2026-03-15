@@ -46,9 +46,13 @@ func LoadGlobal(path string, secretsPaths ...string) (*Config, error) {
 	if path != "" {
 		layer, err := loadLayerFromFile(path)
 		if err != nil {
-			return nil, err
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			// File does not exist — use defaults only.
+		} else {
+			ApplyConfigLayer(&cfg, layer)
 		}
-		ApplyConfigLayer(&cfg, layer)
 	}
 
 	// Apply secrets file if provided.

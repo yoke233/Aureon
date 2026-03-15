@@ -43,7 +43,6 @@ func TestThreadCRUD(t *testing.T) {
 
 	// Update
 	got.Title = "updated title"
-	got.Summary = "summary of discussion"
 	got.Status = core.ThreadClosed
 	if err := s.UpdateThread(ctx, got); err != nil {
 		t.Fatalf("update: %v", err)
@@ -51,9 +50,6 @@ func TestThreadCRUD(t *testing.T) {
 	got, _ = s.GetThread(ctx, id)
 	if got.Title != "updated title" || got.Status != core.ThreadClosed {
 		t.Fatalf("update not applied: %+v", got)
-	}
-	if got.Summary != "summary of discussion" {
-		t.Fatalf("summary not updated: %s", got.Summary)
 	}
 
 	// List

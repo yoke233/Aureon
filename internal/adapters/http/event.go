@@ -615,12 +615,13 @@ type wsErrorPayload struct {
 // ---------------------------------------------------------------------------
 
 type wsThreadSendRequest struct {
-	RequestID        string `json:"request_id,omitempty"`
-	ThreadID         int64  `json:"thread_id"`
-	Message          string `json:"message"`
-	SenderID         string `json:"sender_id,omitempty"`
-	TargetAgentID    string `json:"target_agent_id,omitempty"`
-	ReplyToMessageID *int64 `json:"reply_to_msg_id,omitempty"`
+	RequestID        string         `json:"request_id,omitempty"`
+	ThreadID         int64          `json:"thread_id"`
+	Message          string         `json:"message"`
+	SenderID         string         `json:"sender_id,omitempty"`
+	TargetAgentID    string         `json:"target_agent_id,omitempty"`
+	ReplyToMessageID *int64         `json:"reply_to_msg_id,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
 }
 
 type wsThreadAckPayload struct {
@@ -687,6 +688,7 @@ func (h *Handler) handleWSThreadSend(msg wsMessage, writeJSON func(v any) error)
 		Content:          req.Message,
 		ReplyToMessageID: req.ReplyToMessageID,
 		TargetAgentID:    targetAgentID,
+		Metadata:         req.Metadata,
 	})
 	if err != nil {
 		if apiErr, ok := err.(*threadMessageAPIError); ok {

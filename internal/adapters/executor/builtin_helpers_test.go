@@ -270,6 +270,17 @@ func (n *noopStore) UpdateThreadContextRef(context.Context, *core.ThreadContextR
 }
 func (n *noopStore) DeleteThreadContextRef(context.Context, int64) error          { panic("unused") }
 func (n *noopStore) DeleteThreadContextRefsByThread(context.Context, int64) error { panic("unused") }
+func (n *noopStore) CreateThreadAttachment(context.Context, *core.ThreadAttachment) (int64, error) {
+	panic("unused")
+}
+func (n *noopStore) GetThreadAttachment(context.Context, int64) (*core.ThreadAttachment, error) {
+	panic("unused")
+}
+func (n *noopStore) ListThreadAttachments(context.Context, int64) ([]*core.ThreadAttachment, error) {
+	panic("unused")
+}
+func (n *noopStore) DeleteThreadAttachment(context.Context, int64) error          { panic("unused") }
+func (n *noopStore) DeleteThreadAttachmentsByThread(context.Context, int64) error { panic("unused") }
 func (n *noopStore) CreateAction(context.Context, *core.Action) (int64, error)    { panic("unused") }
 func (n *noopStore) GetAction(context.Context, int64) (*core.Action, error)       { panic("unused") }
 func (n *noopStore) ListActionsByWorkItem(context.Context, int64) ([]*core.Action, error) {

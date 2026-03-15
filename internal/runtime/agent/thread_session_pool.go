@@ -123,9 +123,10 @@ func memberSetAgentData(m *core.ThreadMember, key string, val any) {
 	m.AgentData[key] = val
 }
 
-// InviteAgent starts an ACP session for the given profile in the given thread.
-// It creates a DB record, launches the ACP process, runs the boot sequence,
-// and returns the updated ThreadMember.
+// InviteAgent registers an agent for the given thread and kicks off the boot
+// sequence in the background. It returns the ThreadMember immediately (status
+// = booting). Callers learn about completion / failure via EventBus events
+// (EventThreadAgentBooted, EventThreadAgentJoined, EventThreadAgentFailed).
 func (p *ThreadSessionPool) InviteAgent(ctx context.Context, threadID int64, profileID string) (*core.ThreadMember, error) {
 	if p == nil {
 		return nil, fmt.Errorf("thread session pool is nil")
@@ -150,7 +151,8 @@ func (p *ThreadSessionPool) InviteAgent(ctx context.Context, threadID int64, pro
 				return nil, err
 			}
 			_ = p.store.UpdateThreadMember(ctx, m)
-			return p.bootSession(ctx, m, profile, priorSummary)
+			go p.bootSessionBackground(m, profile, priorSummary)
+			return m, nil
 		}
 		if m.Status == core.ThreadAgentActive || m.Status == core.ThreadAgentBooting {
 			return m, nil // already active
@@ -172,7 +174,18 @@ func (p *ThreadSessionPool) InviteAgent(ctx context.Context, threadID int64, pro
 	}
 	member.ID = id
 
-	return p.bootSession(ctx, member, profile, priorSummary)
+	go p.bootSessionBackground(member, profile, priorSummary)
+	return member, nil
+}
+
+// bootSessionBackground runs the full ACP boot sequence in a background
+// goroutine and publishes success/failure events via the EventBus.
+func (p *ThreadSessionPool) bootSessionBackground(member *core.ThreadMember, profile *core.AgentProfile, priorSummary string) {
+	ctx := context.Background()
+	if _, err := p.bootSession(ctx, member, profile, priorSummary); err != nil {
+		slog.Warn("thread pool: background boot failed",
+			"thread_id", member.ThreadID, "profile", profile.ID, "error", err)
+	}
 }
 
 func (p *ThreadSessionPool) bootSession(ctx context.Context, member *core.ThreadMember, profile *core.AgentProfile, priorSummary string) (*core.ThreadMember, error) {
@@ -406,6 +419,14 @@ func (p *ThreadSessionPool) RemoveAgent(ctx context.Context, threadID int64, age
 	pooled := p.sessions[key]
 	delete(p.sessions, key)
 	p.mu.Unlock()
+
+	// Terminal states (failed/left) — just ensure DB is marked and clean up.
+	if member.Status == core.ThreadAgentFailed || member.Status == core.ThreadAgentLeft {
+		member.Status = core.ThreadAgentLeft
+		_ = p.store.UpdateThreadMember(ctx, member)
+		p.publishThreadEvent(ctx, core.EventThreadAgentLeft, member.ThreadID, member.AgentProfileID, nil)
+		return nil
+	}
 
 	if pooled != nil {
 		pooled.mu.Lock()
@@ -649,8 +670,7 @@ func (p *ThreadSessionPool) prepareThreadWorkspace(ctx context.Context, threadID
 
 	cfg := acphandler.ThreadWorkspaceConfig{
 		ThreadID:     threadID,
-		WorkspaceDir: paths.WorkspaceDir,
-		ArchiveDir:   paths.ArchiveDir,
+		WorkspaceDir: paths.ThreadDir,
 	}
 	if workspaceCtx != nil {
 		refs, _ := p.store.ListThreadContextRefs(ctx, threadID)
@@ -667,5 +687,5 @@ func (p *ThreadSessionPool) prepareThreadWorkspace(ctx context.Context, threadID
 			})
 		}
 	}
-	return paths.WorkspaceDir, cfg, nil
+	return paths.ThreadDir, cfg, nil
 }

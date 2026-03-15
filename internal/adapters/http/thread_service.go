@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -139,17 +140,19 @@ func (h *Handler) resolveThreadMessageRecipients(ctx context.Context, thread *co
 		return nil, nil
 	}
 
-	if !useParticipantFilter {
-		return activeProfileIDs, nil
-	}
-
-	recipients := make([]string, 0, len(activeProfileIDs))
-	for _, profileID := range activeProfileIDs {
-		if agentParticipants[profileID] {
+	// Broadcast: send to all agents that are known participants (DB status
+	// joining/booting/active). We use the DB participant list rather than
+	// the in-memory session pool so that agents that just finished booting
+	// (async) are not missed. If a session doesn't exist yet, SendMessage
+	// will fail gracefully and publish EventThreadAgentFailed.
+	if useParticipantFilter {
+		recipients := make([]string, 0, len(agentParticipants))
+		for profileID := range agentParticipants {
 			recipients = append(recipients, profileID)
 		}
+		return recipients, nil
 	}
-	return recipients, nil
+	return activeProfileIDs, nil
 }
 
 // autoRouteMessage picks the best-fit agent(s) based on keyword matching
@@ -254,9 +257,14 @@ func (h *Handler) createThreadMessageAndRoute(ctx context.Context, input threadM
 
 	var recipients []string
 	if role == "human" {
-		recipients, err = h.resolveThreadMessageRecipients(ctx, thread, content, input.TargetAgentID)
-		if err != nil {
-			return nil, nil, err
+		isBroadcast, _ := input.Metadata["broadcast"].(bool)
+		if isBroadcast && h.threadPool != nil {
+			recipients = h.threadPool.ActiveAgentProfileIDs(thread.ID)
+		} else {
+			recipients, err = h.resolveThreadMessageRecipients(ctx, thread, content, input.TargetAgentID)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
@@ -343,6 +351,7 @@ func (h *Handler) createThreadMessageAndRoute(ctx context.Context, input threadM
 				})
 
 				routedMessage := stripLeadingThreadMention(message.Content, pid, targetAgentID)
+				routedMessage = enrichMessageWithFileRefs(routedMessage, message.Metadata)
 				if sendErr := h.threadPool.SendMessage(context.Background(), message.ThreadID, pid, routedMessage); sendErr != nil {
 					h.bus.Publish(context.Background(), core.Event{
 						Type: core.EventThreadAgentFailed,
@@ -370,6 +379,44 @@ func cloneAnyMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// enrichMessageWithFileRefs prepends a structured file reference section to
+// the message content when file_refs exist in metadata. This gives the agent
+// clear, actionable file paths relative to its cwd.
+func enrichMessageWithFileRefs(content string, metadata map[string]any) string {
+	if metadata == nil {
+		return content
+	}
+	refsRaw, ok := metadata["file_refs"]
+	if !ok {
+		return content
+	}
+	refs, ok := refsRaw.([]any)
+	if !ok || len(refs) == 0 {
+		return content
+	}
+
+	var b strings.Builder
+	b.WriteString("引用文件：\n")
+	for _, r := range refs {
+		ref, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := ref["name"].(string)
+		path, _ := ref["path"].(string)
+		if name == "" && path == "" {
+			continue
+		}
+		if name == "" {
+			name = path
+		}
+		fmt.Fprintf(&b, "- %s → %s\n", name, path)
+	}
+	b.WriteString("\n")
+	b.WriteString(content)
+	return b.String()
 }
 
 func threadAgentSessionIsActive(status core.ThreadAgentStatus) bool {

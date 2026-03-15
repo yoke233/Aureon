@@ -17,11 +17,16 @@ func (h *Handler) workItemTrackService() *workitemtrackapp.Service {
 	if txStore, ok := h.store.(core.TransactionalStore); ok {
 		tx = workItemTrackAppTx{store: txStore}
 	}
+	var leadDispatch workitemtrackapp.LeadDispatcher
+	if h.threadPool != nil {
+		leadDispatch = workItemTrackLeadDispatcher{pool: h.threadPool}
+	}
 	return workitemtrackapp.New(workitemtrackapp.Config{
-		Store:    h.store,
-		Tx:       tx,
-		Bus:      h.bus,
-		Executor: workItemTrackExecutor{handler: h},
+		Store:        h.store,
+		Tx:           tx,
+		Bus:          h.bus,
+		Executor:     workItemTrackExecutor{handler: h},
+		LeadDispatch: leadDispatch,
 	})
 }
 
@@ -35,6 +40,27 @@ func (e workItemTrackExecutor) RunWorkItem(ctx context.Context, workItemID int64
 	}
 	_, err := e.handler.workItemService().RunWorkItem(ctx, workItemID)
 	return err
+}
+
+type workItemTrackLeadDispatcher struct {
+	pool ThreadAgentRuntime
+}
+
+func (d workItemTrackLeadDispatcher) DispatchLeadToThread(ctx context.Context, threadID int64, kickoffMessage string) error {
+	if d.pool == nil {
+		return fmt.Errorf("thread agent runtime is not available")
+	}
+
+	// Invite lead agent. InviteAgent is idempotent — returns existing member if already active.
+	if _, err := d.pool.InviteAgent(ctx, threadID, "lead"); err != nil {
+		return fmt.Errorf("invite lead to thread %d: %w", threadID, err)
+	}
+
+	// Send the kickoff message so the lead starts planning.
+	if err := d.pool.SendMessage(ctx, threadID, "lead", kickoffMessage); err != nil {
+		return fmt.Errorf("send kickoff to lead in thread %d: %w", threadID, err)
+	}
+	return nil
 }
 
 type workItemTrackAppTx struct {

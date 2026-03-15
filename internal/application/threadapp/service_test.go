@@ -239,7 +239,6 @@ func createThreadFixture(t *testing.T, store *sqlite.Store, withMessage bool, wi
 
 	threadID, err := store.CreateThread(ctx, &core.Thread{
 		Title:   "fixture-thread",
-		Summary: "fixture summary",
 		Status:  core.ThreadActive,
 		OwnerID: "owner-1",
 	})
@@ -294,12 +293,12 @@ func createThreadFixture(t *testing.T, store *sqlite.Store, withMessage bool, wi
 	return threadID, workItemID
 }
 
-func TestServiceCreateWorkItemFromThreadUsesSummaryAndCreatesPrimaryLink(t *testing.T) {
+func TestServiceCreateWorkItemFromThreadFallsBackToTitleAndCreatesPrimaryLink(t *testing.T) {
 	store := newThreadAppTestStore(t)
 	svc := newSQLiteThreadAppService(store, newSQLiteTxAdapter(store, nil), nil)
 	ctx := context.Background()
 
-	thread := &core.Thread{Title: "thread-1", Summary: "Ship the feature from summary."}
+	thread := &core.Thread{Title: "thread-1"}
 	threadID, err := store.CreateThread(ctx, thread)
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
@@ -319,11 +318,11 @@ func TestServiceCreateWorkItemFromThreadUsesSummaryAndCreatesPrimaryLink(t *test
 	if result.WorkItem == nil {
 		t.Fatal("expected work item result")
 	}
-	if result.WorkItem.Body != "Ship the feature from summary." {
-		t.Fatalf("expected summary-backed body, got %q", result.WorkItem.Body)
+	if result.WorkItem.Body != "thread-1" {
+		t.Fatalf("expected title-backed body, got %q", result.WorkItem.Body)
 	}
-	if result.WorkItem.Metadata["source_type"] != "thread_summary" {
-		t.Fatalf("expected source_type thread_summary, got %#v", result.WorkItem.Metadata["source_type"])
+	if result.WorkItem.Metadata["source_type"] != "thread_manual" {
+		t.Fatalf("expected source_type thread_manual, got %#v", result.WorkItem.Metadata["source_type"])
 	}
 	if result.Link == nil || result.Link.ThreadID != thread.ID || result.Link.WorkItemID != result.WorkItem.ID {
 		t.Fatalf("unexpected link result: %+v", result.Link)
@@ -368,12 +367,9 @@ func TestServiceCreateWorkItemFromThreadExplicitBodyMarksManualSource(t *testing
 	if result.WorkItem.Metadata["source_type"] != "thread_manual" {
 		t.Fatalf("expected source_type thread_manual, got %#v", result.WorkItem.Metadata["source_type"])
 	}
-	if result.WorkItem.Metadata["body_from_summary"] != false {
-		t.Fatalf("expected body_from_summary false, got %#v", result.WorkItem.Metadata["body_from_summary"])
-	}
 }
 
-func TestServiceCreateWorkItemFromThreadRequiresSummaryWhenBodyMissing(t *testing.T) {
+func TestServiceCreateWorkItemFromThreadFallsBackToTitleWhenBodyMissing(t *testing.T) {
 	store := newThreadAppTestStore(t)
 	svc := newSQLiteThreadAppService(store, newSQLiteTxAdapter(store, nil), nil)
 	ctx := context.Background()
@@ -383,12 +379,15 @@ func TestServiceCreateWorkItemFromThreadRequiresSummaryWhenBodyMissing(t *testin
 		t.Fatalf("create thread: %v", err)
 	}
 
-	_, err = svc.CreateWorkItemFromThread(ctx, CreateWorkItemFromThreadInput{
+	result, err := svc.CreateWorkItemFromThread(ctx, CreateWorkItemFromThreadInput{
 		ThreadID:      threadID,
 		WorkItemTitle: "spawned work item",
 	})
-	if CodeOf(err) != CodeMissingThreadSummary {
-		t.Fatalf("expected %s, got %v", CodeMissingThreadSummary, err)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.WorkItem.Body != "thread-3" {
+		t.Fatalf("expected body to fall back to thread title, got %q", result.WorkItem.Body)
 	}
 }
 
@@ -406,8 +405,7 @@ func TestServiceCreateWorkItemFromThreadRollsBackOnLinkFailure(t *testing.T) {
 	ctx := context.Background()
 
 	threadID, err := base.CreateThread(ctx, &core.Thread{
-		Title:   "thread-4",
-		Summary: "Use me as the body.",
+		Title: "thread-4",
 	})
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
@@ -532,7 +530,6 @@ func TestServiceCrystallizeChatSessionCreatesThreadOnly(t *testing.T) {
 	result, err := svc.CrystallizeChatSession(ctx, CrystallizeChatSessionInput{
 		SessionID:          "chat-1",
 		ThreadTitle:        "Design API shape",
-		ThreadSummary:      "Discuss API structure",
 		OwnerID:            "owner-1",
 		ParticipantUserIDs: []string{"owner-1", "member-2"},
 	})
@@ -575,10 +572,10 @@ func TestServiceCrystallizeChatSessionCreatesThreadAndWorkItem(t *testing.T) {
 	result, err := svc.CrystallizeChatSession(ctx, CrystallizeChatSessionInput{
 		SessionID:      "chat-2",
 		ThreadTitle:    "Ship feature",
-		ThreadSummary:  "Use summary as work item body",
 		OwnerID:        "owner-1",
 		CreateWorkItem: true,
 		WorkItemTitle:  "Implement feature",
+		WorkItemBody:   "Implement the shipping feature",
 	})
 	if err != nil {
 		t.Fatalf("CrystallizeChatSession: %v", err)
@@ -589,8 +586,8 @@ func TestServiceCrystallizeChatSessionCreatesThreadAndWorkItem(t *testing.T) {
 	if result.WorkItem == nil || result.WorkItem.ID == 0 {
 		t.Fatalf("expected work item result, got %+v", result.WorkItem)
 	}
-	if result.WorkItem.Body != "Use summary as work item body" {
-		t.Fatalf("expected summary-backed work item body, got %q", result.WorkItem.Body)
+	if result.WorkItem.Body != "Implement the shipping feature" {
+		t.Fatalf("expected explicit work item body, got %q", result.WorkItem.Body)
 	}
 	links, err := store.ListWorkItemsByThread(ctx, result.Thread.ID)
 	if err != nil {
@@ -620,10 +617,10 @@ func TestServiceCrystallizeChatSessionRollsBackWhenLinkCreationFails(t *testing.
 	_, err := svc.CrystallizeChatSession(ctx, CrystallizeChatSessionInput{
 		SessionID:      "chat-3",
 		ThreadTitle:    "Broken materialization",
-		ThreadSummary:  "summary body",
 		OwnerID:        "owner-1",
 		CreateWorkItem: true,
 		WorkItemTitle:  "Should rollback",
+		WorkItemBody:   "body",
 	})
 	if err == nil {
 		t.Fatal("expected crystallize chat session to fail")
@@ -1149,7 +1146,7 @@ func TestServiceUpdateContextRefAndWorkItemHelpers(t *testing.T) {
 		if _, _, err := createLinkedWorkItemFromThreadData(ctx, store, nil, "title", "body", nil); err == nil {
 			t.Fatal("expected nil thread helper to fail")
 		}
-		thread := &core.Thread{ID: 1, Summary: "summary"}
+		thread := &core.Thread{ID: 1, Title: "thread"}
 		if _, _, err := createLinkedWorkItemFromThreadData(ctx, store, thread, " ", "body", nil); CodeOf(err) != CodeMissingTitle {
 			t.Fatalf("expected %s, got %v", CodeMissingTitle, err)
 		}
@@ -1362,10 +1359,10 @@ func TestServiceErrorAndAggregateFailureBranches(t *testing.T) {
 		if _, err := workItemFailSvc.CrystallizeChatSession(context.Background(), CrystallizeChatSessionInput{
 			SessionID:      "chat-2",
 			ThreadTitle:    "title-2",
-			ThreadSummary:  "summary",
 			OwnerID:        "owner",
 			CreateWorkItem: true,
 			WorkItemTitle:  "work",
+			WorkItemBody:   "body",
 		}); err == nil || err.Error() != "create work item failed" {
 			t.Fatalf("expected create work item failure, got %v", err)
 		}
@@ -1393,7 +1390,7 @@ func TestServiceErrorAndAggregateFailureBranches(t *testing.T) {
 		store := newThreadAppTestStore(t)
 		svc := New(Config{Store: store})
 		ctx := context.Background()
-		threadID, err := store.CreateThread(ctx, &core.Thread{Title: "thread", Summary: "summary"})
+		threadID, err := store.CreateThread(ctx, &core.Thread{Title: "thread"})
 		if err != nil {
 			t.Fatalf("create thread: %v", err)
 		}
@@ -1404,7 +1401,7 @@ func TestServiceErrorAndAggregateFailureBranches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateWorkItemFromThread: %v", err)
 		}
-		if result.WorkItem == nil || result.Link == nil || result.WorkItem.Body != "summary" {
+		if result.WorkItem == nil || result.Link == nil || result.WorkItem.Body != "thread" {
 			t.Fatalf("unexpected non-tx work item result: %+v", result)
 		}
 	})
@@ -1441,7 +1438,7 @@ func TestServiceErrorAndAggregateFailureBranches(t *testing.T) {
 		}
 
 		workItemStore := &failingLinkCleanupStore{failingCreateThreadStore: &failingCreateThreadStore{Store: base, failDeleteItem: true}}
-		_, _, err = createLinkedWorkItemFromThreadData(context.Background(), workItemStore, &core.Thread{ID: 1, Summary: "summary"}, "title", "", nil)
+		_, _, err = createLinkedWorkItemFromThreadData(context.Background(), workItemStore, &core.Thread{ID: 1, Title: "thread"}, "title", "", nil)
 		if err == nil || !strings.Contains(err.Error(), "rollback failed") {
 			t.Fatalf("expected rollback failed error, got %v", err)
 		}

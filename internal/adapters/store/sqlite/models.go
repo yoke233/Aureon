@@ -225,7 +225,6 @@ type ThreadModel struct {
 	Title     string                    `gorm:"column:title;not null"`
 	Status    string                    `gorm:"column:status;not null"`
 	OwnerID   string                    `gorm:"column:owner_id;not null"`
-	Summary   string                    `gorm:"column:summary;not null"`
 	Metadata  JSONField[map[string]any] `gorm:"column:metadata;type:text"`
 	CreatedAt time.Time                 `gorm:"column:created_at"`
 	UpdatedAt time.Time                 `gorm:"column:updated_at"`
@@ -242,7 +241,6 @@ func threadModelFromCore(t *core.Thread) *ThreadModel {
 		Title:     t.Title,
 		Status:    string(t.Status),
 		OwnerID:   t.OwnerID,
-		Summary:   t.Summary,
 		Metadata:  JSONField[map[string]any]{Data: t.Metadata},
 		CreatedAt: t.CreatedAt,
 		UpdatedAt: t.UpdatedAt,
@@ -258,7 +256,6 @@ func (m *ThreadModel) toCore() *core.Thread {
 		Title:     m.Title,
 		Status:    core.ThreadStatus(m.Status),
 		OwnerID:   m.OwnerID,
-		Summary:   m.Summary,
 		Metadata:  m.Metadata.Data,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
@@ -384,6 +381,60 @@ type ThreadContextRefModel struct {
 }
 
 func (ThreadContextRefModel) TableName() string { return "thread_context_refs" }
+
+type ThreadAttachmentModel struct {
+	ID          int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID    int64     `gorm:"column:thread_id;not null;index"`
+	MessageID   *int64    `gorm:"column:message_id"`
+	FileName    string    `gorm:"column:file_name;not null"`
+	FilePath    string    `gorm:"column:file_path;not null"`
+	FileSize    int64     `gorm:"column:file_size;not null;default:0"`
+	ContentType string    `gorm:"column:content_type;not null;default:''"`
+	IsDirectory bool      `gorm:"column:is_directory;not null;default:false"`
+	UploadedBy  string    `gorm:"column:uploaded_by;not null;default:''"`
+	Note        string    `gorm:"column:note;not null;default:''"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+}
+
+func (ThreadAttachmentModel) TableName() string { return "thread_attachments" }
+
+func (m *ThreadAttachmentModel) toCore() *core.ThreadAttachment {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadAttachment{
+		ID:          m.ID,
+		ThreadID:    m.ThreadID,
+		MessageID:   m.MessageID,
+		FileName:    m.FileName,
+		FilePath:    m.FilePath,
+		FileSize:    m.FileSize,
+		ContentType: m.ContentType,
+		IsDirectory: m.IsDirectory,
+		UploadedBy:  m.UploadedBy,
+		Note:        m.Note,
+		CreatedAt:   m.CreatedAt,
+	}
+}
+
+func threadAttachmentModelFromCore(a *core.ThreadAttachment) *ThreadAttachmentModel {
+	if a == nil {
+		return nil
+	}
+	return &ThreadAttachmentModel{
+		ID:          a.ID,
+		ThreadID:    a.ThreadID,
+		MessageID:   a.MessageID,
+		FileName:    a.FileName,
+		FilePath:    a.FilePath,
+		FileSize:    a.FileSize,
+		ContentType: a.ContentType,
+		IsDirectory: a.IsDirectory,
+		UploadedBy:  a.UploadedBy,
+		Note:        a.Note,
+		CreatedAt:   a.CreatedAt,
+	}
+}
 
 func (m *ThreadContextRefModel) toCore() *core.ThreadContextRef {
 	if m == nil {

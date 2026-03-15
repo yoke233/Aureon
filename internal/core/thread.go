@@ -60,7 +60,6 @@ type Thread struct {
 	Title     string         `json:"title"`
 	Status    ThreadStatus   `json:"status"`
 	OwnerID   string         `json:"owner_id,omitempty"`
-	Summary   string         `json:"summary,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -174,23 +173,37 @@ type ThreadWorkspaceMount struct {
 	CheckCommands []string      `json:"check_commands,omitempty"`
 }
 
-// ThreadWorkspaceArchiveSnapshot describes one archived workspace snapshot.
-type ThreadWorkspaceArchiveSnapshot struct {
-	Date      string `json:"date"`
-	Path      string `json:"path"`
-	Manifest  string `json:"manifest,omitempty"`
-	FileCount int    `json:"file_count,omitempty"`
+// ThreadAttachment is a file or directory uploaded to a thread as discussion material.
+type ThreadAttachment struct {
+	ID          int64     `json:"id"`
+	ThreadID    int64     `json:"thread_id"`
+	MessageID   *int64    `json:"message_id,omitempty"`
+	FileName    string    `json:"file_name"`
+	FilePath    string    `json:"file_path"`
+	FileSize    int64     `json:"file_size"`
+	ContentType string    `json:"content_type"`
+	IsDirectory bool      `json:"is_directory"`
+	UploadedBy  string    `json:"uploaded_by,omitempty"`
+	Note        string    `json:"note,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// ThreadWorkspaceAttachmentRef is the .context.json representation of an attachment.
+type ThreadWorkspaceAttachmentRef struct {
+	FileName    string `json:"file_name"`
+	FilePath    string `json:"file_path"`
+	IsDirectory bool   `json:"is_directory,omitempty"`
+	Note        string `json:"note,omitempty"`
 }
 
 // ThreadWorkspaceContext is the platform-maintained .context.json payload.
 type ThreadWorkspaceContext struct {
-	ThreadID  int64                            `json:"thread_id"`
-	Workspace string                           `json:"workspace"`
-	Mounts    map[string]ThreadWorkspaceMount  `json:"mounts,omitempty"`
-	Archive   string                           `json:"archive"`
-	Archives  []ThreadWorkspaceArchiveSnapshot `json:"archives,omitempty"`
-	Members   []string                         `json:"members,omitempty"`
-	UpdatedAt time.Time                        `json:"updated_at"`
+	ThreadID    int64                           `json:"thread_id"`
+	Workspace   string                          `json:"workspace"`
+	Mounts      map[string]ThreadWorkspaceMount `json:"mounts,omitempty"`
+	Attachments []ThreadWorkspaceAttachmentRef  `json:"attachments,omitempty"`
+	Members     []string                        `json:"members,omitempty"`
+	UpdatedAt   time.Time                       `json:"updated_at"`
 }
 
 // ThreadAgentStatus represents the lifecycle status of an agent thread member.
@@ -357,4 +370,10 @@ type ThreadStore interface {
 	UpdateThreadContextRef(ctx context.Context, ref *ThreadContextRef) error
 	DeleteThreadContextRef(ctx context.Context, id int64) error
 	DeleteThreadContextRefsByThread(ctx context.Context, threadID int64) error
+
+	CreateThreadAttachment(ctx context.Context, att *ThreadAttachment) (int64, error)
+	GetThreadAttachment(ctx context.Context, id int64) (*ThreadAttachment, error)
+	ListThreadAttachments(ctx context.Context, threadID int64) ([]*ThreadAttachment, error)
+	DeleteThreadAttachment(ctx context.Context, id int64) error
+	DeleteThreadAttachmentsByThread(ctx context.Context, threadID int64) error
 }

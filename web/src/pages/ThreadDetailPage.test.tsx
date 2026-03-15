@@ -104,14 +104,6 @@ function renderPage() {
   );
 }
 
-async function openDetailsTab() {
-  fireEvent.click(await screen.findByRole("button", { name: "Details" }));
-}
-
-async function openSummaryPanel() {
-  await openDetailsTab();
-  fireEvent.click(await screen.findByRole("button", { name: "Summary" }));
-}
 
 describe("ThreadDetailPage", () => {
   beforeEach(() => {
@@ -127,63 +119,6 @@ describe("ThreadDetailPage", () => {
     cleanup();
   });
 
-  it("支持编辑并保存 summary", async () => {
-    const wsClient = createWsClientMock();
-    const apiClient = {
-      getThread: vi.fn().mockResolvedValue(buildThread("旧摘要")),
-      listThreadMessages: vi.fn().mockResolvedValue([]),
-      listThreadParticipants: vi.fn().mockResolvedValue([]),
-      listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTracks: vi.fn().mockResolvedValue([]),
-      listThreadAgents: vi.fn().mockResolvedValue([]),
-      listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
-      updateThread: vi.fn().mockResolvedValue(buildThread("新摘要")),
-    };
-    mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
-
-    renderPage();
-
-    await openSummaryPanel();
-
-    const textarea = await screen.findByDisplayValue("旧摘要");
-    fireEvent.change(textarea, { target: { value: "新摘要" } });
-    fireEvent.click(screen.getByRole("button", { name: /保存|Save/ }));
-
-    await waitFor(() => {
-      expect(apiClient.updateThread).toHaveBeenCalledWith(1, { summary: "新摘要" });
-    });
-    expect(await screen.findByDisplayValue("新摘要")).toBeTruthy();
-  });
-
-  it("没有 summary 时阻止创建 work item，并持续展示依赖 summary 的提示", async () => {
-    const wsClient = createWsClientMock();
-    const apiClient = {
-      getThread: vi.fn().mockResolvedValue(buildThread("")),
-      listThreadMessages: vi.fn().mockResolvedValue([]),
-      listThreadParticipants: vi.fn().mockResolvedValue([]),
-      listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTracks: vi.fn().mockResolvedValue([]),
-      listThreadAgents: vi.fn().mockResolvedValue([]),
-      listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
-      createWorkItemFromThread: vi.fn(),
-    };
-    mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
-
-    renderPage();
-
-    await openSummaryPanel();
-
-    expect(
-      await screen.findByText(
-        "Save a summary first to create work items.",
-      ),
-    ).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-
-    expect(screen.queryByText("Create Work Item from Summary")).toBeNull();
-    expect(apiClient.createWorkItemFromThread).not.toHaveBeenCalled();
-  });
 
   it("进入页面订阅 thread，并通过 thread.send + 实时事件更新消息列表", async () => {
     const wsClient = createWsClientMock();
@@ -194,6 +129,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
     };
     mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
@@ -256,6 +192,7 @@ describe("ThreadDetailPage", () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([buildAgentSession(11, "worker-a")])
         .mockResolvedValueOnce([]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a"), buildProfile("worker-b")]),
       inviteThreadAgent: vi.fn().mockResolvedValue(buildAgentSession(11, "worker-a", "joining")),
       removeThreadAgent: vi.fn().mockResolvedValue(undefined),
@@ -264,8 +201,10 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
+    // Click "Add Agent" to reveal the invite picker, then select the agent.
+    fireEvent.click(await screen.findByText("Add Agent"));
     fireEvent.click(await screen.findByText("worker-a"));
-    fireEvent.click(await screen.findByRole("button", { name: "Add (1)" }));
+    fireEvent.click(await screen.findByText(/Add \(1\)/));
 
     await waitFor(() => {
       expect(apiClient.inviteThreadAgent).toHaveBeenCalledWith(1, { agent_profile_id: "worker-a" });
@@ -291,6 +230,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a")]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
     };
     mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
@@ -342,6 +282,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a")]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
     };
     mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
@@ -375,6 +316,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a")]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
       updateThread: vi.fn().mockResolvedValue(buildThread("已有摘要", { agent_routing_mode: "broadcast" })),
     };
@@ -401,6 +343,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a"), buildAgentSession(12, "worker-b")]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a"), buildProfile("worker-b")]),
     };
     mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
@@ -437,6 +380,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a")]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
     };
     mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
@@ -469,6 +413,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
     };
     mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
@@ -498,6 +443,7 @@ describe("ThreadDetailPage", () => {
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
       listThreadTracks: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([buildAgentSession(11, "worker-a")]),
+      listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
     };
     mockUseWorkbench.mockReturnValue({ apiClient, wsClient });

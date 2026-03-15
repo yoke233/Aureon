@@ -119,7 +119,6 @@ func (s *Store) UpdateThread(ctx context.Context, thread *core.Thread) error {
 			"title":      model.Title,
 			"status":     model.Status,
 			"owner_id":   model.OwnerID,
-			"summary":    model.Summary,
 			"metadata":   model.Metadata,
 			"updated_at": model.UpdatedAt,
 		})

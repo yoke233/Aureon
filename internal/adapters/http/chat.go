@@ -135,7 +135,6 @@ func (h *chatHandlers) getStatus(w http.ResponseWriter, r *http.Request) {
 
 type crystallizeChatSessionRequest struct {
 	ThreadTitle        string   `json:"thread_title"`
-	ThreadSummary      string   `json:"thread_summary"`
 	WorkItemTitle      string   `json:"work_item_title,omitempty"`
 	WorkItemBody       string   `json:"work_item_body,omitempty"`
 	ProjectID          *int64   `json:"project_id,omitempty"`
@@ -181,12 +180,10 @@ func (h *chatHandlers) crystallizeThread(w http.ResponseWriter, r *http.Request)
 		threadTitle = fmt.Sprintf("Chat Session %s", sessionID)
 	}
 
-	threadSummary := strings.TrimSpace(req.ThreadSummary)
 	ownerID := strings.TrimSpace(req.OwnerID)
 	result, err := h.handler.threadService().CrystallizeChatSession(r.Context(), threadapp.CrystallizeChatSessionInput{
 		SessionID:          sessionID,
 		ThreadTitle:        threadTitle,
-		ThreadSummary:      threadSummary,
 		OwnerID:            ownerID,
 		ParticipantUserIDs: req.ParticipantUserIDs,
 		CreateWorkItem:     req.CreateWorkItem,

@@ -29,6 +29,7 @@ func autoMigrate(ctx context.Context, orm *gorm.DB) error {
 		&ThreadMemberModel{},
 		&ThreadWorkItemLinkModel{},
 		&ThreadContextRefModel{},
+		&ThreadAttachmentModel{},
 		&WorkItemTrackModel{},
 		&WorkItemTrackThreadModel{},
 		&FeatureEntryModel{},

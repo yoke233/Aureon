@@ -5,9 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
 	"github.com/yoke233/ai-workflow/internal/core"
@@ -105,7 +103,7 @@ func TestBuildWorkspaceContext(t *testing.T) {
 	if payload.ThreadID != threadID {
 		t.Fatalf("unexpected thread id: %d", payload.ThreadID)
 	}
-	if payload.Workspace != "." || payload.Archive != "../archive" {
+	if payload.Workspace != "." {
 		t.Fatalf("unexpected workspace payload: %+v", payload)
 	}
 	mount, ok := payload.Mounts["project-beta"]
@@ -117,38 +115,6 @@ func TestBuildWorkspaceContext(t *testing.T) {
 	}
 	if len(payload.Members) != 1 || payload.Members[0] != "owner-1" {
 		t.Fatalf("unexpected members: %+v", payload.Members)
-	}
-}
-
-func TestBuildWorkspaceContextIncludesArchiveSnapshots(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	dataDir := t.TempDir()
-
-	threadID, err := store.CreateThread(ctx, &core.Thread{Title: "Thread Alpha", OwnerID: "owner-1"})
-	if err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	paths, err := EnsureLayout(dataDir, threadID)
-	if err != nil {
-		t.Fatalf("EnsureLayout: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(paths.WorkspaceDir, "notes.md"), []byte("hello"), 0o644); err != nil {
-		t.Fatalf("write workspace file: %v", err)
-	}
-	if err := SyncDailyArchive(paths, time.Date(2026, 3, 15, 9, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("SyncDailyArchive: %v", err)
-	}
-
-	payload, err := BuildWorkspaceContext(ctx, store, dataDir, threadID)
-	if err != nil {
-		t.Fatalf("BuildWorkspaceContext: %v", err)
-	}
-	if len(payload.Archives) != 1 {
-		t.Fatalf("expected 1 archive snapshot, got %+v", payload.Archives)
-	}
-	if payload.Archives[0].Date != "2026-03-15" || payload.Archives[0].Manifest == "" || payload.Archives[0].FileCount != 1 {
-		t.Fatalf("unexpected archive snapshot metadata: %+v", payload.Archives[0])
 	}
 }
 
@@ -201,56 +167,6 @@ func TestSyncContextFileAndLoadContextFileRoundTrip(t *testing.T) {
 	}
 	if len(loaded.Mounts["project-gamma"].CheckCommands) != 2 {
 		t.Fatalf("expected 2 check commands, got %+v", loaded.Mounts["project-gamma"].CheckCommands)
-	}
-}
-
-func TestSyncContextFileCreatesArchiveSnapshotAndManifest(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	dataDir := t.TempDir()
-
-	threadID, err := store.CreateThread(ctx, &core.Thread{Title: "Thread Alpha", OwnerID: "owner-1"})
-	if err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	if _, err := store.AddThreadMember(ctx, &core.ThreadMember{
-		ThreadID: threadID,
-		Kind:     core.ThreadMemberKindHuman,
-		UserID:   "owner-1",
-		Role:     "owner",
-	}); err != nil {
-		t.Fatalf("add member: %v", err)
-	}
-	paths, err := EnsureLayout(dataDir, threadID)
-	if err != nil {
-		t.Fatalf("EnsureLayout: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(paths.WorkspaceDir, "plan.md"), []byte("draft"), 0o644); err != nil {
-		t.Fatalf("write plan: %v", err)
-	}
-
-	if _, err := SyncContextFile(ctx, store, dataDir, threadID); err != nil {
-		t.Fatalf("SyncContextFile: %v", err)
-	}
-
-	snapshotDir := filepath.Join(paths.ArchiveDir, time.Now().UTC().Format("2006-01-02"))
-	if _, err := os.Stat(filepath.Join(snapshotDir, "plan.md")); err != nil {
-		t.Fatalf("expected archived plan.md: %v", err)
-	}
-	raw, err := os.ReadFile(filepath.Join(snapshotDir, archiveManifestName))
-	if err != nil {
-		t.Fatalf("read archive manifest: %v", err)
-	}
-	if !strings.Contains(string(raw), "plan.md") {
-		t.Fatalf("expected manifest to contain plan.md, got %s", string(raw))
-	}
-
-	loaded, err := LoadContextFile(dataDir, threadID)
-	if err != nil {
-		t.Fatalf("LoadContextFile: %v", err)
-	}
-	if len(loaded.Archives) != 1 || loaded.Archives[0].Manifest == "" {
-		t.Fatalf("expected archive snapshot in context file, got %+v", loaded.Archives)
 	}
 }
 
@@ -322,6 +238,10 @@ func (s *threadctxStoreStub) ListThreadContextRefs(context.Context, int64) ([]*c
 	return s.listThreadContextRef, s.listRefsErr
 }
 
+func (s *threadctxStoreStub) ListThreadAttachments(context.Context, int64) ([]*core.ThreadAttachment, error) {
+	return nil, nil
+}
+
 func (s *threadctxStoreStub) ListResourceSpaces(context.Context, int64) ([]*core.ResourceSpace, error) {
 	return s.listSpaces, s.listSpacesErr
 }
@@ -348,7 +268,7 @@ func TestPathsAndEnsureLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureLayout() error = %v", err)
 	}
-	for _, dir := range []string{got.ThreadDir, got.WorkspaceDir, got.MountsDir, got.ArchiveDir} {
+	for _, dir := range []string{got.ThreadDir, got.ProjectsDir, got.AttachmentsDir} {
 		info, statErr := os.Stat(dir)
 		if statErr != nil || !info.IsDir() {
 			t.Fatalf("expected directory %q to exist, err=%v", dir, statErr)
@@ -356,77 +276,42 @@ func TestPathsAndEnsureLayout(t *testing.T) {
 	}
 }
 
-func TestSyncDailyArchiveSkipsContextOnlyWorkspaceAndPrunesOldSnapshots(t *testing.T) {
-	dataDir := t.TempDir()
-	paths, err := EnsureLayout(dataDir, 9)
-	if err != nil {
-		t.Fatalf("EnsureLayout: %v", err)
-	}
-	if err := os.WriteFile(paths.ContextFile, []byte("{}"), 0o644); err != nil {
-		t.Fatalf("write context file: %v", err)
-	}
-	if err := SyncDailyArchive(paths, time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("SyncDailyArchive(context-only): %v", err)
-	}
-	entries, err := os.ReadDir(paths.ArchiveDir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("expected no snapshots for context-only workspace, got %+v", entries)
-	}
-
-	oldDir := filepath.Join(paths.ArchiveDir, "2026-03-01")
-	if err := os.MkdirAll(oldDir, 0o755); err != nil {
-		t.Fatalf("mkdir old archive: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(paths.WorkspaceDir, "notes.md"), []byte("hello"), 0o644); err != nil {
-		t.Fatalf("write workspace file: %v", err)
-	}
-	if err := SyncDailyArchive(paths, time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatalf("SyncDailyArchive(with files): %v", err)
-	}
-	if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
-		t.Fatalf("expected old archive to be pruned, stat err=%v", err)
-	}
-}
-
 func TestSyncMountAliasDirsRemovesStaleDirs(t *testing.T) {
-	mountsDir := filepath.Join(t.TempDir(), "mounts")
-	if err := os.MkdirAll(filepath.Join(mountsDir, "stale-project"), 0o755); err != nil {
+	projectsDir := filepath.Join(t.TempDir(), "projects")
+	if err := os.MkdirAll(filepath.Join(projectsDir, "stale-project"), 0o755); err != nil {
 		t.Fatalf("mkdir stale dir: %v", err)
 	}
 	payload := &core.ThreadWorkspaceContext{
 		Mounts: map[string]core.ThreadWorkspaceMount{
-			"project-alpha": {Path: "../mounts/project-alpha"},
+			"project-alpha": {Path: "projects/project-alpha"},
 		},
 	}
-	if err := syncMountAliasDirs(mountsDir, payload, nil); err != nil {
+	if err := syncMountAliasDirs(projectsDir, payload, nil); err != nil {
 		t.Fatalf("syncMountAliasDirs: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(mountsDir, "project-alpha")); err != nil {
+	if _, err := os.Stat(filepath.Join(projectsDir, "project-alpha")); err != nil {
 		t.Fatalf("expected fresh mount dir: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(mountsDir, "stale-project")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(projectsDir, "stale-project")); !os.IsNotExist(err) {
 		t.Fatalf("expected stale mount dir removed, err=%v", err)
 	}
 }
 
 func TestSyncMountAliasDirsCreatesMountDirForResolvedTarget(t *testing.T) {
-	mountsDir := filepath.Join(t.TempDir(), "mounts")
+	projectsDir := filepath.Join(t.TempDir(), "projects")
 	targetDir := filepath.Join(t.TempDir(), "project-alpha")
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("mkdir target dir: %v", err)
 	}
 	payload := &core.ThreadWorkspaceContext{
 		Mounts: map[string]core.ThreadWorkspaceMount{
-			"project-alpha": {Path: "../mounts/project-alpha"},
+			"project-alpha": {Path: "projects/project-alpha"},
 		},
 	}
-	if err := syncMountAliasDirs(mountsDir, payload, map[string]string{"project-alpha": targetDir}); err != nil {
+	if err := syncMountAliasDirs(projectsDir, payload, map[string]string{"project-alpha": targetDir}); err != nil {
 		t.Fatalf("syncMountAliasDirs: %v", err)
 	}
-	info, err := os.Stat(filepath.Join(mountsDir, "project-alpha"))
+	info, err := os.Stat(filepath.Join(projectsDir, "project-alpha"))
 	if err != nil || !info.IsDir() {
 		t.Fatalf("expected mount alias dir, err=%v", err)
 	}

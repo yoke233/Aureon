@@ -82,8 +82,6 @@ func writeThreadAppError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusBadRequest, "work_item_id is required", threadapp.CodeMissingWorkItemID)
 	case threadapp.CodeMissingProjectID:
 		writeError(w, http.StatusBadRequest, "project_id is required", threadapp.CodeMissingProjectID)
-	case threadapp.CodeMissingThreadSummary:
-		writeError(w, http.StatusBadRequest, "please generate or fill in summary first", threadapp.CodeMissingThreadSummary)
 	case threadapp.CodeInvalidContextAccess:
 		writeError(w, http.StatusBadRequest, err.Error(), threadapp.CodeInvalidContextAccess)
 	case threadapp.CodeContextRefConflict:

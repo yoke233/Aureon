@@ -89,8 +89,7 @@ func TestThreadCRUD(t *testing.T) {
 
 	// Update thread
 	resp, err = put(ts, fmt.Sprintf("/threads/%d", thread.ID), map[string]any{
-		"title":   "updated title",
-		"summary": "key decisions made",
+		"title": "updated title",
 	})
 	if err != nil {
 		t.Fatalf("put: %v", err)
@@ -104,9 +103,6 @@ func TestThreadCRUD(t *testing.T) {
 	}
 	if updated.Title != "updated title" {
 		t.Fatalf("expected 'updated title', got %q", updated.Title)
-	}
-	if updated.Summary != "key decisions made" {
-		t.Fatalf("expected summary, got %q", updated.Summary)
 	}
 
 	// Delete thread
@@ -689,20 +685,12 @@ func TestThreadCreateWorkItem(t *testing.T) {
 
 	// Create thread.
 	resp, _ := post(ts, "/threads", map[string]any{
-		"title":   "create-wi-thread",
-		"summary": "summary should be ignored on create",
+		"title": "create-wi-thread",
 	})
 	var thread core.Thread
 	decodeJSON(resp, &thread)
 
-	resp, _ = put(ts, fmt.Sprintf("/threads/%d", thread.ID), map[string]any{
-		"summary": "Ship the thread summary as the default work item body.",
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 updating summary, got %d", resp.StatusCode)
-	}
-
-	// Create work item from thread.
+	// Create work item from thread (no body => uses thread.Title as fallback).
 	resp, err := post(ts, fmt.Sprintf("/threads/%d/create-work-item", thread.ID), map[string]any{
 		"title": "spawned work item",
 	})
@@ -716,17 +704,14 @@ func TestThreadCreateWorkItem(t *testing.T) {
 	if err := decodeJSON(resp, &issue); err != nil {
 		t.Fatalf("decode issue: %v", err)
 	}
-	if issue.Body != "Ship the thread summary as the default work item body." {
-		t.Fatalf("expected summary-backed body, got %q", issue.Body)
+	if issue.Body != "create-wi-thread" {
+		t.Fatalf("expected title-backed body, got %q", issue.Body)
 	}
 	if issue.Metadata["source_thread_id"] != float64(thread.ID) {
 		t.Fatalf("expected source_thread_id=%d, got %#v", thread.ID, issue.Metadata["source_thread_id"])
 	}
-	if issue.Metadata["source_type"] != "thread_summary" {
-		t.Fatalf("expected source_type=thread_summary, got %#v", issue.Metadata["source_type"])
-	}
-	if issue.Metadata["body_from_summary"] != true {
-		t.Fatalf("expected body_from_summary=true, got %#v", issue.Metadata["body_from_summary"])
+	if issue.Metadata["source_type"] != "thread_manual" {
+		t.Fatalf("expected source_type=thread_manual, got %#v", issue.Metadata["source_type"])
 	}
 
 	// Verify link was created.
@@ -741,7 +726,7 @@ func TestThreadCreateWorkItem(t *testing.T) {
 	}
 }
 
-func TestThreadCreateWorkItemRequiresSummaryWhenBodyMissing(t *testing.T) {
+func TestThreadCreateWorkItemFallsBackToTitleWhenBodyMissing(t *testing.T) {
 	_, ts := setupAPI(t)
 
 	resp, _ := post(ts, "/threads", map[string]any{"title": "create-wi-thread"})
@@ -754,19 +739,16 @@ func TestThreadCreateWorkItemRequiresSummaryWhenBodyMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create work item: %v", err)
 	}
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
 	}
 
-	var apiErr map[string]any
-	if err := decodeJSON(resp, &apiErr); err != nil {
-		t.Fatalf("decode error: %v", err)
+	var issue core.WorkItem
+	if err := decodeJSON(resp, &issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
 	}
-	if apiErr["error"] != "please generate or fill in summary first" {
-		t.Fatalf("unexpected error message: %#v", apiErr["error"])
-	}
-	if apiErr["code"] != "MISSING_THREAD_SUMMARY" {
-		t.Fatalf("unexpected error code: %#v", apiErr["code"])
+	if issue.Body != "create-wi-thread" {
+		t.Fatalf("expected body to fall back to thread title, got %q", issue.Body)
 	}
 }
 
@@ -800,9 +782,6 @@ func TestThreadCreateWorkItemWithExplicitBodyMarksManualSource(t *testing.T) {
 	}
 	if issue.Metadata["source_type"] != "thread_manual" {
 		t.Fatalf("expected source_type=thread_manual, got %#v", issue.Metadata["source_type"])
-	}
-	if issue.Metadata["body_from_summary"] != false {
-		t.Fatalf("expected body_from_summary=false, got %#v", issue.Metadata["body_from_summary"])
 	}
 }
 
@@ -910,7 +889,7 @@ func TestThreadContextRefCRUDAndWorkspaceContextFile(t *testing.T) {
 	}
 	resourceResp.Body.Close()
 
-	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), "workspace", ".context.json")
+	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), ".context.json")
 	if _, err := os.Stat(contextFile); err != nil {
 		t.Fatalf("expected context file to exist after thread create: %v", err)
 	}
@@ -1161,7 +1140,7 @@ func TestThreadWorkspaceContextMembersSyncOnParticipantChanges(t *testing.T) {
 	var thread core.Thread
 	decodeJSON(resp, &thread)
 
-	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), "workspace", ".context.json")
+	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), ".context.json")
 	readMembers := func() []string {
 		raw, err := os.ReadFile(contextFile)
 		if err != nil {
@@ -1210,7 +1189,7 @@ func TestThreadWorkspaceContextMembersSyncOnAgentLifecycle(t *testing.T) {
 	var thread core.Thread
 	decodeJSON(resp, &thread)
 
-	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), "workspace", ".context.json")
+	contextFile := filepath.Join(dataDir, "threads", fmt.Sprintf("%d", thread.ID), ".context.json")
 	readMembers := func() []string {
 		raw, err := os.ReadFile(contextFile)
 		if err != nil {

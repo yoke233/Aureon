@@ -192,18 +192,9 @@ func TestBuildBootPrompt_WorkspaceContext(t *testing.T) {
 		Workspace: &core.ThreadWorkspaceContext{
 			ThreadID:  1,
 			Workspace: ".",
-			Archive:   "../archive",
-			Archives: []core.ThreadWorkspaceArchiveSnapshot{
-				{
-					Date:      "2026-03-15",
-					Path:      "../archive/2026-03-15",
-					Manifest:  "../archive/2026-03-15/.manifest.json",
-					FileCount: 3,
-				},
-			},
 			Mounts: map[string]core.ThreadWorkspaceMount{
 				"project-alpha": {
-					Path:      "../mounts/project-alpha",
+					Path:      "projects/project-alpha",
 					ProjectID: 42,
 					Access:    core.ContextAccessCheck,
 				},
@@ -211,7 +202,7 @@ func TestBuildBootPrompt_WorkspaceContext(t *testing.T) {
 		},
 	})
 
-	for _, want := range []string{"Workspace Context", "Mount project-alpha", "../mounts/project-alpha", "[check]", "Archive Snapshot 2026-03-15", ".manifest.json"} {
+	for _, want := range []string{"Workspace Context", "Mount project-alpha", "projects/project-alpha", "[check]"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output should contain %q.\nOutput:\n%s", want, out)
 		}

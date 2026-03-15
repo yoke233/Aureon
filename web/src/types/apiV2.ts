@@ -885,6 +885,41 @@ export interface AddThreadParticipantRequest {
   role?: string;
 }
 
+export interface ThreadAttachment {
+  id: number;
+  thread_id: number;
+  message_id?: number;
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  content_type: string;
+  is_directory: boolean;
+  uploaded_by?: string;
+  note?: string;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Thread File References (for # trigger and file picker)
+// ---------------------------------------------------------------------------
+
+export interface ThreadFileRef {
+  source: "attachment" | "project" | "workspace";
+  name: string;
+  path: string;
+  size?: number;
+  content_type?: string;
+  is_directory?: boolean;
+  project?: string;
+  note?: string;
+}
+
+export interface MessageFileRef {
+  source: "attachment" | "project" | "workspace";
+  name: string;
+  path: string;
+}
+
 // ---------------------------------------------------------------------------
 // Thread-WorkItem Links
 // ---------------------------------------------------------------------------

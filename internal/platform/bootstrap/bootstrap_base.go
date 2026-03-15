@@ -46,18 +46,14 @@ func initBootstrapBase(storePath string, roleResolver *acpclient.RoleResolver, b
 		return nil, fmt.Errorf("start event persister: %w", err)
 	}
 
-	fmt.Println("[startup] init base: seed registry")
-	seedRegistry(context.Background(), store, bootstrapCfg, roleResolver)
-	fmt.Println("[startup] init base: build runtime manager")
-	runtimeManager := buildRuntimeManager(store, runtimeDBPath, bus)
-
 	fmt.Println("[startup] init base: resolve data dir")
 	dataDir := ""
 	if dd, err := appdata.ResolveDataDir(); err == nil {
 		dataDir = dd
 	}
 
-	// Extract embedded builtin skills to <dataDir>/skills/ on startup.
+	// Extract embedded builtin skills BEFORE seeding registry / runtime manager,
+	// because profiles may reference builtin skills (e.g. plan-core).
 	if dataDir != "" {
 		fmt.Println("[startup] init base: ensure builtin skills")
 		skillsRoot := filepath.Join(dataDir, "skills")
@@ -65,6 +61,11 @@ func initBootstrapBase(storePath string, roleResolver *acpclient.RoleResolver, b
 			slog.Warn("bootstrap: failed to extract builtin skills", "error", err)
 		}
 	}
+
+	fmt.Println("[startup] init base: seed registry")
+	seedRegistry(context.Background(), store, bootstrapCfg, roleResolver)
+	fmt.Println("[startup] init base: build runtime manager")
+	runtimeManager := buildRuntimeManager(store, runtimeDBPath, bus)
 
 	return &bootstrapBase{
 		runtimeDBPath:  runtimeDBPath,

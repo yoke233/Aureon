@@ -30,6 +30,10 @@ type ThreadMessageWriter interface {
 	DeleteThreadMessagesByThread(ctx context.Context, threadID int64) error
 }
 
+type ThreadAttachmentWriter interface {
+	DeleteThreadAttachmentsByThread(ctx context.Context, threadID int64) error
+}
+
 type ThreadMemberWriter interface {
 	AddThreadMember(ctx context.Context, member *core.ThreadMember) (int64, error)
 	DeleteThreadMembersByThread(ctx context.Context, threadID int64) error
@@ -52,6 +56,8 @@ type ThreadContextRefStore interface {
 	UpdateThreadContextRef(ctx context.Context, ref *core.ThreadContextRef) error
 	DeleteThreadContextRef(ctx context.Context, id int64) error
 	DeleteThreadContextRefsByThread(ctx context.Context, threadID int64) error
+
+	ListThreadAttachments(ctx context.Context, threadID int64) ([]*core.ThreadAttachment, error)
 }
 
 type WorkItemWriter interface {
@@ -66,6 +72,7 @@ type Store interface {
 	ProjectReader
 	ThreadWriter
 	ThreadMessageWriter
+	ThreadAttachmentWriter
 	ThreadMemberReader
 	ThreadMemberWriter
 	ThreadLinkWriter
@@ -95,7 +102,6 @@ type WorkspaceManager interface {
 type CreateThreadInput struct {
 	Title              string
 	OwnerID            string
-	Summary            string
 	Metadata           map[string]any
 	ParticipantUserIDs []string
 }
@@ -146,7 +152,6 @@ type CreateWorkItemFromThreadResult struct {
 type CrystallizeChatSessionInput struct {
 	SessionID          string
 	ThreadTitle        string
-	ThreadSummary      string
 	OwnerID            string
 	ParticipantUserIDs []string
 	CreateWorkItem     bool

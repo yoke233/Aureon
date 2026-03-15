@@ -38,7 +38,6 @@ func (s *Service) CreateThread(ctx context.Context, input CreateThreadInput) (*C
 		Title:    strings.TrimSpace(input.Title),
 		Status:   core.ThreadActive,
 		OwnerID:  strings.TrimSpace(input.OwnerID),
-		Summary:  strings.TrimSpace(input.Summary),
 		Metadata: cloneMetadata(input.Metadata),
 	}
 	if thread.Title == "" {
@@ -300,7 +299,6 @@ func (s *Service) CrystallizeChatSession(ctx context.Context, input CrystallizeC
 		Title:   strings.TrimSpace(input.ThreadTitle),
 		Status:  core.ThreadActive,
 		OwnerID: strings.TrimSpace(input.OwnerID),
-		Summary: strings.TrimSpace(input.ThreadSummary),
 		Metadata: map[string]any{
 			"source_chat_session_id": strings.TrimSpace(input.SessionID),
 		},
@@ -415,6 +413,9 @@ func deleteThreadAggregateData(ctx context.Context, store TxStore, threadID int6
 	if err := store.DeleteThreadContextRefsByThread(ctx, threadID); err != nil {
 		return err
 	}
+	if err := store.DeleteThreadAttachmentsByThread(ctx, threadID); err != nil {
+		return err
+	}
 	if err := store.DeleteResourcesByThread(ctx, threadID); err != nil {
 		return err
 	}
@@ -444,19 +445,8 @@ func createLinkedWorkItemFromThreadData(ctx context.Context, store TxStore, thre
 	}
 
 	body = strings.TrimSpace(body)
-	summary := strings.TrimSpace(thread.Summary)
-	bodyFromSummary := false
 	if body == "" {
-		if summary == "" {
-			return nil, nil, newError(CodeMissingThreadSummary, "please generate or fill in summary first", nil)
-		}
-		body = summary
-		bodyFromSummary = true
-	}
-
-	sourceType := "thread_manual"
-	if bodyFromSummary {
-		sourceType = "thread_summary"
+		body = thread.Title
 	}
 
 	workItem := &core.WorkItem{
@@ -466,9 +456,8 @@ func createLinkedWorkItemFromThreadData(ctx context.Context, store TxStore, thre
 		Priority:  core.PriorityMedium,
 		ProjectID: projectID,
 		Metadata: map[string]any{
-			"source_thread_id":  thread.ID,
-			"source_type":       sourceType,
-			"body_from_summary": bodyFromSummary,
+			"source_thread_id": thread.ID,
+			"source_type":      "thread_manual",
 		},
 	}
 

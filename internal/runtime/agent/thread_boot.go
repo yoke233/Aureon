@@ -84,18 +84,6 @@ func BuildBootPrompt(in ThreadBootInput) string {
 	if in.Workspace != nil {
 		b.WriteString("## Workspace Context\n")
 		fmt.Fprintf(&b, "- Workspace: %s\n", strings.TrimSpace(in.Workspace.Workspace))
-		if strings.TrimSpace(in.Workspace.Archive) != "" {
-			fmt.Fprintf(&b, "- Archive: %s\n", strings.TrimSpace(in.Workspace.Archive))
-		}
-		if len(in.Workspace.Archives) > 0 {
-			for _, snapshot := range in.Workspace.Archives {
-				if strings.TrimSpace(snapshot.Manifest) != "" {
-					fmt.Fprintf(&b, "- Archive Snapshot %s => %s (manifest: %s, files: %d)\n", snapshot.Date, snapshot.Path, snapshot.Manifest, snapshot.FileCount)
-					continue
-				}
-				fmt.Fprintf(&b, "- Archive Snapshot %s => %s\n", snapshot.Date, snapshot.Path)
-			}
-		}
 		if len(in.Workspace.Mounts) > 0 {
 			keys := make([]string, 0, len(in.Workspace.Mounts))
 			for key := range in.Workspace.Mounts {
@@ -105,6 +93,20 @@ func BuildBootPrompt(in ThreadBootInput) string {
 			for _, key := range keys {
 				mount := in.Workspace.Mounts[key]
 				fmt.Fprintf(&b, "- Mount %s => %s [%s]\n", key, mount.Path, mount.Access)
+			}
+		}
+		if len(in.Workspace.Attachments) > 0 {
+			b.WriteString("- Attachments:\n")
+			for _, att := range in.Workspace.Attachments {
+				label := att.FileName
+				if att.IsDirectory {
+					label += " (directory)"
+				}
+				if att.Note != "" {
+					fmt.Fprintf(&b, "  - %s => %s — %s\n", label, att.FilePath, att.Note)
+				} else {
+					fmt.Fprintf(&b, "  - %s => %s\n", label, att.FilePath)
+				}
 			}
 		}
 		b.WriteString("\n")

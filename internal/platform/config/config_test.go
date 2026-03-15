@@ -68,8 +68,14 @@ func TestLoadDefaults_RuntimeAgents(t *testing.T) {
 	if lead.PromptTemplate != "team_leader" {
 		t.Fatalf("expected lead.prompt_template=team_leader, got %q", lead.PromptTemplate)
 	}
-	if len(lead.Skills) != 1 || lead.Skills[0] != "plan-core" {
-		t.Fatalf("expected lead.skills=[plan-core], got %#v", lead.Skills)
+	expectedSkills := []string{"plan-core", "sys-step-manage", "track-planning"}
+	if len(lead.Skills) != len(expectedSkills) {
+		t.Fatalf("expected lead.skills=%v, got %#v", expectedSkills, lead.Skills)
+	}
+	for i, s := range expectedSkills {
+		if lead.Skills[i] != s {
+			t.Fatalf("expected lead.skills[%d]=%s, got %s", i, s, lead.Skills[i])
+		}
 	}
 }
 

@@ -10,9 +10,21 @@ const { mockUseWorkbench } = vi.hoisted(() => ({
   mockUseWorkbench: vi.fn(),
 }));
 
+const { mockNavigate } = vi.hoisted(() => ({
+  mockNavigate: vi.fn(),
+}));
+
 vi.mock("@/contexts/WorkbenchContext", () => ({
   useWorkbench: mockUseWorkbench,
 }));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 function renderPage() {
   return render(
@@ -34,7 +46,7 @@ describe("ThreadsPage", () => {
     cleanup();
   });
 
-  it("加载讨论列表并支持搜索和创建", async () => {
+  it("加载讨论列表并支持搜索", async () => {
     const apiClient = {
       listThreads: vi.fn().mockResolvedValue([
         {
@@ -54,14 +66,6 @@ describe("ThreadsPage", () => {
           updated_at: "2026-03-15T00:00:00Z",
         },
       ]),
-      createThread: vi.fn().mockResolvedValue({
-        id: 9,
-        title: "新的讨论",
-        status: "active",
-        owner_id: "charlie",
-        created_at: "2026-03-15T00:00:00Z",
-        updated_at: "2026-03-15T00:00:00Z",
-      }),
     };
 
     mockUseWorkbench.mockReturnValue({ apiClient });
@@ -79,22 +83,51 @@ describe("ThreadsPage", () => {
       expect(screen.getByText("发布复盘")).toBeTruthy();
       expect(screen.queryByText("支付问题排查")).toBeNull();
     });
+  });
 
-    fireEvent.change(screen.getByPlaceholderText("Search threads..."), {
-      target: { value: "" },
-    });
+  it("输入首条消息创建讨论并跳转", async () => {
+    const apiClient = {
+      listThreads: vi.fn().mockResolvedValue([]),
+      createThread: vi.fn().mockResolvedValue({
+        id: 9,
+        title: "新的讨论",
+        status: "active",
+        created_at: "2026-03-15T00:00:00Z",
+        updated_at: "2026-03-15T00:00:00Z",
+      }),
+      createThreadMessage: vi.fn().mockResolvedValue({
+        id: 1,
+        thread_id: 9,
+        content: "新的讨论",
+        role: "human",
+        sender_id: "human",
+        created_at: "2026-03-15T00:00:00Z",
+      }),
+    };
 
-    fireEvent.click(screen.getByRole("button", { name: "New Thread" }));
-    fireEvent.change(screen.getByPlaceholderText("Thread title..."), {
+    mockUseWorkbench.mockReturnValue({ apiClient });
+
+    renderPage();
+
+    await screen.findByPlaceholderText("Start a new discussion...");
+
+    fireEvent.change(screen.getByPlaceholderText("Start a new discussion..."), {
       target: { value: "新的讨论" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    // Click the send button
+    const sendButton = screen.getByRole("button");
+    fireEvent.click(sendButton);
 
     await waitFor(() => {
       expect(apiClient.createThread).toHaveBeenCalledWith({ title: "新的讨论" });
+      expect(apiClient.createThreadMessage).toHaveBeenCalledWith(9, {
+        content: "新的讨论",
+        role: "human",
+        sender_id: "human",
+      });
+      expect(mockNavigate).toHaveBeenCalledWith("/threads/9");
     });
-
-    expect(await screen.findByText("新的讨论")).toBeTruthy();
   });
 
   it("创建讨论失败时展示错误", async () => {
@@ -107,12 +140,14 @@ describe("ThreadsPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("No threads yet")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "New Thread" }));
-    fireEvent.change(screen.getByPlaceholderText("Thread title..."), {
+    await screen.findByPlaceholderText("Start a new discussion...");
+
+    fireEvent.change(screen.getByPlaceholderText("Start a new discussion..."), {
       target: { value: "失败的讨论" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    const sendButton = screen.getByRole("button");
+    fireEvent.click(sendButton);
 
     expect(await screen.findByText("create failed")).toBeTruthy();
   });

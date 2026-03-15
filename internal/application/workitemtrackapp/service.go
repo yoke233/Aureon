@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"time"
@@ -12,17 +13,19 @@ import (
 )
 
 type Config struct {
-	Store    Store
-	Tx       Tx
-	Bus      EventPublisher
-	Executor WorkItemExecutor
+	Store      Store
+	Tx         Tx
+	Bus        EventPublisher
+	Executor   WorkItemExecutor
+	LeadDispatch LeadDispatcher
 }
 
 type Service struct {
-	store    Store
-	tx       Tx
-	bus      EventPublisher
-	executor WorkItemExecutor
+	store        Store
+	tx           Tx
+	bus          EventPublisher
+	executor     WorkItemExecutor
+	leadDispatch LeadDispatcher
 }
 
 type threadMessageWriter interface {
@@ -31,10 +34,11 @@ type threadMessageWriter interface {
 
 func New(cfg Config) *Service {
 	return &Service{
-		store:    cfg.Store,
-		tx:       cfg.Tx,
-		bus:      cfg.Bus,
-		executor: cfg.Executor,
+		store:        cfg.Store,
+		tx:           cfg.Tx,
+		bus:          cfg.Bus,
+		executor:     cfg.Executor,
+		leadDispatch: cfg.LeadDispatch,
 	}
 }
 
@@ -87,6 +91,48 @@ func (s *Service) StartTrack(ctx context.Context, input StartTrackInput) (*core.
 	}
 	s.publishTrackEvent(ctx, core.EventThreadTrackCreated, track, nil)
 	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackCreated, track, nil)
+	return track, nil
+}
+
+func (s *Service) StartPlanning(ctx context.Context, input StartPlanningInput) (*core.WorkItemTrack, error) {
+	track, err := s.updateTrack(ctx, input.TrackID, core.EventThreadTrackPlanningStarted, func(track *core.WorkItemTrack) error {
+		switch track.Status {
+		case core.WorkItemTrackPlanning:
+			return nil // already planning, idempotent
+		case core.WorkItemTrackDraft:
+			// ok
+		default:
+			return newError(CodeInvalidState, "track cannot start planning in current state", core.ErrInvalidTransition)
+		}
+		track.Status = core.WorkItemTrackPlanning
+		track.PlannerStatus = "working"
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.appendTrackTimelineMessage(ctx, core.EventThreadTrackPlanningStarted, track, nil)
+
+	// Dispatch lead agent to the primary thread if runtime is available.
+	if s.leadDispatch != nil && track.PrimaryThreadID != nil {
+		kickoff := fmt.Sprintf(
+			"你已被分配为任务轨道「%s」(Track #%d) 的规划者。\n\n"+
+				"目标：%s\n\n"+
+				"请使用 track-planning skill 开始规划。Track ID: %d",
+			track.Title, track.ID, track.Objective, track.ID,
+		)
+		go func() {
+			if dispatchErr := s.leadDispatch.DispatchLeadToThread(context.Background(), *track.PrimaryThreadID, kickoff); dispatchErr != nil {
+				slog.Warn("track planning: failed to dispatch lead",
+					"track_id", track.ID,
+					"thread_id", *track.PrimaryThreadID,
+					"error", dispatchErr,
+				)
+			}
+		}()
+	}
+
 	return track, nil
 }
 
@@ -693,6 +739,8 @@ func buildTrackTimelineMessage(eventType core.EventType, track *core.WorkItemTra
 			return fmt.Sprintf("线程 #%d 已作为 %s 关联到任务轨道“%s”。", linkedThreadID, relation, title)
 		}
 		return fmt.Sprintf("任务轨道“%s”已更新。", title)
+	case core.EventThreadTrackPlanningStarted:
+		return fmt.Sprintf("任务轨道“%s”已开始规划，Lead 已派遣。", title)
 	case core.EventThreadTrackReviewStarted:
 		return fmt.Sprintf("任务轨道“%s”已进入送审。", title)
 	case core.EventThreadTrackReviewApproved:

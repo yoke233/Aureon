@@ -65,6 +65,8 @@ import type {
   CreateThreadMessageRequest,
   ThreadMember,
   AddThreadParticipantRequest,
+  ThreadAttachment,
+  ThreadFileRef,
   ThreadWorkItemLink,
   CreateThreadWorkItemLinkRequest,
   WorkItemTrack,
@@ -364,6 +366,13 @@ export interface ApiClient {
   inviteThreadAgent(threadId: number, body: { agent_profile_id: string }): Promise<ThreadMember>;
   listThreadAgents(threadId: number): Promise<ThreadMember[]>;
   removeThreadAgent(threadId: number, agentSessionId: number): Promise<void>;
+
+  // Thread Attachments
+  uploadThreadAttachment(threadId: number, file: File, opts?: { note?: string; uploadedBy?: string }): Promise<ThreadAttachment>;
+  listThreadAttachments(threadId: number): Promise<ThreadAttachment[]>;
+  deleteThreadAttachment(threadId: number, attachmentId: number): Promise<void>;
+  getThreadAttachmentDownloadUrl(threadId: number, attachmentId: number): string;
+  searchThreadFiles(threadId: number, query?: string, source?: "all" | "attachment" | "project" | "workspace", limit?: number): Promise<ThreadFileRef[]>;
 
   // Work Item Attachments
   uploadWorkItemAttachment(workItemId: number, file: File): Promise<WorkItemAttachment>;
@@ -1171,6 +1180,45 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
         path: `/threads/${threadId}/agents/${agentSessionId}`,
         method: "DELETE",
       }),
+
+    // Thread Attachments
+    uploadThreadAttachment: async (threadId, file, opts) => {
+      const form = new FormData();
+      form.append("file", file);
+      if (opts?.note) form.append("note", opts.note);
+      if (opts?.uploadedBy) form.append("uploaded_by", opts.uploadedBy);
+      const url = buildUrl(baseUrl, `/threads/${threadId}/attachments`);
+      const headers: Record<string, string> = {};
+      const tok = getToken?.();
+      if (tok) headers["Authorization"] = `Bearer ${tok}`;
+      const res = await fetch(url, { method: "POST", headers, body: form });
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText);
+        throw new Error(text || `upload failed: ${res.status}`);
+      }
+      return res.json() as Promise<ThreadAttachment>;
+    },
+    listThreadAttachments: (threadId) =>
+      request<ThreadAttachment[]>({
+        path: `/threads/${threadId}/attachments`,
+      }).then((items) => (Array.isArray(items) ? items : [])),
+    deleteThreadAttachment: (threadId, attachmentId) =>
+      request<void>({
+        path: `/threads/${threadId}/attachments/${attachmentId}`,
+        method: "DELETE",
+      }),
+    getThreadAttachmentDownloadUrl: (threadId, attachmentId) =>
+      buildUrl(baseUrl, `/threads/${threadId}/attachments/${attachmentId}`),
+    searchThreadFiles: (threadId, query, source, limit) => {
+      const params = new URLSearchParams();
+      if (query) params.set("q", query);
+      if (source) params.set("source", source);
+      if (limit) params.set("limit", String(limit));
+      const qs = params.toString();
+      return request<ThreadFileRef[]>({
+        path: `/threads/${threadId}/files${qs ? `?${qs}` : ""}`,
+      }).then((items) => (Array.isArray(items) ? items : []));
+    },
 
     // Utility
     detectGitInfo: (path: string) =>

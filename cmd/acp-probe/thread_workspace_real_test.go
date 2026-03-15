@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,17 +92,13 @@ func runThreadWorkspaceRealACP(t *testing.T, build func(string) acpclient.Launch
 	if err != nil {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(paths.WorkspaceDir, "notes.md"), []byte("workspace-note"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(paths.ThreadDir, "notes.md"), []byte("workspace-note"), 0o644); err != nil {
 		t.Fatalf("write notes.md: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(paths.WorkspaceDir, "history.md"), []byte("history-note"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(paths.ThreadDir, "history.md"), []byte("history-note"), 0o644); err != nil {
 		t.Fatalf("write history.md: %v", err)
 	}
 
-	archiveDate := time.Date(2026, 3, 15, 9, 0, 0, 0, time.UTC)
-	if err := threadctx.SyncDailyArchive(paths, archiveDate); err != nil {
-		t.Fatalf("SyncDailyArchive: %v", err)
-	}
 	if _, err := threadctx.SyncContextFile(ctx, store, dataDir, threadID); err != nil {
 		t.Fatalf("SyncContextFile: %v", err)
 	}
@@ -113,11 +108,11 @@ func runThreadWorkspaceRealACP(t *testing.T, build func(string) acpclient.Launch
 		t.Fatalf("buildThreadWorkspaceConfig: %v", err)
 	}
 
-	handler := acphandler.NewACPHandler(paths.WorkspaceDir, "", nil)
+	handler := acphandler.NewACPHandler(paths.ThreadDir, "", nil)
 	handler.SetThreadWorkspace(scopeCfg)
 	handler.SetSuppressEvents(true)
 
-	launchCfg := build(paths.WorkspaceDir)
+	launchCfg := build(paths.ThreadDir)
 	client, err := acpclient.New(launchCfg, handler)
 	if err != nil {
 		t.Fatalf("new acp client: %v", err)
@@ -138,7 +133,7 @@ func runThreadWorkspaceRealACP(t *testing.T, build func(string) acpclient.Launch
 	}); err != nil {
 		t.Fatalf("initialize client: %v", err)
 	}
-	sessionID, err := client.NewSession(runCtx, acpproto.NewSessionRequest{Cwd: paths.WorkspaceDir})
+	sessionID, err := client.NewSession(runCtx, acpproto.NewSessionRequest{Cwd: paths.ThreadDir})
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -153,49 +148,35 @@ func runThreadWorkspaceRealACP(t *testing.T, build func(string) acpclient.Launch
 			"Final reply must be exactly: STEP1_OK",
 		}, "\n"),
 		"STEP1_OK",
-		filepath.Join(paths.WorkspaceDir, "workspace-step1.txt"),
+		filepath.Join(paths.ThreadDir, "workspace-step1.txt"),
 		"WORKSPACE=workspace-note",
 	)
 
 	promptAndVerify(t, runCtx, client, sessionID,
 		strings.Join([]string{
 			"Use file tools, not just a text reply.",
-			fmt.Sprintf("Read ../archive/%s/.manifest.json.", archiveDate.Format("2006-01-02")),
-			"Verify it mentions notes.md and history.md.",
-			"Write exactly this content to ./archive-step2.txt : ARCHIVE=notes.md,history.md",
-			"Then read back ./archive-step2.txt to confirm it was written.",
+			"Read mounts/project-alpha/README.md.",
+			"Write exactly this content to ./mount-step2.txt : MOUNT=Project Alpha Readme",
+			"Then read back ./mount-step2.txt to confirm it was written.",
 			"Final reply must be exactly: STEP2_OK",
 		}, "\n"),
 		"STEP2_OK",
-		filepath.Join(paths.WorkspaceDir, "archive-step2.txt"),
-		"ARCHIVE=notes.md,history.md",
-	)
-
-	promptAndVerify(t, runCtx, client, sessionID,
-		strings.Join([]string{
-			"Use file tools, not just a text reply.",
-			"Read ../mounts/project-alpha/README.md.",
-			"Write exactly this content to ./mount-step3.txt : MOUNT=Project Alpha Readme",
-			"Then read back ./mount-step3.txt to confirm it was written.",
-			"Final reply must be exactly: STEP3_OK",
-		}, "\n"),
-		"STEP3_OK",
-		filepath.Join(paths.WorkspaceDir, "mount-step3.txt"),
+		filepath.Join(paths.ThreadDir, "mount-step2.txt"),
 		"MOUNT=Project Alpha Readme",
 	)
 
 	promptAndVerify(t, runCtx, client, sessionID,
 		strings.Join([]string{
 			"Use the terminal tool.",
-			"Use cwd exactly as: ../mounts/project-alpha",
-			"In ../mounts/project-alpha run exactly this terminal command: go test ./...",
+			"Use cwd exactly as: mounts/project-alpha",
+			"In mounts/project-alpha run exactly this terminal command: go test ./...",
 			"Do not run any other terminal command.",
-			"After it succeeds, write exactly this content to ./terminal-step4.txt : TERMINAL=go test ok",
-			"Then read back ./terminal-step4.txt to confirm it was written.",
-			"Final reply must be exactly: STEP4_OK",
+			"After it succeeds, write exactly this content to ./terminal-step3.txt : TERMINAL=go test ok",
+			"Then read back ./terminal-step3.txt to confirm it was written.",
+			"Final reply must be exactly: STEP3_OK",
 		}, "\n"),
-		"STEP4_OK",
-		filepath.Join(paths.WorkspaceDir, "terminal-step4.txt"),
+		"STEP3_OK",
+		filepath.Join(paths.ThreadDir, "terminal-step3.txt"),
 		"TERMINAL=go test ok",
 	)
 }
@@ -207,8 +188,7 @@ func buildThreadWorkspaceConfig(ctx context.Context, store *sqlite.Store, dataDi
 	}
 	cfg := acphandler.ThreadWorkspaceConfig{
 		ThreadID:     threadID,
-		WorkspaceDir: paths.WorkspaceDir,
-		ArchiveDir:   paths.ArchiveDir,
+		WorkspaceDir: paths.ThreadDir,
 	}
 	refs, err := store.ListThreadContextRefs(ctx, threadID)
 	if err != nil {

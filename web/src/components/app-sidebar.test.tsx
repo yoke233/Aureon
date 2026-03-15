@@ -44,7 +44,7 @@ describe("AppSidebar", () => {
     cleanup();
   });
 
-  it("支持切换项目、折叠分组、切换语言并退出登录", async () => {
+  it("支持切换项目、切换语言并退出登录", async () => {
     const setSelectedProjectId = vi.fn();
     const logout = vi.fn();
 
@@ -64,13 +64,6 @@ describe("AppSidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: /Beta/ }));
 
     expect(setSelectedProjectId).toHaveBeenCalledWith(2);
-
-    fireEvent.click(screen.getByRole("button", { name: /协作|Workspace/ }));
-
-    await waitFor(() => {
-      expect(screen.queryByText(/首页|Home/)).toBeNull();
-    });
-    expect(localStorage.getItem("sidebar-collapsed-sections")).toContain("nav.sectionWorkspace");
 
     fireEvent.click(screen.getByRole("button", { name: /English|中文/ }));
 

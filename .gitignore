@@ -23,7 +23,12 @@ node_modules/
 *.out
 *.coverprofile
 coverage.out
+*.stackdump
 bin/
+
+# Environment files
+.env
+web/.env
 
 # Tauri
 src-tauri/target/

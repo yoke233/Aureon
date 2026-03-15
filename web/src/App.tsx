@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import SystemEventBanner from "@/components/SystemEventBanner";
 import { WorkbenchProvider, useWorkbench } from "@/contexts/WorkbenchContext";
 import { AppLayout } from "@/layouts/AppLayout";
@@ -13,7 +13,7 @@ const ChatPage = lazy(() => import("@/pages/ChatPage").then((module) => ({ defau
 const CreateProjectPage = lazy(() => import("@/pages/CreateProjectPage").then((module) => ({ default: module.CreateProjectPage })));
 const CreateWorkItemPage = lazy(() => import("@/pages/CreateWorkItemPage").then((module) => ({ default: module.CreateWorkItemPage })));
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
-const ExecutionDetailPage = lazy(() => import("@/pages/ExecutionDetailPage").then((module) => ({ default: module.ExecutionDetailPage })));
+const RunDetailPage = lazy(() => import("@/pages/RunDetailPage").then((module) => ({ default: module.RunDetailPage })));
 const FeatureManifestPage = lazy(() => import("@/pages/FeatureManifestPage").then((module) => ({ default: module.FeatureManifestPage })));
 const GitTagsPage = lazy(() => import("@/pages/GitTagsPage").then((module) => ({ default: module.GitTagsPage })));
 const InspectionPage = lazy(() => import("@/pages/InspectionPage").then((module) => ({ default: module.InspectionPage })));
@@ -47,18 +47,6 @@ const App = (_props: AppProps = {}) => {
       </WorkbenchProvider>
     </BrowserRouter>
   );
-};
-
-const LegacyWorkItemRedirect = ({ target }: { target: "detail" | "list" | "new" }) => {
-  const { workItemId } = useParams();
-
-  if (target === "new") {
-    return <Navigate to="/work-items/new" replace />;
-  }
-  if (target === "detail" && workItemId) {
-    return <Navigate to={`/work-items/${workItemId}`} replace />;
-  }
-  return <Navigate to="/work-items" replace />;
 };
 
 const WorkbenchRoutes = () => {
@@ -111,15 +99,8 @@ const WorkbenchRoutes = () => {
               <Route path="templates" element={<TemplatesPage />} />
             </Route>
             {/* Standalone pages */}
-            <Route path="/executions/:execId" element={<ExecutionDetailPage />} />
+            <Route path="/runs/:runId" element={<RunDetailPage />} />
             <Route path="/sandbox" element={<SandboxPage />} />
-            {/* Legacy redirects */}
-            <Route path="/issues" element={<LegacyWorkItemRedirect target="list" />} />
-            <Route path="/issues/new" element={<LegacyWorkItemRedirect target="new" />} />
-            <Route path="/issues/:workItemId" element={<LegacyWorkItemRedirect target="detail" />} />
-            <Route path="/flows" element={<LegacyWorkItemRedirect target="list" />} />
-            <Route path="/flows/new" element={<LegacyWorkItemRedirect target="new" />} />
-            <Route path="/flows/:workItemId" element={<LegacyWorkItemRedirect target="detail" />} />
             <Route path="/dashboard" element={<Navigate to="/monitoring/dashboard" replace />} />
             <Route path="/analytics" element={<Navigate to="/monitoring/analytics" replace />} />
             <Route path="/usage" element={<Navigate to="/monitoring/usage" replace />} />

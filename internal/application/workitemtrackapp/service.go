@@ -351,9 +351,9 @@ func (s *Service) buildThreadLinks(ctx context.Context, track *core.WorkItemTrac
 	return links, nil
 }
 
-func (s *Service) ConfirmExecution(ctx context.Context, input ConfirmExecutionInput) (*ConfirmExecutionResult, error) {
+func (s *Service) ConfirmRun(ctx context.Context, input ConfirmRunInput) (*ConfirmRunResult, error) {
 	if s.executor == nil {
-		return nil, newError(CodeExecutionUnavailable, "work item execution is not configured", nil)
+		return nil, newError(CodeRunUnavailable, "work item run is not configured", nil)
 	}
 
 	materialized, err := s.MaterializeWorkItem(ctx, MaterializeWorkItemInput{
@@ -385,7 +385,7 @@ func (s *Service) ConfirmExecution(ctx context.Context, input ConfirmExecutionIn
 		status = "queued"
 	}
 
-	updatedTrack, err := s.updateTrack(ctx, track.ID, core.EventThreadTrackExecutionConfirmed, func(track *core.WorkItemTrack) error {
+	updatedTrack, err := s.updateTrack(ctx, track.ID, core.EventThreadTrackRunConfirmed, func(track *core.WorkItemTrack) error {
 		if track.Status == core.WorkItemTrackExecuting {
 			return nil
 		}
@@ -408,7 +408,7 @@ func (s *Service) ConfirmExecution(ctx context.Context, input ConfirmExecutionIn
 		return nil, err
 	}
 
-	return &ConfirmExecutionResult{
+	return &ConfirmRunResult{
 		Track:    updatedTrack,
 		WorkItem: refreshedWorkItem,
 		Status:   status,

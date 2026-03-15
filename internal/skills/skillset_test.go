@@ -134,6 +134,6 @@ func TestValidateProfileSkillsFromRoot(t *testing.T) {
 		t.Fatalf("expected InvalidSkillsError, got %T", err)
 	}
 	if len(invalid.Issues) != 2 {
-		t.Fatalf("expected 2 issues, got %+v", invalid.Issues)
+		t.Fatalf("expected 2 validation entries, got %+v", invalid.Issues)
 	}
 }

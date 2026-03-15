@@ -446,7 +446,7 @@ func TestDecisionToSignalType(t *testing.T) {
 	}
 }
 
-func TestPublishExecutionAudit(t *testing.T) {
+func TestPublishRunAudit(t *testing.T) {
 	bus := NewMemBus()
 	sub := bus.Subscribe(core.SubscribeOpts{BufferSize: 4})
 	defer sub.Cancel()
@@ -461,21 +461,21 @@ func TestPublishExecutionAudit(t *testing.T) {
 		ActionID: step.ID,
 	}
 
-	publishExecutionAudit(t.Context(), bus, nil, step, exec, "execution.watch", "completed", map[string]any{
+	publishRunAudit(t.Context(), bus, nil, step, exec, "run.watch", "completed", map[string]any{
 		"invocation_id": "inv-1",
 		"output_chars":  128,
 	})
 
 	select {
 	case ev := <-sub.C:
-		if ev.Type != core.EventExecutionAudit {
-			t.Fatalf("event type = %s, want %s", ev.Type, core.EventExecutionAudit)
+		if ev.Type != core.EventRunAudit {
+			t.Fatalf("event type = %s, want %s", ev.Type, core.EventRunAudit)
 		}
 		if ev.WorkItemID != step.WorkItemID || ev.ActionID != step.ID || ev.RunID != exec.ID {
 			t.Fatalf("unexpected event scope: %+v", ev)
 		}
-		if got, _ := ev.Data["kind"].(string); got != "execution.watch" {
-			t.Fatalf("kind = %q, want execution.watch", got)
+		if got, _ := ev.Data["kind"].(string); got != "run.watch" {
+			t.Fatalf("kind = %q, want run.watch", got)
 		}
 		if got, _ := ev.Data["status"].(string); got != "completed" {
 			t.Fatalf("status = %q, want completed", got)
@@ -487,6 +487,6 @@ func TestPublishExecutionAudit(t *testing.T) {
 			t.Fatalf("output_chars = %v, want 128", ev.Data["output_chars"])
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for execution.audit event")
+		t.Fatal("timed out waiting for run.audit event")
 	}
 }

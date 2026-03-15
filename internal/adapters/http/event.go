@@ -35,7 +35,7 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listWorkItemEvents(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
@@ -154,7 +154,7 @@ func isThreadEvent(t core.EventType) bool {
 		core.EventThreadTrackReviewApproved,
 		core.EventThreadTrackReviewRejected,
 		core.EventThreadTrackMaterialized,
-		core.EventThreadTrackExecutionConfirmed:
+		core.EventThreadTrackRunConfirmed:
 		return true
 	}
 	return false

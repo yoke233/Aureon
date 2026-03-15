@@ -11,8 +11,8 @@ type generateStepsRequest struct {
 	Description string `json:"description"`
 }
 
-// generateActions uses AI to decompose a task description into a DAG of Steps
-// and creates them in the given issue.
+// generateActions uses AI to decompose a task description into a DAG of steps
+// and creates them in the given work item.
 // POST /work-items/{issueID}/generate-steps
 func (h *Handler) generateActions(w http.ResponseWriter, r *http.Request) {
 	if h.dagGen == nil {
@@ -22,14 +22,14 @@ func (h *Handler) generateActions(w http.ResponseWriter, r *http.Request) {
 
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
-	// Verify issue exists and is open.
+	// Verify the work item exists and is open.
 	iss, err := h.store.GetWorkItem(r.Context(), issueID)
 	if err == core.ErrNotFound {
-		writeError(w, http.StatusNotFound, "issue not found", "NOT_FOUND")
+		writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 		return
 	}
 	if err != nil {
@@ -37,7 +37,7 @@ func (h *Handler) generateActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if iss.Status != core.WorkItemOpen {
-		writeError(w, http.StatusConflict, "issue is not open, cannot generate steps", "INVALID_STATE")
+		writeError(w, http.StatusConflict, "work item is not open, cannot generate steps", "INVALID_STATE")
 		return
 	}
 

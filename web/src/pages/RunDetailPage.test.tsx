@@ -4,7 +4,7 @@ import { I18nextProvider } from "react-i18next";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import { ExecutionDetailPage } from "./ExecutionDetailPage";
+import { RunDetailPage } from "./RunDetailPage";
 
 const { mockUseWorkbench } = vi.hoisted(() => ({
   mockUseWorkbench: vi.fn(),
@@ -14,19 +14,19 @@ vi.mock("@/contexts/WorkbenchContext", () => ({
   useWorkbench: mockUseWorkbench,
 }));
 
-function renderPage(initialEntry = "/executions/77") {
+function renderPage(initialEntry = "/runs/77") {
   return render(
     <I18nextProvider i18n={i18n}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
-          <Route path="/executions/:execId" element={<ExecutionDetailPage />} />
+          <Route path="/runs/:runId" element={<RunDetailPage />} />
         </Routes>
       </MemoryRouter>
     </I18nextProvider>,
   );
 }
 
-describe("ExecutionDetailPage", () => {
+describe("RunDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     void i18n.changeLanguage("zh-CN");
@@ -40,7 +40,7 @@ describe("ExecutionDetailPage", () => {
     cleanup();
   });
 
-  it("展示执行详情、运行结果资源与事件日志", async () => {
+  it("展示运行详情、运行结果资源与事件日志", async () => {
     const apiClient = {
       getRun: vi.fn().mockResolvedValue({
         id: 77,
@@ -103,7 +103,7 @@ describe("ExecutionDetailPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("执行详情")).toBeTruthy();
+    expect(await screen.findByText("运行详情")).toBeTruthy();
     expect(screen.getByText("实现支付重试")).toBeTruthy();
     expect(screen.getByText("支付链路优化")).toBeTruthy();
     expect(screen.getByText("已提交补丁")).toBeTruthy();

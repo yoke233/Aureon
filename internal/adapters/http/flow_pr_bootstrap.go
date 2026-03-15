@@ -47,16 +47,16 @@ var (
 	errBootstrapPRIssueHasSteps       = errors.New("issue already has steps")
 )
 
-// bootstrapPRWorkItem creates a standard PR automation pipeline for an issue:
+// bootstrapPRWorkItem creates a standard PR automation pipeline for a work item:
 // implement(exec) → commit_push(exec,builtin) → open_pr(exec,builtin) → review_merge_gate(gate).
 //
 // Requirements:
-// - Issue must belong to a project
+// - Work item must belong to a project
 // - Project must have an enabled supported SCM git resource space (GitHub / Codeup)
 func (h *Handler) bootstrapPRWorkItem(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 

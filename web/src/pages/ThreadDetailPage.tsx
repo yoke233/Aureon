@@ -592,7 +592,7 @@ export function ThreadDetailPage() {
     const unsubscribeTrackMaterialized = wsClient.subscribe<ThreadEventPayload>("thread.track.materialized", (payload) => {
       void syncTrackFromPayload(payload);
     });
-    const unsubscribeTrackExecutionConfirmed = wsClient.subscribe<ThreadEventPayload>("thread.track.execution_confirmed", (payload) => {
+    const unsubscribeTrackRunConfirmed = wsClient.subscribe<ThreadEventPayload>("thread.track.run_confirmed", (payload) => {
       void syncTrackFromPayload(payload);
     });
     const unsubscribeStatus = wsClient.onStatusChange((status) => {
@@ -619,7 +619,7 @@ export function ThreadDetailPage() {
       unsubscribeTrackReviewApproved();
       unsubscribeTrackReviewRejected();
       unsubscribeTrackMaterialized();
-      unsubscribeTrackExecutionConfirmed();
+      unsubscribeTrackRunConfirmed();
       unsubscribeStatus();
       pendingThreadRequestIdRef.current = null;
       setThinkingAgentIDs(new Set());
@@ -975,11 +975,11 @@ export function ThreadDetailPage() {
     }
   };
 
-  const handleConfirmTrackExecution = async (track: WorkItemTrack) => {
+  const handleConfirmTrackRun = async (track: WorkItemTrack) => {
     setTrackActionBusyKey(`confirm-${track.id}`);
     setError(null);
     try {
-      const result = await apiClient.confirmTrackExecution(track.id);
+      const result = await apiClient.confirmTrackRun(track.id);
       replaceTrack(result.track);
       setLinkedIssues((prev) => ({
         ...prev,
@@ -1381,7 +1381,7 @@ export function ThreadDetailPage() {
                         variant="outline"
                         size="sm"
                         className="h-8 text-xs"
-                        onClick={() => void handleConfirmTrackExecution(track)}
+                        onClick={() => void handleConfirmTrackRun(track)}
                         disabled={!canConfirmTrackExecution(track) || confirming}
                       >
                         {confirming ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}

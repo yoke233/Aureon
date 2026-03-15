@@ -70,7 +70,7 @@ func WithDAGGenerator(g DAGGenerator) HandlerOption {
 	return func(h *Handler) { h.dagGen = g }
 }
 
-// WithRunProbeService sets the execution probe service for manual/admin probe APIs.
+// WithRunProbeService sets the run probe service for manual/admin probe APIs.
 func WithRunProbeService(service probeapp.Service) HandlerOption {
 	return func(h *Handler) { h.probeSvc = service }
 }
@@ -183,7 +183,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/templates/{templateID}", h.getDAGTemplate)
 	r.Put("/templates/{templateID}", h.updateDAGTemplate)
 	r.Delete("/templates/{templateID}", h.deleteDAGTemplate)
-	r.Post("/templates/{templateID}/create-issue", h.createWorkItemFromTemplate)
+	r.Post("/templates/{templateID}/create-work-item", h.createWorkItemFromTemplate)
 
 	// Step signals (human intervention)
 	r.Post("/steps/{stepID}/decision", h.actionDecision)
@@ -191,9 +191,9 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/steps/{stepID}/signals", h.listActionSignals)
 	r.Get("/pending-decisions", h.listPendingDecisions)
 
-	// Executions
-	r.Get("/steps/{stepID}/executions", h.listRuns)
-	r.Get("/executions/{execID}", h.getRun)
+	// Runs
+	r.Get("/steps/{stepID}/runs", h.listRuns)
+	r.Get("/runs/{runID}", h.getRun)
 
 	// Events
 	r.Get("/events", h.listEvents)
@@ -212,10 +212,9 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/analytics/usage/by-project", h.getUsageByProject)
 	r.Get("/analytics/usage/by-agent", h.getUsageByAgent)
 	r.Get("/analytics/usage/by-profile", h.getUsageByProfile)
-	r.Get("/executions/{execID}/usage", h.getUsageByRun)
+	r.Get("/runs/{runID}/usage", h.getUsageByRun)
 
-	// Cron (scheduled issues)
-	r.Get("/cron/issues", h.listCronWorkItems)
+	// Cron (scheduled work items)
 
 	// Git tags (version tagging & CI/CD trigger)
 	h.registerGitTagRoutes(r)
@@ -262,12 +261,12 @@ func (h *Handler) Register(r chi.Router) {
 		r.Get("/admin/system/llm-config", h.getLLMConfig)
 		r.Put("/admin/system/sandbox-support", h.updateSandboxSupport)
 		r.Put("/admin/system/llm-config", h.updateLLMConfig)
-		r.Get("/executions/{execID}/tool-calls", h.listToolCallAuditsByRun)
+		r.Get("/runs/{runID}/tool-calls", h.listToolCallAuditsByRun)
 		r.Get("/tool-calls/{auditID}", h.getToolCallAudit)
-		r.Get("/executions/{execID}/audit-timeline", h.getExecutionAuditTimeline)
-		r.Post("/executions/{execID}/probe", h.createRunProbe)
-		r.Get("/executions/{execID}/probes", h.listExecutionProbes)
-		r.Get("/executions/{execID}/probe/latest", h.getLatestRunProbe)
+		r.Get("/runs/{runID}/audit-timeline", h.getRunAuditTimeline)
+		r.Post("/runs/{runID}/probe", h.createRunProbe)
+		r.Get("/runs/{runID}/probes", h.listRunProbes)
+		r.Get("/runs/{runID}/probe/latest", h.getLatestRunProbe)
 		r.Post("/admin/system-event", h.sendSystemEvent)
 		r.Delete("/manifest/entries/{entryID}", h.deleteManifestEntry)
 		registerSkillRoutes(r, h.skillsRoot, h.registry, h.skillGitHubImporter)

@@ -64,7 +64,7 @@ const priorityConfig: Record<WorkItemPriority, { label: string; text: string; bg
   low: { label: "低", text: "text-zinc-500", bg: "bg-zinc-100" },
 };
 
-const stepStatusConfig: Record<string, { icon: React.ReactNode; text: string; bg: string }> = {
+const actionStatusConfig: Record<string, { icon: React.ReactNode; text: string; bg: string }> = {
   done: { icon: <Check className="h-3.5 w-3.5" />, text: "text-emerald-600", bg: "bg-emerald-50" },
   running: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, text: "text-blue-600", bg: "bg-blue-50" },
   failed: { icon: <XCircle className="h-3.5 w-3.5" />, text: "text-red-600", bg: "bg-red-50" },
@@ -75,7 +75,7 @@ const stepStatusConfig: Record<string, { icon: React.ReactNode; text: string; bg
   ready: { icon: <Play className="h-3 w-3" />, text: "text-blue-500", bg: "bg-blue-50" },
 };
 
-const stepTypeColors: Record<string, { text: string; bg: string }> = {
+const actionTypeColors: Record<string, { text: string; bg: string }> = {
   exec: { text: "text-blue-600", bg: "bg-blue-50" },
   gate: { text: "text-amber-600", bg: "bg-amber-50" },
   composite: { text: "text-indigo-600", bg: "bg-indigo-50" },
@@ -120,37 +120,37 @@ function getSourceTypeDisplay(sourceType: string | null): SourceTypeDisplay | nu
   };
 }
 
-function StepRow({ step, index, isLast }: { step: Action; index: number; isLast: boolean }) {
-  const statusStyle = stepStatusConfig[step.status] ?? stepStatusConfig.pending;
-  const typeStyle = stepTypeColors[step.type] ?? stepTypeColors.exec;
-  const statusLabel = statusConfig[step.status]?.label ?? step.status;
+function ActionRow({ action, index, isLast }: { action: Action; index: number; isLast: boolean }) {
+  const statusStyle = actionStatusConfig[action.status] ?? actionStatusConfig.pending;
+  const typeStyle = actionTypeColors[action.type] ?? actionTypeColors.exec;
+  const statusLabel = statusConfig[action.status]?.label ?? action.status;
 
   return (
     <Link
-      to={step.status === "done" || step.status === "running" || step.status === "failed" ? `/executions/${step.id}` : "#"}
+      to={action.status === "done" || action.status === "running" || action.status === "failed" ? `/runs/${action.id}` : "#"}
       className={cn(
         "flex items-center gap-3 px-3.5 py-3 transition-colors hover:bg-muted/50",
         !isLast && "border-b",
-        step.status === "done" && "bg-muted/40",
-        step.status === "running" && "bg-muted/30",
+        action.status === "done" && "bg-muted/40",
+        action.status === "running" && "bg-muted/30",
       )}
     >
       <div className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full", statusStyle.bg)}>
         {statusStyle.icon ?? <span className={cn("text-[11px] font-semibold", statusStyle.text)}>{index + 1}</span>}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-foreground">{step.name}</div>
-        {step.description ? (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">{step.description}</div>
+        <div className="text-[13px] font-medium text-foreground">{action.name}</div>
+        {action.description ? (
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">{action.description}</div>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", typeStyle.text, typeStyle.bg)}>
-          {normalizeStepTypeLabel(step.type)}
+          {normalizeStepTypeLabel(action.type)}
         </span>
-        {step.agent_role ? (
+        {action.agent_role ? (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {step.agent_role}
+            {action.agent_role}
           </span>
         ) : null}
         <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", statusStyle.text, statusStyle.bg)}>
@@ -167,7 +167,7 @@ export function WorkItemDetailPage() {
   const { apiClient, projects } = useWorkbench();
   const numericWorkItemId = Number.parseInt(workItemIdParam ?? "", 10);
   const [workItem, setWorkItem] = useState<WorkItem | null>(null);
-  const [steps, setSteps] = useState<Action[]>([]);
+  const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(false);
   const [runningAction, setRunningAction] = useState<"idle" | "run" | "cancel">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -191,10 +191,10 @@ export function WorkItemDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const [workItemResponse, stepsResponse] = await fetchWorkItemData(numericWorkItemId);
+        const [workItemResponse, actionsResponse] = await fetchWorkItemData(numericWorkItemId);
         if (!cancelled) {
           setWorkItem(workItemResponse);
-          setSteps(stepsResponse);
+          setActions(actionsResponse);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -408,7 +408,7 @@ export function WorkItemDetailPage() {
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-semibold">{t("workItemDetail.steps")}</h3>
                   <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                    {steps.length} {t("workItemDetail.stepsUnit")}
+                    {actions.length} {t("workItemDetail.stepsUnit")}
                   </span>
                 </div>
                 <Button variant="outline" size="sm" className="h-7 gap-1 text-xs text-muted-foreground">
@@ -416,10 +416,10 @@ export function WorkItemDetailPage() {
                   {t("workItemDetail.addStep")}
                 </Button>
               </div>
-              {steps.length > 0 ? (
+              {actions.length > 0 ? (
                 <div className="rounded-lg border">
-                  {steps.map((step, index) => (
-                    <StepRow key={step.id} step={step} index={index} isLast={index === steps.length - 1} />
+                  {actions.map((action, index) => (
+                    <ActionRow key={action.id} action={action} index={index} isLast={index === actions.length - 1} />
                   ))}
                 </div>
               ) : (

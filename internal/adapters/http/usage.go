@@ -95,21 +95,21 @@ func (h *Handler) getUsageByProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, data)
 }
 
-// getUsageByRun returns usage for a specific execution.
+// getUsageByRun returns usage for a specific run.
 func (h *Handler) getUsageByRun(w http.ResponseWriter, r *http.Request) {
-	execID, ok := urlParamInt64(r, "execID")
+	runID, ok := urlParamInt64(r, "runID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid execution ID", "BAD_REQUEST")
+		writeError(w, http.StatusBadRequest, "invalid run ID", "BAD_REQUEST")
 		return
 	}
 
-	data, err := h.store.GetUsageByRun(r.Context(), execID)
+	data, err := h.store.GetUsageByRun(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "USAGE_ERROR")
 		return
 	}
 	if data == nil {
-		writeError(w, http.StatusNotFound, "no usage record for this execution", "NOT_FOUND")
+		writeError(w, http.StatusNotFound, "no usage record for this run", "NOT_FOUND")
 		return
 	}
 	writeJSON(w, http.StatusOK, data)

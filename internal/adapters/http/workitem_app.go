@@ -69,13 +69,13 @@ func (t workItemAppTx) InTx(ctx context.Context, fn func(ctx context.Context, st
 func writeWorkItemAppError(w http.ResponseWriter, err error) bool {
 	switch workitemapp.CodeOf(err) {
 	case workitemapp.CodeWorkItemNotFound:
-		writeError(w, http.StatusNotFound, "issue not found", "NOT_FOUND")
+		writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 	case workitemapp.CodeProjectNotFound:
 		writeError(w, http.StatusNotFound, "project not found", "PROJECT_NOT_FOUND")
 	case workitemapp.CodeResourceBindingNotFound:
 		writeError(w, http.StatusNotFound, "resource binding not found", "RESOURCE_BINDING_NOT_FOUND")
 	case workitemapp.CodeWorkItemDependencyNotFound:
-		writeError(w, http.StatusNotFound, "dependency issue not found", "ISSUE_DEPENDENCY_NOT_FOUND")
+		writeError(w, http.StatusNotFound, "dependency work item not found", "ISSUE_DEPENDENCY_NOT_FOUND")
 	case workitemapp.CodeMissingTitle:
 		writeError(w, http.StatusBadRequest, "title is required", "MISSING_TITLE")
 	case workitemapp.CodeInvalidResourceBinding:
@@ -83,7 +83,7 @@ func writeWorkItemAppError(w http.ResponseWriter, err error) bool {
 	case workitemapp.CodeInvalidWorkItemDependency:
 		writeError(w, http.StatusBadRequest, err.Error(), "INVALID_ISSUE_DEPENDENCY")
 	case workitemapp.CodeNoSteps:
-		writeError(w, http.StatusBadRequest, "issue has no steps; add at least one step before running", "NO_STEPS")
+		writeError(w, http.StatusBadRequest, "work item has no steps; add at least one step before running", "NO_STEPS")
 	case workitemapp.CodeInvalidState:
 		writeError(w, http.StatusConflict, err.Error(), "INVALID_STATE")
 	case workitemapp.CodeBootstrapPRFailed:

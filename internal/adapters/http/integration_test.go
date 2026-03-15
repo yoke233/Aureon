@@ -267,10 +267,10 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	// 8. Verify executions exist for each step.
 	for _, id := range []int64{stepA.ID, stepB.ID, stepC.ID} {
-		resp, _ = getJSON(ts, fmt.Sprintf("/steps/%d/executions", id))
+		resp, _ = getJSON(ts, fmt.Sprintf("/steps/%d/runs", id))
 		execs := decode[[]*core.Run](t, resp)
 		if len(execs) == 0 {
-			t.Fatalf("step %d: expected at least 1 execution", id)
+			t.Fatalf("step %d: expected at least 1 run", id)
 		}
 		if execs[0].Status != core.RunSucceeded {
 			t.Fatalf("step %d exec: expected succeeded, got %s", id, execs[0].Status)
@@ -279,7 +279,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	// 9. Verify all 3 steps were executed.
 	if c := atomic.LoadInt32(&execCount); c != 3 {
-		t.Fatalf("expected 3 executions, got %d", c)
+		t.Fatalf("expected 3 runs, got %d", c)
 	}
 
 	// 10. Verify persisted events exist.
@@ -360,7 +360,7 @@ func TestIntegration_FanOutFanIn(t *testing.T) {
 
 	// All 5 steps executed.
 	if c := atomic.LoadInt32(&execCount); c != 5 {
-		t.Fatalf("expected 5 executions, got %d", c)
+		t.Fatalf("expected 5 runs, got %d", c)
 	}
 
 	// E is done.
@@ -459,7 +459,7 @@ func TestIntegration_RetryThenSucceed(t *testing.T) {
 	pollWorkItemStatus(t, ts, issue.ID, core.WorkItemDone, 5*time.Second)
 
 	// Step should have 2 executions (1 failed + 1 succeeded).
-	resp, _ = getJSON(ts, fmt.Sprintf("/steps/%d/executions", step.ID))
+	resp, _ = getJSON(ts, fmt.Sprintf("/steps/%d/runs", step.ID))
 	execs := decode[[]*core.Run](t, resp)
 	if len(execs) < 2 {
 		t.Fatalf("expected at least 2 executions (retry), got %d", len(execs))
@@ -502,7 +502,7 @@ func TestIntegration_PermanentFailure(t *testing.T) {
 	// Only 1 execution (no retries for permanent errors).
 	resp, _ = getJSON(ts, fmt.Sprintf("/work-items/%d/steps", issue.ID))
 	steps := decode[[]*core.Action](t, resp)
-	resp, _ = getJSON(ts, fmt.Sprintf("/steps/%d/executions", steps[0].ID))
+	resp, _ = getJSON(ts, fmt.Sprintf("/steps/%d/runs", steps[0].ID))
 	execs := decode[[]*core.Run](t, resp)
 	if len(execs) != 1 {
 		t.Fatalf("expected exactly 1 execution for permanent failure, got %d", len(execs))
@@ -853,7 +853,7 @@ func TestIntegration_ConcurrentIssues(t *testing.T) {
 
 	// All 3 issues × 1 step = 3 executions.
 	if c := atomic.LoadInt32(&execCount); c != 3 {
-		t.Fatalf("expected 3 executions, got %d", c)
+		t.Fatalf("expected 3 runs, got %d", c)
 	}
 }
 

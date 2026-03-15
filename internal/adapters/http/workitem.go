@@ -62,12 +62,12 @@ func (h *Handler) createWorkItem(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getWorkItem(w http.ResponseWriter, r *http.Request) {
 	id, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 	issue, err := h.store.GetWorkItem(r.Context(), id)
 	if err == core.ErrNotFound {
-		writeError(w, http.StatusNotFound, "issue not found", "NOT_FOUND")
+		writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 		return
 	}
 	if err != nil {
@@ -124,7 +124,7 @@ func (h *Handler) listWorkItems(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateWorkItem(w http.ResponseWriter, r *http.Request) {
 	id, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
@@ -159,7 +159,7 @@ func (h *Handler) updateWorkItem(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteWorkItem(w http.ResponseWriter, r *http.Request) {
 	id, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
@@ -184,7 +184,7 @@ func (h *Handler) unarchiveWorkItem(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) setIssueArchived(w http.ResponseWriter, r *http.Request, archived bool) {
 	id, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
@@ -199,12 +199,12 @@ func (h *Handler) setIssueArchived(w http.ResponseWriter, r *http.Request, archi
 	writeJSON(w, http.StatusOK, workItem)
 }
 
-// runWorkItem triggers async execution of an issue. Returns immediately.
-// If a scheduler is configured, the issue is queued; otherwise it runs directly.
+// runWorkItem triggers async execution of a work item. Returns immediately.
+// If a scheduler is configured, the work item is queued; otherwise it runs directly.
 func (h *Handler) runWorkItem(w http.ResponseWriter, r *http.Request) {
 	id, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
@@ -234,7 +234,7 @@ func (h *Handler) runWorkItem(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) cancelWorkItem(w http.ResponseWriter, r *http.Request) {
 	id, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 

@@ -1358,7 +1358,7 @@ func TestAPI_ToolCallAuditRoutes(t *testing.T) {
 		t.Fatalf("handle tool finish: %v", err)
 	}
 
-	listResp, err := get(ts, fmt.Sprintf("/executions/%d/tool-calls", runID))
+	listResp, err := get(ts, fmt.Sprintf("/runs/%d/tool-calls", runID))
 	if err != nil {
 		t.Fatalf("list tool call audits: %v", err)
 	}
@@ -1392,7 +1392,7 @@ func TestAPI_ToolCallAuditRoutes(t *testing.T) {
 	}
 }
 
-func TestAPI_ExecutionAuditTimelineRoute(t *testing.T) {
+func TestAPI_RunAuditTimelineRoute(t *testing.T) {
 	h, ts := setupAPI(t)
 	ctx := context.Background()
 
@@ -1427,13 +1427,13 @@ func TestAPI_ExecutionAuditTimelineRoute(t *testing.T) {
 
 	eventAt := time.Now().UTC().Add(-5 * time.Minute)
 	if _, err := h.store.CreateEvent(ctx, &core.Event{
-		Type:       core.EventExecutionAudit,
+		Type:       core.EventRunAudit,
 		WorkItemID: workItemID,
 		ActionID:   actionID,
 		RunID:      runID,
 		Timestamp:  eventAt,
 		Data: map[string]any{
-			"kind":   "execution.dispatch",
+			"kind":   "run.dispatch",
 			"status": "succeeded",
 		},
 	}); err != nil {
@@ -1494,7 +1494,7 @@ func TestAPI_ExecutionAuditTimelineRoute(t *testing.T) {
 		t.Fatalf("create action signal: %v", err)
 	}
 
-	resp, err := get(ts, fmt.Sprintf("/executions/%d/audit-timeline", runID))
+	resp, err := get(ts, fmt.Sprintf("/runs/%d/audit-timeline", runID))
 	if err != nil {
 		t.Fatalf("get audit timeline: %v", err)
 	}
@@ -1503,7 +1503,7 @@ func TestAPI_ExecutionAuditTimelineRoute(t *testing.T) {
 	}
 
 	var got struct {
-		ExecutionID int64 `json:"execution_id"`
+		RunID       int64 `json:"run_id"`
 		Items       []struct {
 			Source    string    `json:"source"`
 			Kind      string    `json:"kind"`
@@ -1527,8 +1527,8 @@ func TestAPI_ExecutionAuditTimelineRoute(t *testing.T) {
 	if err := decodeJSON(resp, &got); err != nil {
 		t.Fatalf("decode audit timeline: %v", err)
 	}
-	if got.ExecutionID != runID {
-		t.Fatalf("execution_id = %d, want %d", got.ExecutionID, runID)
+	if got.RunID != runID {
+		t.Fatalf("run_id = %d, want %d", got.RunID, runID)
 	}
 	if len(got.Items) != 4 {
 		t.Fatalf("expected 4 timeline items, got %d", len(got.Items))
@@ -1536,11 +1536,11 @@ func TestAPI_ExecutionAuditTimelineRoute(t *testing.T) {
 	if !got.Items[0].Timestamp.Before(got.Items[1].Timestamp) || !got.Items[1].Timestamp.Before(got.Items[2].Timestamp) || !got.Items[2].Timestamp.Before(got.Items[3].Timestamp) {
 		t.Fatalf("timeline items not sorted by timestamp: %+v", got.Items)
 	}
-	if got.Items[0].Source != "event" || got.Items[0].Kind != string(core.EventExecutionAudit) || got.Items[0].Status != "succeeded" {
+	if got.Items[0].Source != "event" || got.Items[0].Kind != string(core.EventRunAudit) || got.Items[0].Status != "succeeded" {
 		t.Fatalf("unexpected event item: %+v", got.Items[0])
 	}
-	if got.Items[0].Summary != "execution.dispatch succeeded" {
-		t.Fatalf("event summary = %q, want execution.dispatch succeeded", got.Items[0].Summary)
+	if got.Items[0].Summary != "run.dispatch succeeded" {
+		t.Fatalf("event summary = %q, want run.dispatch succeeded", got.Items[0].Summary)
 	}
 	if got.Items[1].Source != "probe" || got.Items[1].Probe == nil || got.Items[1].Probe.Status != string(core.RunProbeAnswered) {
 		t.Fatalf("unexpected probe item: %+v", got.Items[1])

@@ -11,7 +11,7 @@ import (
 
 type setupCronRequest struct {
 	Schedule     string `json:"schedule"`                // cron expression, e.g. "0 */6 * * *"
-	MaxInstances int    `json:"max_instances,omitempty"`  // default 1
+	MaxInstances int    `json:"max_instances,omitempty"` // default 1
 }
 
 type cronStatusResponse struct {
@@ -24,7 +24,7 @@ type cronStatusResponse struct {
 	LastTriggered string `json:"last_triggered,omitempty"`
 }
 
-// setupWorkItemCron enables cron scheduling on an issue (making it a template).
+// setupWorkItemCron enables cron scheduling on a work item (making it a template).
 func (h *Handler) setupWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
@@ -45,7 +45,7 @@ func (h *Handler) setupWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	issue, err := h.store.GetWorkItem(r.Context(), issueID)
 	if err != nil {
 		if err == core.ErrNotFound {
-			writeError(w, http.StatusNotFound, "issue not found", "NOT_FOUND")
+			writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
@@ -77,7 +77,7 @@ func (h *Handler) setupWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// disableWorkItemCron disables cron scheduling on an issue.
+// disableWorkItemCron disables cron scheduling on a work item.
 func (h *Handler) disableWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
@@ -88,7 +88,7 @@ func (h *Handler) disableWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	issue, err := h.store.GetWorkItem(r.Context(), issueID)
 	if err != nil {
 		if err == core.ErrNotFound {
-			writeError(w, http.StatusNotFound, "issue not found", "NOT_FOUND")
+			writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
@@ -123,7 +123,7 @@ func (h *Handler) disableWorkItemCron(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getWorkItemCronStatus returns the cron status for an issue.
+// getWorkItemCronStatus returns the cron status for a work item.
 func (h *Handler) getWorkItemCronStatus(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
@@ -134,7 +134,7 @@ func (h *Handler) getWorkItemCronStatus(w http.ResponseWriter, r *http.Request) 
 	issue, err := h.store.GetWorkItem(r.Context(), issueID)
 	if err != nil {
 		if err == core.ErrNotFound {
-			writeError(w, http.StatusNotFound, "issue not found", "NOT_FOUND")
+			writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
@@ -163,7 +163,7 @@ func (h *Handler) getWorkItemCronStatus(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// listCronWorkItems lists all issues that are configured as cron templates.
+// listCronWorkItems lists all work items that are configured as cron templates.
 func (h *Handler) listCronWorkItems(w http.ResponseWriter, r *http.Request) {
 	archived := false
 	issues, err := h.store.ListWorkItems(r.Context(), core.WorkItemFilter{

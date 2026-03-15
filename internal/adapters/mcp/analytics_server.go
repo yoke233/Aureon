@@ -51,7 +51,7 @@ func (s *AnalyticsServer) Tools() []ToolDefinition {
 		},
 		{
 			Name:        "analytics_duration_stats",
-			Description: "Get issue execution duration statistics. Shows avg/min/max execution time per issue.",
+			Description: "Get work item execution duration statistics. Shows avg/min/max execution time per work item.",
 			InputSchema: filterSchema,
 		},
 		{
@@ -66,7 +66,7 @@ func (s *AnalyticsServer) Tools() []ToolDefinition {
 		},
 		{
 			Name:        "analytics_status_distribution",
-			Description: "Get issue status distribution (how many pending/running/done/failed).",
+			Description: "Get work item status distribution (how many pending/running/done/failed).",
 			InputSchema: filterSchema,
 		},
 		{

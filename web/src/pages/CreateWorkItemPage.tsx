@@ -21,7 +21,7 @@ import { getErrorMessage, normalizeStepTypeLabel } from "@/lib/v2Workbench";
 import { cn } from "@/lib/utils";
 import type { Action, DAGTemplate, ResourceSpace, WorkItemAttachment } from "@/types/apiV2";
 
-const stepColors: Record<string, { bg: string; text: string }> = {
+const actionColors: Record<string, { bg: string; text: string }> = {
   exec: { bg: "bg-blue-50", text: "text-blue-600" },
   gate: { bg: "bg-amber-50", text: "text-amber-600" },
   composite: { bg: "bg-indigo-50", text: "text-indigo-600" },
@@ -39,7 +39,7 @@ export function CreateWorkItemPage() {
   const [description, setDescription] = useState(searchParams.get("body") ?? "");
   const [generatingTitle, setGeneratingTitle] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
-  const [previewSteps, setPreviewSteps] = useState<Action[]>([]);
+  const [previewActions, setPreviewActions] = useState<Action[]>([]);
   const [draftWorkItemId, setDraftWorkItemId] = useState<number | null>(null);
   const [busy, setBusy] = useState<"idle" | "generating" | "saving" | "running" | "from_template">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +83,7 @@ export function CreateWorkItemPage() {
   useEffect(() => {
     if (scmProvider) {
       setSelectedTemplateId(null);
-      setPreviewSteps([]);
+      setPreviewActions([]);
     }
   }, [scmProvider]);
 
@@ -161,7 +161,7 @@ export function CreateWorkItemPage() {
     }
   };
 
-  const generateSteps = async () => {
+  const generateActionPreview = async () => {
     if (scmProvider) {
       setError(t("createWorkItem.scmFlowError"));
       return;
@@ -174,10 +174,10 @@ export function CreateWorkItemPage() {
     setError(null);
     try {
       const workItemId = await ensureDraftWorkItem();
-      const generatedSteps = await apiClient.generateActions(workItemId, {
+      const generatedActions = await apiClient.generateActions(workItemId, {
         description: aiPrompt.trim() || description.trim() || title.trim(),
       });
-      setPreviewSteps(generatedSteps);
+      setPreviewActions(generatedActions);
     } catch (generateError) {
       setError(getErrorMessage(generateError));
     } finally {
@@ -221,11 +221,11 @@ export function CreateWorkItemPage() {
     try {
       const workItemId = await ensureDraftWorkItem();
       await uploadPendingFiles(workItemId);
-      if (!scmProvider && previewSteps.length === 0 && (aiPrompt.trim() || description.trim())) {
-        const generatedSteps = await apiClient.generateActions(workItemId, {
+      if (!scmProvider && previewActions.length === 0 && (aiPrompt.trim() || description.trim())) {
+        const generatedActions = await apiClient.generateActions(workItemId, {
           description: aiPrompt.trim() || description.trim(),
         });
-        setPreviewSteps(generatedSteps);
+        setPreviewActions(generatedActions);
       }
       if (runImmediately) {
         await apiClient.runWorkItem(workItemId);
@@ -454,7 +454,7 @@ export function CreateWorkItemPage() {
                   <Button
                     className="bg-indigo-500 hover:bg-indigo-600"
                     disabled={busy !== "idle"}
-                    onClick={() => void generateSteps()}
+                    onClick={() => void generateActionPreview()}
                   >
                     <Sparkles className="mr-2 h-4 w-4" />
                     {busy === "generating" ? t("createWorkItem.generating") : t("createWorkItem.generateSteps")}
@@ -472,16 +472,16 @@ export function CreateWorkItemPage() {
               <Badge variant="secondary">
                 {selectedTemplate
                   ? t("createWorkItem.nSteps", { count: selectedTemplate.actions.length })
-                  : t("createWorkItem.nSteps", { count: previewSteps.length })}
+                  : t("createWorkItem.nSteps", { count: previewActions.length })}
               </Badge>
             </div>
             <div>
               {selectedTemplate ? (
-                selectedTemplate.actions.map((step, index) => {
-                  const color = stepColors[step.type] ?? stepColors.exec;
+                selectedTemplate.actions.map((action, index) => {
+                  const color = actionColors[action.type] ?? actionColors.exec;
                   return (
                     <div
-                      key={step.name}
+                      key={action.name}
                       className={cn(
                         "flex items-center gap-3 px-5 py-3",
                         index < selectedTemplate.actions.length - 1 && "border-b",
@@ -491,11 +491,11 @@ export function CreateWorkItemPage() {
                         {index + 1}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-medium">{step.name}</div>
+                        <div className="text-[13px] font-medium">{action.name}</div>
                         <div className="text-[11px] text-muted-foreground">
-                          {normalizeStepTypeLabel(step.type)}
-                          {step.agent_role ? ` · ${step.agent_role}` : ""}
-                          {step.depends_on?.length ? ` · ${t("createWorkItem.dependsOn", { deps: step.depends_on.join(", ") })}` : ""}
+                          {normalizeStepTypeLabel(action.type)}
+                          {action.agent_role ? ` · ${action.agent_role}` : ""}
+                          {action.depends_on?.length ? ` · ${t("createWorkItem.dependsOn", { deps: action.depends_on.join(", ") })}` : ""}
                         </div>
                       </div>
                     </div>
@@ -505,30 +505,30 @@ export function CreateWorkItemPage() {
                 <div className="px-5 py-6 text-sm text-muted-foreground">
                   {t("createWorkItem.scmAutoSteps")}
                 </div>
-              ) : previewSteps.length === 0 ? (
+              ) : previewActions.length === 0 ? (
                 <div className="px-5 py-6 text-sm text-muted-foreground">
                   {t("createWorkItem.noSteps")}
                 </div>
               ) : (
-                previewSteps.map((step, index) => {
-                  const color = stepColors[step.type] ?? stepColors.exec;
+                previewActions.map((action, index) => {
+                  const color = actionColors[action.type] ?? actionColors.exec;
                   return (
                     <div
-                      key={step.id}
+                      key={action.id}
                       className={cn(
                         "flex items-center gap-3 px-5 py-3",
-                        index < previewSteps.length - 1 && "border-b",
+                        index < previewActions.length - 1 && "border-b",
                       )}
                     >
                       <div className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", color.bg, color.text)}>
                         {index + 1}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-medium">{step.name}</div>
+                        <div className="text-[13px] font-medium">{action.name}</div>
                         <div className="text-[11px] text-muted-foreground">
-                          {normalizeStepTypeLabel(step.type)}
-                          {step.agent_role ? ` · ${step.agent_role}` : ""}
-                          {step.depends_on?.length ? ` · ${t("createWorkItem.dependsOn", { deps: step.depends_on.join(", ") })}` : ""}
+                          {normalizeStepTypeLabel(action.type)}
+                          {action.agent_role ? ` · ${action.agent_role}` : ""}
+                          {action.depends_on?.length ? ` · ${t("createWorkItem.dependsOn", { deps: action.depends_on.join(", ") })}` : ""}
                         </div>
                       </div>
                     </div>

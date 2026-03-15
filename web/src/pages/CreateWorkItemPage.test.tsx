@@ -43,7 +43,7 @@ describe("CreateWorkItemPage", () => {
     cleanup();
   });
 
-  it("支持手工创建工作项并在提交时补生成步骤后直接运行", async () => {
+  it("支持手工创建工作项并在提交时补生成动作后直接运行", async () => {
     const apiClient = {
       listDAGTemplates: vi.fn().mockResolvedValue([]),
       listProjectResources: vi.fn().mockResolvedValue([]),
@@ -102,7 +102,7 @@ describe("CreateWorkItemPage", () => {
         {
           id: 7,
           name: "标准发布",
-          description: "包含构建、发布与验收步骤",
+          description: "包含构建、发布与验收动作",
           actions: [
             { name: "构建", type: "exec" },
             { name: "发布", type: "exec" },
@@ -134,7 +134,7 @@ describe("CreateWorkItemPage", () => {
     fireEvent.click(templateButton);
 
     expect(await screen.findByDisplayValue("标准发布")).toBeTruthy();
-    expect(screen.getByDisplayValue("包含构建、发布与验收步骤")).toBeTruthy();
+    expect(screen.getByDisplayValue("包含构建、发布与验收动作")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "创建并运行" }));
 

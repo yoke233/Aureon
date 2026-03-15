@@ -216,7 +216,7 @@ export type ThreadEventType =
   | "thread.track.review_approved"
   | "thread.track.review_rejected"
   | "thread.track.materialized"
-  | "thread.track.execution_confirmed";
+  | "thread.track.run_confirmed";
 
 export interface ThreadEventPayload {
   thread_id?: number;

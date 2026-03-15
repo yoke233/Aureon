@@ -70,8 +70,8 @@ func writeWorkItemTrackAppError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusBadRequest, err.Error(), workitemtrackapp.CodeInvalidRelationType)
 	case workitemtrackapp.CodeInvalidState:
 		writeError(w, http.StatusConflict, err.Error(), workitemtrackapp.CodeInvalidState)
-	case workitemtrackapp.CodeExecutionUnavailable:
-		writeError(w, http.StatusServiceUnavailable, err.Error(), workitemtrackapp.CodeExecutionUnavailable)
+	case workitemtrackapp.CodeRunUnavailable:
+		writeError(w, http.StatusServiceUnavailable, err.Error(), workitemtrackapp.CodeRunUnavailable)
 	default:
 		return false
 	}

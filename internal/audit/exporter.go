@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-type ExecutionAuditRecord struct {
+type RunAuditRecord struct {
 	EventName      string         `json:"event_name"`
 	WorkItemID     int64          `json:"work_item_id,omitempty"`
 	ActionID       int64          `json:"action_id,omitempty"`
@@ -24,7 +24,7 @@ type ExecutionAuditRecord struct {
 }
 
 type Exporter interface {
-	ExportExecutionAudit(ctx context.Context, logRef string, records []ExecutionAuditRecord) error
+	ExportRunAudit(ctx context.Context, logRef string, records []RunAuditRecord) error
 }
 
 type FileExporter struct {
@@ -35,20 +35,20 @@ func NewFileExporter(rootDir string) *FileExporter {
 	return &FileExporter{rootDir: filepath.Clean(strings.TrimSpace(rootDir))}
 }
 
-func (e *FileExporter) ExportExecutionAudit(_ context.Context, logRef string, records []ExecutionAuditRecord) error {
+func (e *FileExporter) ExportRunAudit(_ context.Context, logRef string, records []RunAuditRecord) error {
 	return writeJSONLRecords(e.rootDir, logRef, records)
 }
 
-func buildExecutionAuditLogRef(runID int64, now time.Time) string {
+func buildRunAuditLogRef(runID int64, now time.Time) string {
 	return filepath.ToSlash(filepath.Join(
 		now.Format("2006"),
 		now.Format("01"),
 		now.Format("02"),
-		fmt.Sprintf("exec-%d-execution.jsonl", runID),
+		fmt.Sprintf("run-%d-audit.jsonl", runID),
 	))
 }
 
-func ReadExecutionAuditRecords(rootDir, logRef string) ([]ExecutionAuditRecord, error) {
+func ReadRunAuditRecords(rootDir, logRef string) ([]RunAuditRecord, error) {
 	path, err := resolveLogPath(rootDir, logRef)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func ReadExecutionAuditRecords(rootDir, logRef string) ([]ExecutionAuditRecord, 
 	}
 	defer f.Close()
 
-	records := make([]ExecutionAuditRecord, 0)
+	records := make([]RunAuditRecord, 0)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -67,14 +67,14 @@ func ReadExecutionAuditRecords(rootDir, logRef string) ([]ExecutionAuditRecord, 
 		if len(strings.TrimSpace(string(line))) == 0 {
 			continue
 		}
-		var record ExecutionAuditRecord
+		var record RunAuditRecord
 		if err := json.Unmarshal(line, &record); err != nil {
-			return nil, fmt.Errorf("decode execution audit record: %w", err)
+			return nil, fmt.Errorf("decode run audit record: %w", err)
 		}
 		records = append(records, record)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan execution audit file: %w", err)
+		return nil, fmt.Errorf("scan run audit file: %w", err)
 	}
 	return records, nil
 }

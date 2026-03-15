@@ -10,20 +10,20 @@ import (
 // --- Request / Response types ---
 
 type createDAGTemplateRequest struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	ProjectID   *int64                 `json:"project_id,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
-	Metadata    map[string]string      `json:"metadata,omitempty"`
+	Name        string                   `json:"name"`
+	Description string                   `json:"description,omitempty"`
+	ProjectID   *int64                   `json:"project_id,omitempty"`
+	Tags        []string                 `json:"tags,omitempty"`
+	Metadata    map[string]string        `json:"metadata,omitempty"`
 	Steps       []core.DAGTemplateAction `json:"steps"`
 }
 
 type updateDAGTemplateRequest struct {
-	Name        *string                 `json:"name,omitempty"`
-	Description *string                 `json:"description,omitempty"`
-	ProjectID   *int64                  `json:"project_id,omitempty"`
-	Tags        *[]string               `json:"tags,omitempty"`
-	Metadata    map[string]string       `json:"metadata,omitempty"`
+	Name        *string                   `json:"name,omitempty"`
+	Description *string                   `json:"description,omitempty"`
+	ProjectID   *int64                    `json:"project_id,omitempty"`
+	Tags        *[]string                 `json:"tags,omitempty"`
+	Metadata    map[string]string         `json:"metadata,omitempty"`
 	Steps       *[]core.DAGTemplateAction `json:"steps,omitempty"`
 }
 
@@ -185,17 +185,17 @@ func (h *Handler) deleteDAGTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /work-items/{issueID}/save-as-template
-// Snapshots the current issue's steps into a new DAGTemplate.
+// Snapshots the current work item's steps into a new DAGTemplate.
 func (h *Handler) saveWorkItemAsTemplate(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
 	issue, err := h.store.GetWorkItem(r.Context(), issueID)
 	if err == core.ErrNotFound {
-		writeError(w, http.StatusNotFound, "issue not found", "NOT_FOUND")
+		writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 		return
 	}
 	if err != nil {
@@ -209,7 +209,7 @@ func (h *Handler) saveWorkItemAsTemplate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if len(steps) == 0 {
-		writeError(w, http.StatusBadRequest, "issue has no steps to save as template", "NO_STEPS")
+		writeError(w, http.StatusBadRequest, "work item has no steps to save as template", "NO_STEPS")
 		return
 	}
 
@@ -252,8 +252,8 @@ func (h *Handler) saveWorkItemAsTemplate(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, t)
 }
 
-// POST /templates/{templateID}/create-issue
-// Creates a new Issue and materializes template steps into it.
+// POST /templates/{templateID}/create-work-item
+// Creates a new work item and materializes template steps into it.
 func (h *Handler) createWorkItemFromTemplate(w http.ResponseWriter, r *http.Request) {
 	templateID, ok := urlParamInt64(r, "templateID")
 	if !ok {

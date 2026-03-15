@@ -9,12 +9,12 @@ import (
 	"github.com/yoke233/ai-workflow/internal/core"
 )
 
-type executionAuditTimelineResponse struct {
-	ExecutionID int64                       `json:"execution_id"`
-	Items       []executionAuditTimelineRow `json:"items"`
+type runAuditTimelineResponse struct {
+	RunID int64                 `json:"run_id"`
+	Items []runAuditTimelineRow `json:"items"`
 }
 
-type executionAuditTimelineRow struct {
+type runAuditTimelineRow struct {
 	Source          string              `json:"source"`
 	Kind            string              `json:"kind"`
 	Timestamp       time.Time           `json:"timestamp"`
@@ -33,15 +33,15 @@ type executionAuditTimelineRow struct {
 	ToolCall        *core.ToolCallAudit `json:"tool_call,omitempty"`
 }
 
-func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Request) {
-	execID, ok := urlParamInt64(r, "execID")
+func (h *Handler) getRunAuditTimeline(w http.ResponseWriter, r *http.Request) {
+	runID, ok := urlParamInt64(r, "runID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid execution ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid run ID", "BAD_ID")
 		return
 	}
 
 	filter := core.EventFilter{
-		RunID:    &execID,
+		RunID:    &runID,
 		Category: core.EventCategoryDomain,
 		Limit:    queryInt(r, "limit", 500),
 		Offset:   queryInt(r, "offset", 0),
@@ -51,7 +51,7 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, err.Error(), "EVENT_LIST_ERROR")
 		return
 	}
-	probeSigs, err := h.store.ListProbeSignalsByRun(r.Context(), execID)
+	probeSigs, err := h.store.ListProbeSignalsByRun(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "PROBE_LIST_ERROR")
 		return
@@ -60,15 +60,15 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 	for _, sig := range probeSigs {
 		probes = append(probes, core.ProbeFromSignal(sig))
 	}
-	toolCalls, err := h.store.ListToolCallAuditsByRun(r.Context(), execID)
+	toolCalls, err := h.store.ListToolCallAuditsByRun(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "TOOL_CALL_AUDIT_LIST_ERROR")
 		return
 	}
-	runRec, err := h.store.GetRun(r.Context(), execID)
+	runRec, err := h.store.GetRun(r.Context(), runID)
 	if err != nil {
 		if err == core.ErrNotFound {
-			writeError(w, http.StatusNotFound, "execution not found", "NOT_FOUND")
+			writeError(w, http.StatusNotFound, "run not found", "NOT_FOUND")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error(), "RUN_GET_ERROR")
@@ -80,12 +80,12 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	items := make([]executionAuditTimelineRow, 0, len(events)+len(probes)+len(toolCalls)+len(signals))
+	items := make([]runAuditTimelineRow, 0, len(events)+len(probes)+len(toolCalls)+len(signals))
 	for _, event := range events {
 		if event == nil {
 			continue
 		}
-		items = append(items, executionAuditTimelineRow{
+		items = append(items, runAuditTimelineRow{
 			Source:     "event",
 			Kind:       string(event.Type),
 			Timestamp:  event.Timestamp,
@@ -102,9 +102,9 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 		if probe == nil {
 			continue
 		}
-		items = append(items, executionAuditTimelineRow{
+		items = append(items, runAuditTimelineRow{
 			Source:     "probe",
-			Kind:       "execution.probe",
+			Kind:       "run.probe",
 			Timestamp:  timelineProbeTimestamp(probe),
 			WorkItemID: probe.WorkItemID,
 			ActionID:   probe.ActionID,
@@ -119,7 +119,7 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 		if auditItem == nil {
 			continue
 		}
-		items = append(items, executionAuditTimelineRow{
+		items = append(items, runAuditTimelineRow{
 			Source:          "tool_call",
 			Kind:            "tool.call",
 			Timestamp:       timelineToolCallTimestamp(auditItem),
@@ -133,13 +133,13 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 		})
 	}
 	for _, signal := range signals {
-		if signal == nil || signal.RunID != execID {
+		if signal == nil || signal.RunID != runID {
 			continue
 		}
 		if signal.Type == core.SignalProbeRequest || signal.Type == core.SignalProbeResponse {
 			continue
 		}
-		items = append(items, executionAuditTimelineRow{
+		items = append(items, runAuditTimelineRow{
 			Source:     "signal",
 			Kind:       "action.signal",
 			Timestamp:  signal.CreatedAt,
@@ -163,9 +163,9 @@ func (h *Handler) getExecutionAuditTimeline(w http.ResponseWriter, r *http.Reque
 		return items[i].Timestamp.Before(items[j].Timestamp)
 	})
 
-	writeJSON(w, http.StatusOK, executionAuditTimelineResponse{
-		ExecutionID: execID,
-		Items:       items,
+	writeJSON(w, http.StatusOK, runAuditTimelineResponse{
+		RunID: runID,
+		Items: items,
 	})
 }
 
@@ -186,7 +186,7 @@ func timelineEventSummary(event *core.Event) string {
 	if event == nil {
 		return ""
 	}
-	if event.Type == core.EventExecutionAudit {
+	if event.Type == core.EventRunAudit {
 		kind, _ := event.Data["kind"].(string)
 		status, _ := event.Data["status"].(string)
 		if strings.TrimSpace(kind) != "" && strings.TrimSpace(status) != "" {

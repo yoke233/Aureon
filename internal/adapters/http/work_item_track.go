@@ -47,7 +47,7 @@ func registerWorkItemTrackRoutes(r chi.Router, h *Handler) {
 	r.Post("/tracks/{trackID}/pause", h.pauseWorkItemTrack)
 	r.Post("/tracks/{trackID}/cancel", h.cancelWorkItemTrack)
 	r.Post("/tracks/{trackID}/materialize", h.materializeWorkItemTrack)
-	r.Post("/tracks/{trackID}/confirm-execution", h.confirmWorkItemTrackExecution)
+	r.Post("/tracks/{trackID}/confirm-run", h.confirmWorkItemTrackRun)
 }
 
 func (h *Handler) createWorkItemTrack(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +268,7 @@ func (h *Handler) cancelWorkItemTrack(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, track)
 }
 
-func (h *Handler) confirmWorkItemTrackExecution(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) confirmWorkItemTrackRun(w http.ResponseWriter, r *http.Request) {
 	trackID, ok := urlParamInt64(r, "trackID")
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid track ID", "BAD_ID")
@@ -281,12 +281,12 @@ func (h *Handler) confirmWorkItemTrackExecution(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	result, err := h.workItemTrackService().ConfirmExecution(r.Context(), workitemtrackapp.ConfirmExecutionInput{
+	result, err := h.workItemTrackService().ConfirmRun(r.Context(), workitemtrackapp.ConfirmRunInput{
 		TrackID:   trackID,
 		ProjectID: req.ProjectID,
 	})
 	if err != nil {
-		writeWorkItemTrackAppFailure(w, err, "CONFIRM_TRACK_EXECUTION_FAILED")
+		writeWorkItemTrackAppFailure(w, err, "CONFIRM_TRACK_RUN_FAILED")
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

@@ -15,18 +15,18 @@ import (
 type mockStore struct {
 	core.Store // embed to satisfy interface; panics on unused methods
 
-	workItems    map[int64]*core.WorkItem
-	actions      map[int64][]*core.Action
-	runs         map[int64]*core.Run         // actionID → latest run with result
-	entries map[int64][]*core.FeatureEntry // projectID → entries
+	workItems map[int64]*core.WorkItem
+	actions   map[int64][]*core.Action
+	runs      map[int64]*core.Run            // actionID → latest run with result
+	entries   map[int64][]*core.FeatureEntry // projectID → entries
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		workItems:    make(map[int64]*core.WorkItem),
-		actions:      make(map[int64][]*core.Action),
-		runs:         make(map[int64]*core.Run),
-		entries: make(map[int64][]*core.FeatureEntry),
+		workItems: make(map[int64]*core.WorkItem),
+		actions:   make(map[int64][]*core.Action),
+		runs:      make(map[int64]*core.Run),
+		entries:   make(map[int64][]*core.FeatureEntry),
 	}
 }
 
@@ -121,7 +121,7 @@ func TestBuild_FullMaterials(t *testing.T) {
 		}
 	}
 
-	// Verify issue.md content.
+	// Verify work-item material content.
 	issueContent, _ := os.ReadFile(filepath.Join(dir, "issue.md"))
 	if !strings.Contains(string(issueContent), "Implement login page") {
 		t.Error("issue.md should contain the work item title")

@@ -74,7 +74,7 @@ import type {
   MaterializeWorkItemTrackRequest,
   MaterializeWorkItemTrackResponse,
   WorkItemTrackReviewRequest,
-  ConfirmExecutionTrackResponse,
+  ConfirmRunTrackResponse,
   Notification,
   CreateNotificationRequest,
   UnreadCountResponse,
@@ -358,7 +358,7 @@ export interface ApiClient {
   rejectTrackReview(trackId: number, body?: WorkItemTrackReviewRequest): Promise<WorkItemTrack>;
   pauseTrack(trackId: number): Promise<WorkItemTrack>;
   cancelTrack(trackId: number): Promise<WorkItemTrack>;
-  confirmTrackExecution(trackId: number, body?: MaterializeWorkItemTrackRequest): Promise<ConfirmExecutionTrackResponse>;
+  confirmTrackRun(trackId: number, body?: MaterializeWorkItemTrackRequest): Promise<ConfirmRunTrackResponse>;
 
   // Thread Agent Sessions
   inviteThreadAgent(threadId: number, body: { agent_profile_id: string }): Promise<ThreadMember>;
@@ -571,12 +571,12 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
   // -- Runs (primary) --
   const listRuns: ApiClient["listRuns"] = (actionId) =>
     request<Run[]>({
-      path: `/steps/${actionId}/executions`,
+      path: `/steps/${actionId}/runs`,
     }).then((items) => (Array.isArray(items) ? items : []));
 
   const getRun: ApiClient["getRun"] = (runId) =>
     request<Run>({
-      path: `/executions/${runId}`,
+      path: `/runs/${runId}`,
     });
 
   // -- Run resources --
@@ -711,7 +711,7 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
   // -- Usage --
   const getUsageByRun: ApiClient["getUsageByRun"] = (runId) =>
     request<UsageRecord>({
-      path: `/executions/${runId}/usage`,
+      path: `/runs/${runId}/usage`,
     });
 
   return {
@@ -1150,9 +1150,9 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
         path: `/tracks/${trackId}/cancel`,
         method: "POST",
       }),
-    confirmTrackExecution: (trackId, body = {}) =>
-      request<ConfirmExecutionTrackResponse, MaterializeWorkItemTrackRequest>({
-        path: `/tracks/${trackId}/confirm-execution`,
+    confirmTrackRun: (trackId, body = {}) =>
+      request<ConfirmRunTrackResponse, MaterializeWorkItemTrackRequest>({
+        path: `/tracks/${trackId}/confirm-run`,
         method: "POST",
         body,
       }),

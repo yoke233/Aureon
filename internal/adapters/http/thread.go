@@ -497,7 +497,7 @@ func (h *Handler) deleteThreadWorkItemLink(w http.ResponseWriter, r *http.Reques
 func (h *Handler) listThreadsByWorkItem(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 

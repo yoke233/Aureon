@@ -154,7 +154,7 @@ func NewACPActionExecutor(cfg ACPExecutorConfig) flowapp.ActionExecutor {
 
 		reuse := profile.Session.Reuse
 		mcpFactory := buildStepMCPFactory(step, profile, exec.ID, cfg.MCPResolver)
-		publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "session.acquire", "started", map[string]any{
+		publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "session.acquire", "started", map[string]any{
 			"agent_id":      profile.ID,
 			"session_reuse": reuse,
 			"work_dir":      workDir,
@@ -176,13 +176,13 @@ func NewACPActionExecutor(cfg ACPExecutorConfig) flowapp.ActionExecutor {
 			EphemeralSkills: ephemeralSkills,
 		})
 		if err != nil {
-			publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "session.acquire", "failed", map[string]any{
+			publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "session.acquire", "failed", map[string]any{
 				"agent_id": profile.ID,
 				"error":    err.Error(),
 			})
 			return fmt.Errorf("acquire session: %w", err)
 		}
-		publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "session.acquire", "succeeded", map[string]any{
+		publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "session.acquire", "succeeded", map[string]any{
 			"agent_id":         profile.ID,
 			"agent_context_id": derefInt64(handle.AgentContextID),
 			"has_prior_turns":  handle.HasPriorTurns,
@@ -207,27 +207,27 @@ func NewACPActionExecutor(cfg ACPExecutorConfig) flowapp.ActionExecutor {
 		// Persist the full execution input for auditability.
 		exec.Input = buildExecutionInputRecord(executionInput, profile, workDir, hasSignalSkill, hasStepContext, step)
 
-		publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "execution.dispatch", "started", map[string]any{
+		publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "run.dispatch", "started", map[string]any{
 			"agent_id":    profile.ID,
 			"input_chars": len(executionInput),
 		})
 		invocationID, err := cfg.SessionManager.StartExecution(ctx, handle, executionInput)
 		if err != nil {
-			publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "execution.dispatch", "failed", map[string]any{
+			publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "run.dispatch", "failed", map[string]any{
 				"error": err.Error(),
 			})
 			return fmt.Errorf("start execution: %w", err)
 		}
-		publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "execution.dispatch", "succeeded", map[string]any{
+		publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "run.dispatch", "succeeded", map[string]any{
 			"invocation_id": invocationID,
 		})
 
-		publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "execution.watch", "started", map[string]any{
+		publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "run.watch", "started", map[string]any{
 			"invocation_id": invocationID,
 		})
 		result, err := cfg.SessionManager.WatchExecution(ctx, invocationID, 0, sink)
 		if err != nil {
-			publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "execution.watch", "failed", map[string]any{
+			publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "run.watch", "failed", map[string]any{
 				"invocation_id": invocationID,
 				"error":         err.Error(),
 			})
@@ -240,7 +240,7 @@ func NewACPActionExecutor(cfg ACPExecutorConfig) flowapp.ActionExecutor {
 			watchAuditData["stop_reason"] = result.StopReason
 			watchAuditData["output_chars"] = len(strings.TrimSpace(result.Text))
 		}
-		publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "execution.watch", "completed", watchAuditData)
+		publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "run.watch", "completed", watchAuditData)
 		if result != nil && result.AgentContextID != nil {
 			exec.AgentContextID = result.AgentContextID
 		}
@@ -260,7 +260,7 @@ func NewACPActionExecutor(cfg ACPExecutorConfig) flowapp.ActionExecutor {
 		if step.Type == core.ActionGate {
 			exec.ResultMetadata = extractGateMetadata(replyText)
 		}
-		publishExecutionAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "deliverable.persist", "succeeded", map[string]any{
+		publishRunAudit(ctx, cfg.Bus, cfg.AuditLogger, step, exec, "deliverable.persist", "succeeded", map[string]any{
 			"result_chars": len(replyText),
 		})
 
@@ -426,7 +426,7 @@ func cloneEnv(in map[string]string) map[string]string {
 	return out
 }
 
-func publishExecutionAudit(ctx context.Context, bus core.EventBus, auditLogger *audit.Logger, step *core.Action, exec *core.Run, kind string, status string, data map[string]any) {
+func publishRunAudit(ctx context.Context, bus core.EventBus, auditLogger *audit.Logger, step *core.Action, exec *core.Run, kind string, status string, data map[string]any) {
 	if step == nil || exec == nil {
 		return
 	}
@@ -438,7 +438,7 @@ func publishExecutionAudit(ctx context.Context, bus core.EventBus, auditLogger *
 		payload[k] = v
 	}
 	if auditLogger != nil {
-		if logRef := auditLogger.LogExecutionAudit(ctx, audit.Scope{
+		if logRef := auditLogger.LogRunAudit(ctx, audit.Scope{
 			WorkItemID: step.WorkItemID,
 			ActionID:   step.ID,
 			RunID:      exec.ID,
@@ -450,7 +450,7 @@ func publishExecutionAudit(ctx context.Context, bus core.EventBus, auditLogger *
 		return
 	}
 	bus.Publish(ctx, core.Event{
-		Type:       core.EventExecutionAudit,
+		Type:       core.EventRunAudit,
 		WorkItemID: step.WorkItemID,
 		ActionID:   step.ID,
 		RunID:      exec.ID,
@@ -564,7 +564,7 @@ func tryFallbackSignal(ctx context.Context, store core.Store, bus core.EventBus,
 			"method":    "output_fallback",
 		},
 	})
-	publishExecutionAudit(ctx, bus, auditLogger, step, exec, "signal.fallback", "created", map[string]any{
+	publishRunAudit(ctx, bus, auditLogger, step, exec, "signal.fallback", "created", map[string]any{
 		"signal_id":   sigID,
 		"signal_type": string(sigType),
 		"actor":       fmt.Sprintf("agent/%s", profileID),

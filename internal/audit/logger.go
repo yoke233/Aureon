@@ -90,13 +90,13 @@ func (s *RunSink) HandleSessionUpdate(ctx context.Context, update acpclient.Sess
 	return nil
 }
 
-func (l *Logger) LogExecutionAudit(ctx context.Context, scope Scope, kind string, status string, data map[string]any) string {
+func (l *Logger) LogRunAudit(ctx context.Context, scope Scope, kind string, status string, data map[string]any) string {
 	if l == nil {
 		return ""
 	}
-	logRef, err := l.logExecutionAudit(ctx, scope, kind, status, data)
+	logRef, err := l.logRunAudit(ctx, scope, kind, status, data)
 	if err != nil {
-		slog.Warn("audit: failed to persist execution audit", "run_id", scope.RunID, "kind", kind, "status", status, "error", err)
+		slog.Warn("audit: failed to persist run audit", "run_id", scope.RunID, "kind", kind, "status", status, "error", err)
 		return ""
 	}
 	return logRef
@@ -119,14 +119,14 @@ func (l *Logger) handleSessionUpdate(ctx context.Context, scope Scope, update ac
 	}
 }
 
-func (l *Logger) logExecutionAudit(ctx context.Context, scope Scope, kind string, status string, data map[string]any) (string, error) {
+func (l *Logger) logRunAudit(ctx context.Context, scope Scope, kind string, status string, data map[string]any) (string, error) {
 	if l == nil || !l.cfg.Enabled || l.exporter == nil || l.cfg.RootDir == "." || strings.TrimSpace(l.cfg.RootDir) == "" {
 		return "", nil
 	}
 	now := time.Now().UTC()
-	logRef := buildExecutionAuditLogRef(scope.RunID, now)
-	record := ExecutionAuditRecord{
-		EventName:      "execution.audit",
+	logRef := buildRunAuditLogRef(scope.RunID, now)
+	record := RunAuditRecord{
+		EventName:      "run.audit",
 		WorkItemID:     scope.WorkItemID,
 		ActionID:       scope.ActionID,
 		RunID:          scope.RunID,
@@ -136,7 +136,7 @@ func (l *Logger) logExecutionAudit(ctx context.Context, scope Scope, kind string
 		Data:           redactAuditData(l.redactor, data),
 		CreatedAt:      now,
 	}
-	if err := l.exporter.ExportExecutionAudit(ctx, logRef, []ExecutionAuditRecord{record}); err != nil {
+	if err := l.exporter.ExportRunAudit(ctx, logRef, []RunAuditRecord{record}); err != nil {
 		return "", err
 	}
 	return logRef, nil

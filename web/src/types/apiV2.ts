@@ -982,7 +982,7 @@ export interface MaterializeWorkItemTrackResponse {
   links: ThreadWorkItemLink[];
 }
 
-export interface ConfirmExecutionTrackResponse {
+export interface ConfirmRunTrackResponse {
   track: WorkItemTrack;
   work_item: WorkItem;
   status: string;
@@ -1178,10 +1178,6 @@ export type StepStatus = ActionStatus;
 export type CreateStepRequest = CreateActionRequest;
 export type UpdateStepRequest = UpdateActionRequest;
 export type GenerateStepsRequest = GenerateActionsRequest;
-
-export type Execution = Run;
-export type ExecutionStatus = RunStatus;
-export type ExecutionErrorKind = RunErrorKind;
 
 export type StepBottleneck = ActionBottleneck;
 export type IssueDurationStat = WorkItemDurationStat;

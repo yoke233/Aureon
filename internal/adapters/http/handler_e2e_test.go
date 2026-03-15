@@ -60,11 +60,11 @@ func TestE2E_APIIssueLifecycle(t *testing.T) {
 		t.Fatalf("expected action B done, got %s", actionB.Status)
 	}
 
-	resp, _ = get(ts, fmt.Sprintf("/steps/%d/executions", actionA.ID))
+	resp, _ = get(ts, fmt.Sprintf("/steps/%d/runs", actionA.ID))
 	var execs []*core.Run
 	decodeJSON(resp, &execs)
 	if len(execs) == 0 {
-		t.Fatal("expected at least 1 execution for action A")
+		t.Fatal("expected at least 1 run for action A")
 	}
 	if execs[0].Status != core.RunSucceeded {
 		t.Fatalf("expected succeeded, got %s", execs[0].Status)

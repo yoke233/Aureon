@@ -183,10 +183,12 @@ func (p *ACPSessionPool) Acquire(ctx context.Context, in acpSessionAcquireInput)
 			delete(p.sessions, key)
 			p.mu.Unlock()
 			_ = existing.client.Close(context.Background())
+			p.mu.Lock()
 		} else if in.MaxTurns > 0 && turns >= in.MaxTurns {
 			delete(p.sessions, key)
 			p.mu.Unlock()
 			_ = existing.client.Close(context.Background())
+			p.mu.Lock()
 		} else {
 			p.mu.Unlock()
 			ac, _ := p.findAgentContext(ctx, in.Profile.ID, in.WorkItemID)

@@ -25,7 +25,7 @@ const (
 	EventRunStarted          EventType = "run.started"
 	EventRunSucceeded        EventType = "run.succeeded"
 	EventRunFailed           EventType = "run.failed"
-	EventExecutionAudit      EventType = "execution.audit"
+	EventRunAudit            EventType = "run.audit"
 	EventRunProbeRequested   EventType = "run.probe_requested"
 	EventRunProbeSent        EventType = "run.probe_sent"
 	EventRunProbeAnswered    EventType = "run.probe_answered"
@@ -63,7 +63,7 @@ const (
 	EventThreadTrackReviewApproved     EventType = "thread.track.review_approved"
 	EventThreadTrackReviewRejected     EventType = "thread.track.review_rejected"
 	EventThreadTrackMaterialized       EventType = "thread.track.materialized"
-	EventThreadTrackExecutionConfirmed EventType = "thread.track.execution_confirmed"
+	EventThreadTrackRunConfirmed       EventType = "thread.track.run_confirmed"
 
 	// Feature manifest events.
 	EventManifestEntryUpdated EventType = "manifest.entry_updated"

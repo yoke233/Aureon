@@ -69,13 +69,13 @@ func (h *Handler) getLatestDeliverable(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listDeliverablesByRun(w http.ResponseWriter, r *http.Request) {
-	execID, ok := urlParamInt64(r, "execID")
+	runID, ok := urlParamInt64(r, "runID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid execution ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid run ID", "BAD_ID")
 		return
 	}
 
-	run, err := h.store.GetRun(r.Context(), execID)
+	run, err := h.store.GetRun(r.Context(), runID)
 	if err == core.ErrNotFound {
 		writeJSON(w, http.StatusOK, []any{})
 		return

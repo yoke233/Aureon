@@ -10,7 +10,7 @@ const (
 	CodeThreadNotFound       = "THREAD_NOT_FOUND"
 	CodeTrackNotFound        = "TRACK_NOT_FOUND"
 	CodeWorkItemNotFound     = "WORK_ITEM_NOT_FOUND"
-	CodeExecutionUnavailable = "EXECUTION_UNAVAILABLE"
+	CodeRunUnavailable = "RUN_UNAVAILABLE"
 )
 
 type Error struct {

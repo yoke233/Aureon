@@ -100,49 +100,49 @@ func TestLogger_HandleToolCallLifecycle_PersistsAuditSummary(t *testing.T) {
 	}
 }
 
-func TestLogger_LogExecutionAudit_PersistsLocalFile(t *testing.T) {
-	rootDir := filepath.Join(t.TempDir(), "execution-audit")
+func TestLogger_LogRunAudit_PersistsLocalFile(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "run-audit")
 	logger := NewLogger(nil, Config{
 		Enabled:        true,
 		RootDir:        rootDir,
 		RedactionLevel: "basic",
 	})
 
-	logRef := logger.LogExecutionAudit(context.Background(), Scope{
+	logRef := logger.LogRunAudit(context.Background(), Scope{
 		WorkItemID: 101,
 		ActionID:   202,
 		RunID:      303,
-	}, "execution.watch", "failed", map[string]any{
+	}, "run.watch", "failed", map[string]any{
 		"error": "Authorization: Bearer abc.def.ghi",
 		"nested": map[string]any{
 			"token": "sk-live-secret",
 		},
 	})
 	if logRef == "" {
-		t.Fatal("expected non-empty execution audit log_ref")
+		t.Fatal("expected non-empty run audit log_ref")
 	}
 
 	logPath := filepath.Join(rootDir, filepath.FromSlash(logRef))
 	if _, err := os.Stat(logPath); err != nil {
-		t.Fatalf("stat execution audit log %s: %v", logPath, err)
+		t.Fatalf("stat run audit log %s: %v", logPath, err)
 	}
 
-	records, err := ReadExecutionAuditRecords(rootDir, logRef)
+	records, err := ReadRunAuditRecords(rootDir, logRef)
 	if err != nil {
-		t.Fatalf("read execution audit records: %v", err)
+		t.Fatalf("read run audit records: %v", err)
 	}
 	if len(records) != 1 {
 		t.Fatalf("records = %d, want 1", len(records))
 	}
 	record := records[0]
-	if record.EventName != "execution.audit" {
-		t.Fatalf("event_name = %q, want execution.audit", record.EventName)
+	if record.EventName != "run.audit" {
+		t.Fatalf("event_name = %q, want run.audit", record.EventName)
 	}
 	if record.WorkItemID != 101 || record.ActionID != 202 || record.RunID != 303 {
 		t.Fatalf("unexpected scope in record: %+v", record)
 	}
-	if record.Kind != "execution.watch" || record.Status != "failed" {
-		t.Fatalf("unexpected execution audit record: %+v", record)
+	if record.Kind != "run.watch" || record.Status != "failed" {
+		t.Fatalf("unexpected run audit record: %+v", record)
 	}
 	if record.RedactionLevel != "basic" {
 		t.Fatalf("redaction_level = %q, want basic", record.RedactionLevel)

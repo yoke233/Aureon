@@ -69,7 +69,7 @@ func TestIntegration_APIExecutionProbeLifecycle(t *testing.T) {
 	execRec := &core.Run{ActionID: stepID, WorkItemID: issueID, Status: core.RunRunning, Attempt: 1, StartedAt: &startedAt, AgentContextID: &agentCtxID}
 	execID, err := store.CreateRun(ctx, execRec)
 	if err != nil {
-		t.Fatalf("create execution: %v", err)
+		t.Fatalf("create run: %v", err)
 	}
 
 	probeSvc := probeapp.NewRunProbeService(probeapp.RunProbeServiceConfig{
@@ -91,7 +91,7 @@ func TestIntegration_APIExecutionProbeLifecycle(t *testing.T) {
 	defer ts.Close()
 
 	body, _ := json.Marshal(map[string]any{})
-	resp, err := http.Post(ts.URL+"/executions/"+itoa(execID)+"/probe", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(ts.URL+"/runs/"+itoa(execID)+"/probe", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST probe: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestIntegration_APIExecutionProbeLifecycle(t *testing.T) {
 		t.Fatalf("probe status = %s, want answered", probe.Status)
 	}
 
-	resp, err = http.Get(ts.URL + "/executions/" + itoa(execID) + "/probes")
+	resp, err = http.Get(ts.URL + "/runs/" + itoa(execID) + "/probes")
 	if err != nil {
 		t.Fatalf("GET probes: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestIntegration_APIExecutionProbeLifecycle(t *testing.T) {
 		t.Fatalf("expected 1 probe, got %d", len(probes))
 	}
 
-	resp, err = http.Get(ts.URL + "/executions/" + itoa(execID) + "/probe/latest")
+	resp, err = http.Get(ts.URL + "/runs/" + itoa(execID) + "/probe/latest")
 	if err != nil {
 		t.Fatalf("GET latest probe: %v", err)
 	}

@@ -55,15 +55,15 @@ const eventToLogLine = (event: Event, locale: string): LogLine | null => {
   };
 };
 
-export function ExecutionDetailPage() {
-  const { execId } = useParams();
+export function RunDetailPage() {
+  const { runId } = useParams();
   const { t, i18n } = useTranslation();
   const { apiClient } = useWorkbench();
-  const numericExecId = Number.parseInt(execId ?? "", 10);
+  const numericRunId = Number.parseInt(runId ?? "", 10);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  const [execution, setExecution] = useState<Run | null>(null);
-  const [step, setStep] = useState<Action | null>(null);
+  const [run, setRun] = useState<Run | null>(null);
+  const [action, setAction] = useState<Action | null>(null);
   const [workItem, setWorkItem] = useState<WorkItem | null>(null);
   const [briefing, setBriefing] = useState<{ objective: string; constraints?: string[]; context_refs?: unknown[] } | null>(null);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -72,7 +72,7 @@ export function ExecutionDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!Number.isFinite(numericExecId)) {
+    if (!Number.isFinite(numericRunId)) {
       return;
     }
     let cancelled = false;
@@ -81,23 +81,23 @@ export function ExecutionDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const execResp = await apiClient.getRun(numericExecId);
+        const runResp = await apiClient.getRun(numericRunId);
         if (cancelled) {
           return;
         }
-        setExecution(execResp);
+        setRun(runResp);
 
-        const [stepResp, workItemResp, briefingResp, runResources, eventResp] = await Promise.all([
-          apiClient.getAction(execResp.action_id),
-          apiClient.getWorkItem(execResp.work_item_id),
-          apiClient.getAction(execResp.action_id).then((a) => ({
+        const [actionResp, workItemResp, briefingResp, runResources, eventResp] = await Promise.all([
+          apiClient.getAction(runResp.action_id),
+          apiClient.getWorkItem(runResp.work_item_id),
+          apiClient.getAction(runResp.action_id).then((a) => ({
             objective: a.description ?? "",
             constraints: [] as string[],
           })).catch(() => null),
-          apiClient.listRunResources(execResp.id),
+          apiClient.listRunResources(runResp.id),
           apiClient.listEvents({
-            issue_id: execResp.work_item_id,
-            step_id: execResp.action_id,
+            issue_id: runResp.work_item_id,
+            step_id: runResp.action_id,
             limit: 200,
             offset: 0,
           }),
@@ -105,7 +105,7 @@ export function ExecutionDetailPage() {
         if (cancelled) {
           return;
         }
-        setStep(stepResp);
+        setAction(actionResp);
         setWorkItem(workItemResp);
         setBriefing(briefingResp);
         setResources(runResources);
@@ -125,7 +125,7 @@ export function ExecutionDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [apiClient, numericExecId]);
+  }, [apiClient, numericRunId]);
 
   const logs = useMemo(
     () =>
@@ -147,17 +147,17 @@ export function ExecutionDetailPage() {
           <ChevronRight className="h-3 w-3" />
           {workItem ? <Link to={`/work-items/${workItem.id}`} className="hover:text-foreground">{workItem.title}</Link> : <span>Work Item</span>}
           <ChevronRight className="h-3 w-3" />
-          <span className="text-foreground">{step?.name ?? "Execution"}</span>
+          <span className="text-foreground">{action?.name ?? "Run"}</span>
           <span className="mx-1">·</span>
           <span className="text-foreground">{t("execDetail.title")}</span>
         </div>
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold">
-            {step?.name ?? t("execDetail.execution")} {execution ? `— ${t("execDetail.attemptN", { n: execution.attempt })}` : ""}
+            {action?.name ?? t("execDetail.execution")} {run ? `— ${t("execDetail.attemptN", { n: run.attempt })}` : ""}
           </h1>
-          {execution ? <StatusBadge status={execution.status} /> : null}
+          {run ? <StatusBadge status={run.status} /> : null}
           {loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-          <span className="ml-auto text-sm text-muted-foreground">Execution #{execId ?? "-"}</span>
+          <span className="ml-auto text-sm text-muted-foreground">Run #{runId ?? "-"}</span>
         </div>
       </div>
 
@@ -176,7 +176,7 @@ export function ExecutionDetailPage() {
               <div>
                 <h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">{t("execDetail.objective")}</h4>
                 <p className="text-sm leading-relaxed">
-                  {briefing?.objective || step?.description || t("execDetail.noObjective")}
+                  {briefing?.objective || action?.description || t("execDetail.noObjective")}
                 </p>
               </div>
               <div>
@@ -197,10 +197,10 @@ export function ExecutionDetailPage() {
               <div>
                 <h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">{t("execDetail.acceptanceCriteria")}</h4>
                 <ul className="space-y-1.5 text-sm">
-                  {(step?.acceptance_criteria ?? []).length === 0 ? (
+                  {(action?.acceptance_criteria ?? []).length === 0 ? (
                     <li className="text-muted-foreground">{t("execDetail.noAcceptanceCriteria")}</li>
                   ) : (
-                    step?.acceptance_criteria?.map((criteria, index) => (
+                    action?.acceptance_criteria?.map((criteria, index) => (
                       <li key={`${criteria}-${index}`} className="flex items-start gap-2">
                         <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
                         {criteria}
@@ -220,13 +220,13 @@ export function ExecutionDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {execution?.result_markdown ? (
+              {run?.result_markdown ? (
                 <div className="space-y-3">
                   <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                    {execution.result_markdown || t("execDetail.emptyResult")}
+                    {run.result_markdown || t("execDetail.emptyResult")}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Run #{execution.id} · {formatRelativeTime(execution.created_at)}
+                    Run #{run.id} · {formatRelativeTime(run.created_at)}
                   </div>
                   {resources.length > 0 ? (
                     <div className="rounded-lg border bg-background p-3">
@@ -265,23 +265,23 @@ export function ExecutionDetailPage() {
             <CardContent className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t("execDetail.stepType")}</span>
-                <span className="font-medium">{step ? normalizeStepTypeLabel(step.type) : "-"}</span>
+                <span className="font-medium">{action ? normalizeStepTypeLabel(action.type) : "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t("execDetail.role")}</span>
-                <span className="font-medium">{step?.agent_role || execution?.agent_id || "-"}</span>
+                <span className="font-medium">{action?.agent_role || run?.agent_id || "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t("execDetail.attempt")}</span>
-                <span className="font-medium">{execution ? t("execDetail.attemptCount", { n: execution.attempt }) : "-"}</span>
+                <span className="font-medium">{run ? t("execDetail.attemptCount", { n: run.attempt }) : "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t("execDetail.startTime")}</span>
-                <span className="font-medium">{execution?.started_at ? formatRelativeTime(execution.started_at) : "-"}</span>
+                <span className="font-medium">{run?.started_at ? formatRelativeTime(run.started_at) : "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t("execDetail.endTime")}</span>
-                <span className="font-medium">{execution?.finished_at ? formatRelativeTime(execution.finished_at) : "-"}</span>
+                <span className="font-medium">{run?.finished_at ? formatRelativeTime(run.finished_at) : "-"}</span>
               </div>
             </CardContent>
           </Card>

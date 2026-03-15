@@ -128,7 +128,7 @@ func TestWorkItemTrackAttachThreadAndMaterialize(t *testing.T) {
 	}
 }
 
-func TestWorkItemTrackReviewAndConfirmExecution(t *testing.T) {
+func TestWorkItemTrackReviewAndConfirmRun(t *testing.T) {
 	_, ts := setupAPI(t)
 
 	resp, _ := post(ts, "/threads", map[string]any{"title": "track-lifecycle-thread"})
@@ -176,12 +176,12 @@ func TestWorkItemTrackReviewAndConfirmExecution(t *testing.T) {
 		t.Fatalf("expected awaiting_confirmation status, got %+v", track)
 	}
 
-	resp, err = post(ts, fmt.Sprintf("/tracks/%d/confirm-execution", track.ID), map[string]any{})
+	resp, err = post(ts, fmt.Sprintf("/tracks/%d/confirm-run", track.ID), map[string]any{})
 	if err != nil {
-		t.Fatalf("confirm execution: %v", err)
+		t.Fatalf("confirm run: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 confirm-execution, got %d", resp.StatusCode)
+		t.Fatalf("expected 200 confirm-run, got %d", resp.StatusCode)
 	}
 	var result struct {
 		Track    core.WorkItemTrack `json:"track"`
@@ -189,7 +189,7 @@ func TestWorkItemTrackReviewAndConfirmExecution(t *testing.T) {
 		Status   string             `json:"status"`
 	}
 	if err := decodeJSON(resp, &result); err != nil {
-		t.Fatalf("decode confirm-execution response: %v", err)
+		t.Fatalf("decode confirm-run response: %v", err)
 	}
 	if result.Track.Status != core.WorkItemTrackExecuting {
 		t.Fatalf("expected executing track, got %+v", result.Track)
@@ -200,7 +200,7 @@ func TestWorkItemTrackReviewAndConfirmExecution(t *testing.T) {
 	switch result.WorkItem.Status {
 	case core.WorkItemQueued, core.WorkItemRunning, core.WorkItemDone:
 	default:
-		t.Fatalf("unexpected work item status after confirm-execution: %s", result.WorkItem.Status)
+		t.Fatalf("unexpected work item status after confirm-run: %s", result.WorkItem.Status)
 	}
 }
 

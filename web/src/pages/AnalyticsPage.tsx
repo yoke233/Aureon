@@ -282,7 +282,7 @@ export function AnalyticsPage() {
           </CardContent>
         </Card>
 
-        {/* Step bottleneck */}
+        {/* Action bottleneck */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

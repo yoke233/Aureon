@@ -12,22 +12,22 @@ import (
 
 // createStepRequest is the request body for POST /work-items/{issueID}/steps.
 type createStepRequest struct {
-	Name                 string         `json:"name"`
-	Description          string         `json:"description,omitempty"`
-	Type                 core.ActionType  `json:"type"`
-	Position             *int           `json:"position,omitempty"`
-	AgentRole            string         `json:"agent_role,omitempty"`
-	RequiredCapabilities []string       `json:"required_capabilities,omitempty"`
-	AcceptanceCriteria   []string       `json:"acceptance_criteria,omitempty"`
-	Timeout              string         `json:"timeout,omitempty"` // Go duration string
-	MaxRetries           int            `json:"max_retries"`
-	Config               map[string]any `json:"config,omitempty"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description,omitempty"`
+	Type                 core.ActionType `json:"type"`
+	Position             *int            `json:"position,omitempty"`
+	AgentRole            string          `json:"agent_role,omitempty"`
+	RequiredCapabilities []string        `json:"required_capabilities,omitempty"`
+	AcceptanceCriteria   []string        `json:"acceptance_criteria,omitempty"`
+	Timeout              string          `json:"timeout,omitempty"` // Go duration string
+	MaxRetries           int             `json:"max_retries"`
+	Config               map[string]any  `json:"config,omitempty"`
 }
 
 func (h *Handler) createAction(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
@@ -85,7 +85,7 @@ func (h *Handler) createAction(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listActions(w http.ResponseWriter, r *http.Request) {
 	issueID, ok := urlParamInt64(r, "issueID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid issue ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid work item ID", "BAD_ID")
 		return
 	}
 
@@ -103,16 +103,16 @@ func (h *Handler) listActions(w http.ResponseWriter, r *http.Request) {
 // updateStepRequest is the request body for PUT /steps/{stepID}.
 // All fields are optional — only provided fields are applied.
 type updateStepRequest struct {
-	Name                 *string        `json:"name,omitempty"`
-	Description          *string        `json:"description,omitempty"`
+	Name                 *string          `json:"name,omitempty"`
+	Description          *string          `json:"description,omitempty"`
 	Type                 *core.ActionType `json:"type,omitempty"`
-	Position             *int           `json:"position,omitempty"`
-	AgentRole            *string        `json:"agent_role,omitempty"`
-	RequiredCapabilities *[]string      `json:"required_capabilities,omitempty"`
-	AcceptanceCriteria   *[]string      `json:"acceptance_criteria,omitempty"`
-	Timeout              *string        `json:"timeout,omitempty"`
-	MaxRetries           *int           `json:"max_retries,omitempty"`
-	Config               map[string]any `json:"config,omitempty"`
+	Position             *int             `json:"position,omitempty"`
+	AgentRole            *string          `json:"agent_role,omitempty"`
+	RequiredCapabilities *[]string        `json:"required_capabilities,omitempty"`
+	AcceptanceCriteria   *[]string        `json:"acceptance_criteria,omitempty"`
+	Timeout              *string          `json:"timeout,omitempty"`
+	MaxRetries           *int             `json:"max_retries,omitempty"`
+	Config               map[string]any   `json:"config,omitempty"`
 }
 
 func (h *Handler) updateAction(w http.ResponseWriter, r *http.Request) {

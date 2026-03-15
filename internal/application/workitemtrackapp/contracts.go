@@ -105,7 +105,7 @@ type CancelTrackInput struct {
 	TrackID int64
 }
 
-type ConfirmExecutionInput struct {
+type ConfirmRunInput struct {
 	TrackID   int64
 	ProjectID *int64
 }
@@ -116,7 +116,7 @@ type MaterializeWorkItemResult struct {
 	Links    []*core.ThreadWorkItemLink `json:"links"`
 }
 
-type ConfirmExecutionResult struct {
+type ConfirmRunResult struct {
 	Track    *core.WorkItemTrack `json:"track"`
 	WorkItem *core.WorkItem      `json:"work_item"`
 	Status   string              `json:"status"`

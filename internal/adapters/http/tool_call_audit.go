@@ -8,13 +8,13 @@ import (
 )
 
 func (h *Handler) listToolCallAuditsByRun(w http.ResponseWriter, r *http.Request) {
-	execID, ok := urlParamInt64(r, "execID")
+	runID, ok := urlParamInt64(r, "runID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid execution ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid run ID", "BAD_ID")
 		return
 	}
 
-	items, err := h.store.ListToolCallAuditsByRun(r.Context(), execID)
+	items, err := h.store.ListToolCallAuditsByRun(r.Context(), runID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
 		return

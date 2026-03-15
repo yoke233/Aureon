@@ -304,7 +304,7 @@ func TestServiceReviewLifecycle(t *testing.T) {
 	}
 }
 
-func TestServiceConfirmExecutionCreatesDefaultAction(t *testing.T) {
+func TestServiceConfirmRunCreatesDefaultAction(t *testing.T) {
 	store := newWorkItemTrackAppTestStore(t)
 	ctx := context.Background()
 	bus := &recordingBus{}
@@ -333,9 +333,9 @@ func TestServiceConfirmExecutionCreatesDefaultAction(t *testing.T) {
 	}
 
 	svc := newSQLiteWorkItemTrackServiceWithDeps(store, sqliteTxAdapter{base: store}, bus, executor)
-	result, err := svc.ConfirmExecution(ctx, ConfirmExecutionInput{TrackID: trackID})
+	result, err := svc.ConfirmRun(ctx, ConfirmRunInput{TrackID: trackID})
 	if err != nil {
-		t.Fatalf("ConfirmExecution: %v", err)
+		t.Fatalf("ConfirmRun: %v", err)
 	}
 	if result.Track.Status != core.WorkItemTrackExecuting {
 		t.Fatalf("expected executing track, got %+v", result.Track)

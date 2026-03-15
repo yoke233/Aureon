@@ -7,22 +7,22 @@ import (
 )
 
 func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
-	id, ok := urlParamInt64(r, "execID")
+	id, ok := urlParamInt64(r, "runID")
 	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid execution ID", "BAD_ID")
+		writeError(w, http.StatusBadRequest, "invalid run ID", "BAD_ID")
 		return
 	}
 
-	e, err := h.store.GetRun(r.Context(), id)
+	run, err := h.store.GetRun(r.Context(), id)
 	if err == core.ErrNotFound {
-		writeError(w, http.StatusNotFound, "execution not found", "NOT_FOUND")
+		writeError(w, http.StatusNotFound, "run not found", "NOT_FOUND")
 		return
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, run)
 }
 
 func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {

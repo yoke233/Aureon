@@ -1290,7 +1290,7 @@ func buildSessionSummary(record *persistedLeadSession, live, running bool) chata
 
 	// Best-effort git diff stats for the session's working directory.
 	if record.WorkDir != "" && record.Branch != "" {
-		if stats := computeGitStats(record.WorkDir); stats != nil {
+		if stats := computeGitStats(record.WorkDir, record.Branch, record.RepoPath); stats != nil {
 			summary.Git = stats
 		}
 	}
@@ -1303,35 +1303,70 @@ func buildSessionSummary(record *persistedLeadSession, live, running bool) chata
 		summary.Git.PrURL = record.PrURL
 		summary.Git.PrNumber = record.PrNumber
 		summary.Git.PrState = record.PrState
+		if record.PrState == "merged" {
+			summary.Git.Merged = true
+		}
 	}
 
 	return summary
 }
 
-// computeGitStats runs `git diff --shortstat` in the given directory to
-// obtain lightweight diff statistics (additions, deletions, files changed).
-// Returns nil on any error — callers should treat this as optional data.
-func computeGitStats(workDir string) *chatapp.GitStats {
-	if _, err := os.Stat(workDir); err != nil {
-		return nil
-	}
-
-	// git diff --shortstat HEAD produces output like:
-	//   3 files changed, 120 insertions(+), 45 deletions(-)
-	cmd := exec.Command("git", "diff", "--shortstat", "HEAD")
-	cmd.Dir = workDir
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-
-	line := strings.TrimSpace(string(out))
-	if line == "" {
-		return nil
-	}
-
+// computeGitStats computes diff statistics (vs main) and merge status for a
+// session's worktree branch. Returns nil on any error — callers should treat
+// this as optional data.
+func computeGitStats(workDir, branch, repoPath string) *chatapp.GitStats {
 	stats := &chatapp.GitStats{}
-	// Parse " 3 files changed, 120 insertions(+), 45 deletions(-)"
+	hasData := false
+
+	// Diff stats vs main — requires live worktree.
+	if workDir != "" {
+		if _, err := os.Stat(workDir); err == nil {
+			// git diff --shortstat main produces output like:
+			//   3 files changed, 120 insertions(+), 45 deletions(-)
+			cmd := exec.Command("git", "diff", "--shortstat", "main")
+			cmd.Dir = workDir
+			out, err := cmd.Output()
+			if err == nil {
+				parseShortstat(strings.TrimSpace(string(out)), stats)
+				if stats.FilesChanged > 0 || stats.Additions > 0 || stats.Deletions > 0 {
+					hasData = true
+				}
+			}
+		}
+	}
+
+	// Merged check — can run from worktree or the main repo.
+	if branch != "" {
+		gitDir := workDir
+		if gitDir == "" || !dirExists(gitDir) {
+			gitDir = repoPath
+		}
+		if gitDir != "" && dirExists(gitDir) {
+			cmd := exec.Command("git", "merge-base", "--is-ancestor", branch, "main")
+			cmd.Dir = gitDir
+			if err := cmd.Run(); err == nil {
+				stats.Merged = true
+				hasData = true
+			}
+		}
+	}
+
+	if !hasData {
+		return nil
+	}
+	return stats
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// parseShortstat parses git's --shortstat output into the given GitStats.
+func parseShortstat(line string, stats *chatapp.GitStats) {
+	if line == "" {
+		return
+	}
 	for _, part := range strings.Split(line, ",") {
 		part = strings.TrimSpace(part)
 		fields := strings.Fields(part)
@@ -1351,11 +1386,6 @@ func computeGitStats(workDir string) *chatapp.GitStats {
 			stats.Deletions = n
 		}
 	}
-
-	if stats.FilesChanged == 0 && stats.Additions == 0 && stats.Deletions == 0 {
-		return nil
-	}
-	return stats
 }
 
 func (l *LeadAgent) captureSessionState(sessionID string, update acpclient.SessionUpdate) {

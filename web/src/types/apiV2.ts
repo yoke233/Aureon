@@ -455,6 +455,7 @@ export interface GitStats {
   additions: number;
   deletions: number;
   files_changed: number;
+  merged?: boolean;
   pr_url?: string;
   pr_number?: number;
   pr_state?: string;

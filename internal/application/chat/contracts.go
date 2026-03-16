@@ -88,6 +88,7 @@ type GitStats struct {
 	Additions    int    `json:"additions"`
 	Deletions    int    `json:"deletions"`
 	FilesChanged int    `json:"files_changed"`
+	Merged       bool   `json:"merged"`
 	PrURL        string `json:"pr_url,omitempty"`
 	PrNumber     int    `json:"pr_number,omitempty"`
 	PrState      string `json:"pr_state,omitempty"`

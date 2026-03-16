@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight, Loader2, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, GitMerge, Loader2, Plus, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,7 +111,7 @@ export function ChatSessionSidebar(props: ChatSessionSidebarProps) {
                     </span>
                   </div>
                   <p className="mt-1.5 truncate text-xs text-muted-foreground">{preview}</p>
-                  <div className="mt-2 flex items-center gap-1.5">
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <span
                       className={cn(
                         "inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium",
@@ -127,6 +127,18 @@ export function ChatSessionSidebar(props: ChatSessionSidebarProps) {
                     {turnCount > 0 && (
                       <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-px text-[10px] font-medium text-muted-foreground">
                         {turnCount} {t("chat.turns")}
+                      </span>
+                    )}
+                    {session.git && (session.git.additions > 0 || session.git.deletions > 0) && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-px text-[10px] font-medium">
+                        <span className="text-green-600">+{session.git.additions}</span>
+                        <span className="text-red-500">-{session.git.deletions}</span>
+                      </span>
+                    )}
+                    {session.git?.merged && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-px text-[10px] font-medium text-purple-600">
+                        <GitMerge className="h-3 w-3" />
+                        {t("chat.merged", { defaultValue: "已合并" })}
                       </span>
                     )}
                   </div>

@@ -77,6 +77,8 @@ func (b *EventBridge) HandleSessionUpdate(ctx context.Context, update acpclient.
 	case "tool_call_update":
 		if update.Status == "completed" {
 			b.publishToolCallCompleted(ctx, update)
+		} else {
+			b.publishToolCallUpdate(ctx, update)
 		}
 	case "usage_update":
 		b.publishUsageUpdate(ctx, update)
@@ -149,9 +151,29 @@ func (b *EventBridge) publishToolCall(ctx context.Context, update acpclient.Sess
 	b.publish(ctx, data)
 }
 
+func (b *EventBridge) publishToolCallUpdate(ctx context.Context, update acpclient.SessionUpdate) {
+	var parsed struct {
+		Title      string `json:"title"`
+		ToolCallID string `json:"toolCallId"`
+		Status     string `json:"status"`
+	}
+	if json.Unmarshal(update.RawJSON, &parsed) != nil || parsed.ToolCallID == "" {
+		return
+	}
+	data := map[string]any{
+		"type":         "tool_call",
+		"tool_call_id": parsed.ToolCallID,
+	}
+	if parsed.Title != "" {
+		data["content"] = parsed.Title
+	}
+	b.publish(ctx, data)
+}
+
 func (b *EventBridge) publishToolCallCompleted(ctx context.Context, update acpclient.SessionUpdate) {
 	data := map[string]any{"type": "tool_call_completed"}
 	var parsed struct {
+		Title      string `json:"title"`
 		ToolCallID string `json:"toolCallId"`
 		RawOutput  struct {
 			ExitCode int    `json:"exit_code"`
@@ -161,6 +183,9 @@ func (b *EventBridge) publishToolCallCompleted(ctx context.Context, update acpcl
 	}
 	if json.Unmarshal(update.RawJSON, &parsed) == nil {
 		data["tool_call_id"] = parsed.ToolCallID
+		if parsed.Title != "" {
+			data["title"] = parsed.Title
+		}
 		data["exit_code"] = parsed.RawOutput.ExitCode
 		stdout := parsed.RawOutput.Stdout
 		if len(stdout) > 2000 {

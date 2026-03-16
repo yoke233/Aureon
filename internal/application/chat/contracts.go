@@ -113,6 +113,7 @@ type SessionSummary struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	Status       string    `json:"status"`
+	Archived     bool      `json:"archived,omitempty"`
 	MessageCount int       `json:"message_count"`
 	Git          *GitStats `json:"git,omitempty"`
 }

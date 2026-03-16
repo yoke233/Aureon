@@ -1,11 +1,94 @@
+import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight, GitMerge, Loader2, Plus, Search } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, GitMerge, Loader2, Plus, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { SessionGroup, ChatMessageView } from "./chatTypes";
+import type { SessionRecord, SessionGroup, ChatMessageView } from "./chatTypes";
 import { badgeLabelForStatus } from "./chatUtils";
+
+interface SessionItemProps {
+  session: SessionRecord;
+  isActive: boolean;
+  preview: string;
+  turnCount: number;
+  onSelect: (sessionId: string) => void;
+  onArchive?: (sessionId: string) => void;
+}
+
+const SessionItem = memo(function SessionItem({ session, isActive, preview, turnCount, onSelect, onArchive }: SessionItemProps) {
+  const { t } = useTranslation();
+  const canArchive = onArchive && session.status !== "running";
+  return (
+    <div
+      className={cn(
+        "group/session relative w-full border-b text-left transition-colors",
+        isActive ? "bg-accent" : "hover:bg-muted/50",
+      )}
+    >
+      <button
+        onClick={() => onSelect(session.session_id)}
+        className="w-full px-4 py-3 pl-7 text-left"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className={cn(
+            "truncate text-sm",
+            isActive ? "font-semibold" : "font-medium",
+          )}>{session.title ?? t("chat.newSession")}</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {new Date(session.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        </div>
+        <p className="mt-1.5 truncate text-xs text-muted-foreground">{preview}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span
+            className={cn(
+              "inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium",
+              session.status === "running"
+                ? "bg-blue-50 text-blue-500"
+                : session.status === "alive"
+                  ? "bg-amber-50 text-amber-500"
+                  : "bg-muted text-muted-foreground",
+            )}
+          >
+            {badgeLabelForStatus(session.status, t)}
+          </span>
+          {turnCount > 0 && (
+            <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+              {turnCount} {t("chat.turns")}
+            </span>
+          )}
+          {session.git && (session.git.additions > 0 || session.git.deletions > 0) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-px text-[10px] font-medium">
+              <span className="text-green-600">+{session.git.additions}</span>
+              <span className="text-red-500">-{session.git.deletions}</span>
+            </span>
+          )}
+          {session.git?.merged && (
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-px text-[10px] font-medium text-purple-600">
+              <GitMerge className="h-3 w-3" />
+              {t("chat.merged", { defaultValue: "已合并" })}
+            </span>
+          )}
+        </div>
+      </button>
+      {canArchive && (
+        <button
+          type="button"
+          title={t("chat.archive", { defaultValue: "归档" })}
+          className="absolute right-2 top-2 hidden rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground group-hover/session:block"
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive(session.session_id);
+          }}
+        >
+          <Archive className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+});
 
 interface ChatSessionSidebarProps {
   groupedSessions: SessionGroup[];
@@ -19,9 +102,10 @@ interface ChatSessionSidebarProps {
   onSessionSelect: (sessionId: string) => void;
   onGroupToggle: (key: string) => void;
   onCreateSession: () => void;
+  onArchiveSession?: (sessionId: string) => void;
 }
 
-export function ChatSessionSidebar(props: ChatSessionSidebarProps) {
+export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSessionSidebarProps) {
   const {
     groupedSessions,
     activeSession,
@@ -34,8 +118,21 @@ export function ChatSessionSidebar(props: ChatSessionSidebarProps) {
     onSessionSelect,
     onGroupToggle,
     onCreateSession,
+    onArchiveSession,
   } = props;
   const { t } = useTranslation();
+
+  /* Derive a stable preview map: only recalculate when messagesBySession changes */
+  const previewMap = useMemo(() => {
+    const map: Record<string, { preview: string; turnCount: number }> = {};
+    for (const [sessionId, messages] of Object.entries(messagesBySession)) {
+      map[sessionId] = {
+        preview: [...messages].reverse().find((m) => m.role === "assistant")?.content ?? messages.at(-1)?.content ?? "",
+        turnCount: messages.length,
+      };
+    }
+    return map;
+  }, [messagesBySession]);
 
   return (
     <div className="flex w-72 flex-col border-r bg-sidebar">
@@ -90,59 +187,17 @@ export function ChatSessionSidebar(props: ChatSessionSidebarProps) {
             </button>
 
             {!collapsedGroups[group.key] ? group.sessions.map((session) => {
-              const preview = messagesBySession[session.session_id]?.at(-1)?.content ?? t("chat.noMessages");
-              const turnCount = messagesBySession[session.session_id]?.length ?? 0;
+              const info = previewMap[session.session_id];
               return (
-                <button
+                <SessionItem
                   key={session.session_id}
-                  onClick={() => onSessionSelect(session.session_id)}
-                  className={cn(
-                    "w-full border-b px-4 py-3 pl-7 text-left transition-colors",
-                    activeSession === session.session_id ? "bg-accent" : "hover:bg-muted/50",
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={cn(
-                      "truncate text-sm",
-                      activeSession === session.session_id ? "font-semibold" : "font-medium",
-                    )}>{session.title ?? t("chat.newSession")}</span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {new Date(session.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  </div>
-                  <p className="mt-1.5 truncate text-xs text-muted-foreground">{preview}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium",
-                        session.status === "running"
-                          ? "bg-blue-50 text-blue-500"
-                          : session.status === "alive"
-                            ? "bg-amber-50 text-amber-500"
-                            : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {badgeLabelForStatus(session.status, t)}
-                    </span>
-                    {turnCount > 0 && (
-                      <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-px text-[10px] font-medium text-muted-foreground">
-                        {turnCount} {t("chat.turns")}
-                      </span>
-                    )}
-                    {session.git && (session.git.additions > 0 || session.git.deletions > 0) && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-px text-[10px] font-medium">
-                        <span className="text-green-600">+{session.git.additions}</span>
-                        <span className="text-red-500">-{session.git.deletions}</span>
-                      </span>
-                    )}
-                    {session.git?.merged && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-px text-[10px] font-medium text-purple-600">
-                        <GitMerge className="h-3 w-3" />
-                        {t("chat.merged", { defaultValue: "已合并" })}
-                      </span>
-                    )}
-                  </div>
-                </button>
+                  session={session}
+                  isActive={activeSession === session.session_id}
+                  preview={info?.preview || t("chat.noMessages")}
+                  turnCount={info?.turnCount ?? 0}
+                  onSelect={onSessionSelect}
+                  onArchive={onArchiveSession}
+                />
               );
             }) : null}
           </div>
@@ -155,4 +210,4 @@ export function ChatSessionSidebar(props: ChatSessionSidebarProps) {
       </div>
     </div>
   );
-}
+});

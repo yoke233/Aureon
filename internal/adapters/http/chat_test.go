@@ -54,9 +54,10 @@ func (s *stubLeadChatService) SetSessionMode(context.Context, string, string) (*
 	return nil, nil
 }
 func (s *stubLeadChatService) ResolvePermission(string, string, bool) error { return nil }
-func (s *stubLeadChatService) CancelChat(string) error                      { return nil }
-func (s *stubLeadChatService) CloseSession(string)                          {}
-func (s *stubLeadChatService) DeleteSession(string)                         {}
+func (s *stubLeadChatService) CancelChat(string) error                { return nil }
+func (s *stubLeadChatService) ArchiveSession(string, bool) error      { return nil }
+func (s *stubLeadChatService) CloseSession(string)                    {}
+func (s *stubLeadChatService) DeleteSession(string)                   {}
 func (s *stubLeadChatService) IsSessionAlive(string) bool {
 	return false
 }

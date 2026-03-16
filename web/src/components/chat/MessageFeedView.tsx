@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Brain,
@@ -9,30 +9,22 @@ import {
   ListTodo,
   Loader2,
   Wrench,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ChatActivityView, ChatFeedEntry } from "./chatTypes";
+import type { ChatActivityView, ChatAttachmentView, ChatFeedEntry } from "./chatTypes";
 import { compactText } from "./chatUtils";
 
 interface MessageFeedViewProps {
   entries: ChatFeedEntry[];
   submitting: boolean;
+  sessionRunning: boolean;
+  lastActivityText: string;
   copiedMessageId: string | null;
   collapsedActivityGroups: Record<string, boolean>;
   onCopyMessage: (id: string, content: string) => void;
   onCreateWorkItem: (id: string, content: string) => void;
   onActivityGroupToggle: (id: string) => void;
-}
-
-const TOOL_PREVIEW_LINES = 5;
-const TOOL_PREVIEW_CHARS_PER_LINE = 72;
-
-function estimateVisualLineCount(value: string): number {
-  const lines = value.split(/\r?\n/);
-  return lines.reduce((total, line) => {
-    const normalizedLength = Math.max(line.trim().length, 1);
-    return total + Math.max(1, Math.ceil(normalizedLength / TOOL_PREVIEW_CHARS_PER_LINE));
-  }, 0);
 }
 
 function statusBadgeClass(status: ChatActivityView["status"]) {
@@ -61,73 +53,62 @@ function statusLabel(status: ChatActivityView["status"], t: (key: string) => str
   }
 }
 
-interface ToolCallCardProps {
-  activity: ChatActivityView;
+
+function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        className="absolute right-4 top-4 rounded-full bg-black/50 p-1.5 text-white hover:bg-black/70"
+        onClick={onClose}
+      >
+        <X className="h-5 w-5" />
+      </button>
+      <img
+        src={src}
+        alt={alt}
+        className="max-h-[90vh] max-w-[90vw] rounded object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
 }
 
-function ToolCallCard({ activity }: ToolCallCardProps) {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+function AttachmentImagePreviews({ attachments }: { attachments: ChatAttachmentView[] }) {
+  const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
 
-  const detailText = useMemo(() => {
-    const detail = activity.detail?.trim();
-    if (detail) {
-      return detail;
-    }
-    return activity.title.trim();
-  }, [activity.detail, activity.title]);
-
-  const canToggle = useMemo(
-    () => estimateVisualLineCount(detailText) > TOOL_PREVIEW_LINES,
-    [detailText],
-  );
-  const badgeText = statusLabel(activity.status, t);
+  const imageAttachments = attachments.filter((a) => a.mime_type.startsWith("image/"));
+  if (imageAttachments.length === 0) return null;
 
   return (
-    <div className="rounded-md border border-amber-200/70 bg-amber-50/50 px-3 py-2 shadow-sm shadow-amber-100/40">
-      <div className="flex items-start gap-2">
-        <Wrench className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-xs font-semibold text-foreground">{activity.title}</span>
-            {badgeText && (
-              <span className={cn(
-                "rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
-                statusBadgeClass(activity.status),
-              )}>
-                {badgeText}
-              </span>
-            )}
-            <span className="text-[10px] text-muted-foreground">{activity.time}</span>
-          </div>
-          <div className="relative mt-2">
-            <div
-              data-testid={`tool-call-detail-${activity.id}`}
-              className={cn(
-                "whitespace-pre-wrap break-words rounded-sm border-l-2 border-amber-300/70 bg-background/80 px-3 py-2 text-xs leading-6 text-foreground/80",
-                !expanded && "line-clamp-5",
-              )}
+    <>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {imageAttachments.map((att, idx) => {
+          const src = `data:${att.mime_type};base64,${att.data}`;
+          return (
+            <button
+              key={idx}
+              type="button"
+              className="group/img overflow-hidden rounded border border-border/60 bg-muted/30 transition-shadow hover:shadow-md"
+              onClick={() => setLightboxSrc({ src, alt: att.name })}
+              title={att.name}
             >
-              {detailText}
-            </div>
-            {!expanded && canToggle && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 rounded-b-sm bg-gradient-to-t from-amber-50 via-amber-50/80 to-transparent" />
-            )}
-          </div>
-          {canToggle && (
-            <div className={cn("mt-2 flex", expanded ? "sticky bottom-2 z-10 justify-end" : "justify-end")}>
-              <button
-                type="button"
-                className="pointer-events-auto rounded-full border border-amber-200 bg-background/95 px-2.5 py-1 text-[11px] font-medium text-amber-700 shadow-sm backdrop-blur transition-colors hover:bg-amber-50"
-                onClick={() => setExpanded((current) => !current)}
-              >
-                {t(expanded ? "chat.collapse" : "chat.expand")}
-              </button>
-            </div>
-          )}
-        </div>
+              <img
+                src={src}
+                alt={att.name}
+                className="max-h-48 max-w-xs object-contain"
+              />
+            </button>
+          );
+        })}
       </div>
-    </div>
+      {lightboxSrc && (
+        <ImageLightbox src={lightboxSrc.src} alt={lightboxSrc.alt} onClose={() => setLightboxSrc(null)} />
+      )}
+    </>
   );
 }
 
@@ -135,6 +116,8 @@ export function MessageFeedView(props: MessageFeedViewProps) {
   const {
     entries,
     submitting,
+    sessionRunning,
+    lastActivityText,
     copiedMessageId,
     collapsedActivityGroups,
     onCopyMessage,
@@ -157,25 +140,62 @@ export function MessageFeedView(props: MessageFeedViewProps) {
           );
         }
 
-        /* ── tool_group: collapsible compact block ── */
+        /* ── tool_group: collapsed = summary of running items; expanded = all items ── */
         if (entry.type === "tool_group") {
-          const isCollapsed = collapsedActivityGroups[entry.id] === true;
+          const isExpanded = collapsedActivityGroups[entry.id] === true;
           const count = entry.items.length;
+          const activeItems = entry.items.filter((item) => item.data.status !== "completed");
+          const completedCount = count - activeItems.length;
+
+          /* summary: show first + last active with ellipsis */
+          const summaryItems = activeItems.length <= 2
+            ? activeItems
+            : [activeItems[0], activeItems[activeItems.length - 1]];
+          const omitted = activeItems.length - summaryItems.length;
+
+          const displayItems = isExpanded ? entry.items : summaryItems;
+
           return (
-            <div key={entry.id} className="py-1">
+            <div key={entry.id} className="rounded border border-amber-200/70 bg-amber-50/50 px-2 py-1 shadow-sm shadow-amber-100/40">
               <button
                 type="button"
-                className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                className="flex w-full items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
                 onClick={() => onActivityGroupToggle(entry.id)}
               >
-                {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 <Wrench className="h-3 w-3 text-amber-500" />
-                <span>{count} {t("chat.toolCalls").toLowerCase()}</span>
+                <span className="font-medium">
+                  {count} {t("chat.toolCalls").toLowerCase()}
+                  {completedCount > 0 && (
+                    <span className="ml-1 font-normal text-emerald-600">({completedCount} {t("chat.completed")})</span>
+                  )}
+                </span>
               </button>
-              {!isCollapsed && (
-                <div className="ml-6 mt-2 space-y-2 border-l-2 border-amber-200/80 pl-4">
-                  {entry.items.map((item) => {
-                    return <ToolCallCard key={item.data.id} activity={item.data} />;
+              {displayItems.length > 0 && (
+                <div className="mt-1">
+                  {displayItems.map((item, idx) => {
+                    const act = item.data;
+                    const snippet = compactText(act.detail || act.title, 80);
+                    const badgeText = statusLabel(act.status, t);
+                    return (
+                      <div key={act.id}>
+                        <div className="flex items-baseline gap-1.5 py-0.5 pl-5">
+                          <span className="shrink-0 text-[11px] font-semibold text-foreground">{act.title}</span>
+                          {badgeText && (
+                            <span className={cn(
+                              "shrink-0 rounded-full border px-1 py-px text-[9px] font-medium leading-none",
+                              statusBadgeClass(act.status),
+                            )}>
+                              {badgeText}
+                            </span>
+                          )}
+                          <span className="min-w-0 truncate text-[10px] text-muted-foreground">{snippet}</span>
+                        </div>
+                        {!isExpanded && idx === 0 && omitted > 0 && (
+                          <div className="py-0.5 pl-5 text-[10px] text-muted-foreground/60">… {omitted} more</div>
+                        )}
+                      </div>
+                    );
                   })}
                 </div>
               )}
@@ -232,14 +252,19 @@ export function MessageFeedView(props: MessageFeedViewProps) {
               isUser ? "border-l-2 border-blue-300 pl-3 text-foreground" : "border-l-2 border-emerald-200 pl-3 text-foreground/90",
             )}>
               {message.content}
+              {message.attachments && message.attachments.length > 0 && (
+                <AttachmentImagePreviews attachments={message.attachments} />
+              )}
             </div>
           </div>
         );
       })}
-      {submitting && (
-        <div className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>{t("chat.thinking")}...</span>
+      {(submitting || sessionRunning) && (
+        <div className="flex items-center gap-1.5 rounded border border-emerald-200/70 bg-emerald-50/40 px-2.5 py-1 text-xs text-emerald-700">
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          <span className="min-w-0 truncate">
+            {lastActivityText ? compactText(lastActivityText, 120) : `${t("chat.thinking")}...`}
+          </span>
         </div>
       )}
     </>

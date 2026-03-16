@@ -1,12 +1,44 @@
 import type React from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Paperclip, Send, X } from "lucide-react";
+import { ChevronDown, Paperclip, Send, Square, X } from "lucide-react";
 import type { ConfigOption, SessionModeState, SlashCommand } from "@/types/apiV2";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { SessionRecord } from "./chatTypes";
+
+function ImagePreviewBadge({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const [hover, setHover] = useState(false);
+  const previewUrl = useMemo(() => URL.createObjectURL(file), [file]);
+  useEffect(() => () => URL.revokeObjectURL(previewUrl), [previewUrl]);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <Badge variant="secondary" className="gap-1 text-xs">
+        {file.name}
+        <button type="button" onClick={onRemove} className="ml-1 hover:text-red-500">
+          <X className="h-3 w-3" />
+        </button>
+      </Badge>
+      {hover && (
+        <div className="absolute bottom-full left-0 z-50 mb-2 rounded-lg border bg-popover p-1.5 shadow-lg">
+          <img
+            src={previewUrl}
+            alt={file.name}
+            className="max-h-48 max-w-64 rounded object-contain"
+          />
+          <div className="mt-1 text-center text-[10px] text-muted-foreground">{file.name}</div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ChatInputBarProps {
   messageInput: string;
@@ -20,12 +52,14 @@ interface ChatInputBarProps {
   availableCommands: SlashCommand[];
   commandFilter: string;
   fileInputRef: React.RefObject<HTMLInputElement>;
+  sessionRunning: boolean;
   modes: SessionModeState | null;
   configOptions: ConfigOption[];
   onMessageChange: (value: string) => void;
   onPaste: (e: React.ClipboardEvent) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   onSend: () => void;
+  onCancel: () => void;
   onCommandSelect: (name: string) => void;
   onRemovePendingFile: (index: number) => void;
   onCommandPaletteClose: () => void;
@@ -49,7 +83,9 @@ export function ChatInputBar(props: ChatInputBarProps) {
     onMessageChange,
     onPaste,
     onKeyDown,
+    sessionRunning,
     onSend,
+    onCancel,
     onCommandSelect,
     onRemovePendingFile,
     onCommandPaletteClose,
@@ -72,14 +108,18 @@ export function ChatInputBar(props: ChatInputBarProps) {
     <div className="space-y-2 border-t px-6 py-4">
       {pendingFiles.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {pendingFiles.map((file, idx) => (
-            <Badge key={idx} variant="secondary" className="gap-1 text-xs">
-              {file.name}
-              <button type="button" onClick={() => onRemovePendingFile(idx)} className="ml-1 hover:text-red-500">
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
+          {pendingFiles.map((file, idx) =>
+            file.type.startsWith("image/") ? (
+              <ImagePreviewBadge key={idx} file={file} onRemove={() => onRemovePendingFile(idx)} />
+            ) : (
+              <Badge key={idx} variant="secondary" className="gap-1 text-xs">
+                {file.name}
+                <button type="button" onClick={() => onRemovePendingFile(idx)} className="ml-1 hover:text-red-500">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ),
+          )}
         </div>
       )}
       <div className="relative">
@@ -141,14 +181,25 @@ export function ChatInputBar(props: ChatInputBarProps) {
             >
               <Paperclip className="h-[18px] w-[18px]" />
             </button>
-            <Button
-              size="icon"
-              className="h-8 w-8"
-              disabled={isDisabled}
-              onClick={onSend}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+            {sessionRunning ? (
+              <Button
+                size="icon"
+                variant="destructive"
+                className="h-8 w-8"
+                onClick={onCancel}
+              >
+                <Square className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                className="h-8 w-8"
+                disabled={isDisabled}
+                onClick={onSend}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
         <div className="flex items-center justify-between pt-1 text-[11px] text-muted-foreground">

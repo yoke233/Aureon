@@ -244,6 +244,7 @@ export interface ApiClient {
   ): Promise<CrystallizeChatSessionThreadResponse>;
   cancelChat(sessionId: string): Promise<{ session_id: string; status: string }>;
   closeChat(sessionId: string): Promise<{ session_id: string; status: string }>;
+  archiveChatSession(sessionId: string, archived: boolean): Promise<{ session_id: string; archived: boolean }>;
   getChatStatus(sessionId: string): Promise<ChatStatusResponse>;
 
   listWorkItems(params?: {
@@ -839,6 +840,12 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
       request<{ session_id: string; status: string }>({
         path: `/chat/${encodeURIComponent(sessionId)}`,
         method: "DELETE",
+      }),
+    archiveChatSession: (sessionId, archived) =>
+      request<{ session_id: string; archived: boolean }>({
+        path: `/chat/sessions/${encodeURIComponent(sessionId)}/archive`,
+        method: "POST",
+        body: { archived },
       }),
     getChatStatus: (sessionId) =>
       request<ChatStatusResponse>({

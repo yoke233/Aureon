@@ -8,6 +8,28 @@
   background: #ffffff;
   background-color: #ffffff;
   color-scheme: light;
+
+  /* ── shadcn/ui theme variables (light) ── */
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --primary: 222.2 47.4% 11.2%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 222.2 84% 4.9%;
+  --radius: 0.625rem;
 }
 
 * {
@@ -27,33 +49,33 @@ textarea {
   font: inherit;
 }
 
-/* ── Settings: accent color themes ── */
+/* ── Settings: theme accent color ── */
 :root {
-  --accent: #475569;      /* slate-600 */
-  --accent-dark: #0f172a; /* slate-900 */
-  --font-chat: 0.9375rem; /* 15px — MD default */
+  --theme-accent: #475569;      /* slate-600 */
+  --theme-accent-dark: #0f172a; /* slate-900 */
+  --font-chat: 0.9375rem;       /* 15px — MD default */
 }
 
 [data-theme="ocean"] {
-  --accent: #0284c7;
-  --accent-dark: #0369a1;
+  --theme-accent: #0284c7;
+  --theme-accent-dark: #0369a1;
 }
 [data-theme="forest"] {
-  --accent: #059669;
-  --accent-dark: #047857;
+  --theme-accent: #059669;
+  --theme-accent-dark: #047857;
 }
 [data-theme="amber"] {
-  --accent: #d97706;
-  --accent-dark: #b45309;
+  --theme-accent: #d97706;
+  --theme-accent-dark: #b45309;
 }
 
 [data-font-size="sm"] { --font-chat: 0.8125rem; } /* 13px */
 [data-font-size="lg"] { --font-chat: 1.0625rem; } /* 17px */
 
-/* Utility classes using CSS variables */
-.accent-bg   { background-color: var(--accent-dark); color: #fff; }
-.accent-text { color: var(--accent); }
-.accent-border { border-color: var(--accent); }
+/* Utility classes using theme accent */
+.accent-bg   { background-color: var(--theme-accent-dark); color: #fff; }
+.accent-text { color: var(--theme-accent); }
+.accent-border { border-color: var(--theme-accent); }
 
 #root {
   min-height: 100vh;

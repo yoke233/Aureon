@@ -2,12 +2,19 @@ import type { ChatSessionSummary } from "@/types/apiV2";
 
 export type SessionRecord = ChatSessionSummary;
 
+export interface ChatAttachmentView {
+  name: string;
+  mime_type: string;
+  data: string;
+}
+
 export interface ChatMessageView {
   id: string;
   role: "user" | "assistant";
   content: string;
   time: string;
   at: string;
+  attachments?: ChatAttachmentView[];
 }
 
 export type ChatFeedItem =
@@ -24,6 +31,7 @@ export interface RealtimeChatOutputPayload {
   session_id?: string;
   type?: string;
   content?: string;
+  title?: string;
   tool_call_id?: string;
   stderr?: string;
   exit_code?: number;

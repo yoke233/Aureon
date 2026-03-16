@@ -24,6 +24,7 @@ func registerChatRoutes(r chi.Router, h *Handler) {
 	}
 	handlers := &chatHandlers{handler: h, lead: h.lead}
 	r.Get("/chat/sessions", handlers.listSessions)
+	r.Post("/chat/sessions/{sessionID}/archive", handlers.archiveSession)
 	r.Post("/chat/sessions/{sessionID}/crystallize-thread", handlers.crystallizeThread)
 	r.Post("/chat", handlers.sendMessage)
 	r.Get("/chat/{sessionID}", handlers.getSession)
@@ -34,13 +35,60 @@ func registerChatRoutes(r chi.Router, h *Handler) {
 }
 
 // GET /chat/sessions — list persisted lead chat sessions.
+// Query params:
+//   - archived=true  → include only archived sessions
+//   - archived=all   → include both active and archived
+//   - (default)      → exclude archived sessions
 func (h *chatHandlers) listSessions(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.lead.ListSessions(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "LIST_CHAT_SESSIONS_FAILED")
 		return
 	}
+
+	archivedParam := strings.TrimSpace(r.URL.Query().Get("archived"))
+	if archivedParam != "all" {
+		wantArchived := archivedParam == "true"
+		filtered := resp[:0]
+		for _, s := range resp {
+			if s.Archived == wantArchived {
+				filtered = append(filtered, s)
+			}
+		}
+		resp = filtered
+	}
+
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// POST /chat/sessions/{sessionID}/archive — toggle session archived state.
+func (h *chatHandlers) archiveSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(chi.URLParam(r, "sessionID"))
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required", "BAD_REQUEST")
+		return
+	}
+
+	var body struct {
+		Archived bool `json:"archived"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		// Default to archive when no body is provided.
+		body.Archived = true
+	}
+
+	if err := h.lead.ArchiveSession(sessionID, body.Archived); err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error(), "ARCHIVE_SESSION_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": sessionID,
+		"archived":   body.Archived,
+	})
 }
 
 // POST /chat — deprecated, use WebSocket chat.send instead.

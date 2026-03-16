@@ -42,9 +42,11 @@ interface ChatMainPanelProps {
   copiedMessageId: string | null;
   collapsedActivityGroups: Record<string, boolean>;
   activeSession: string | null;
+  sessionRunning: boolean;
   chatContainerRef: React.RefObject<HTMLDivElement>;
   messagesEndRef: React.RefObject<HTMLDivElement>;
   onScroll: React.UIEventHandler<HTMLDivElement>;
+  lastActivityText: string;
   onCopyMessage: (id: string, content: string) => void;
   onCreateWorkItem: (id: string, content: string) => void;
   onActivityGroupToggle: (id: string) => void;
@@ -83,7 +85,9 @@ export function ChatMainPanel({
   visibleFeedEntries,
   copiedMessageId,
   collapsedActivityGroups,
+  lastActivityText,
   activeSession,
+  sessionRunning,
   chatContainerRef,
   messagesEndRef,
   onScroll,
@@ -145,7 +149,9 @@ export function ChatMainPanel({
             )}
             <MessageFeedView
               entries={visibleFeedEntries}
-              submitting={submitting}
+              submitting={submitting && !!activeSession}
+              sessionRunning={sessionRunning}
+              lastActivityText={lastActivityText}
               copiedMessageId={copiedMessageId}
               collapsedActivityGroups={collapsedActivityGroups}
               onCopyMessage={onCopyMessage}

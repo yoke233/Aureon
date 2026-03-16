@@ -101,9 +101,9 @@ export function ChatPage() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [availableCommands, setAvailableCommands] = useState<SlashCommand[]>([]);
-  const [configOptions, setConfigOptions] = useState<ConfigOption[]>([]);
-  const [sessionModes, setSessionModes] = useState<SessionModeState | null>(null);
+  const [commandsBySession, setCommandsBySession] = useState<Record<string, SlashCommand[]>>({});
+  const [configOptionsBySession, setConfigOptionsBySession] = useState<Record<string, ConfigOption[]>>({});
+  const [modesBySession, setModesBySession] = useState<Record<string, SessionModeState | null>>({});
   const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([]);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [commandFilter, setCommandFilter] = useState("");
@@ -122,6 +122,8 @@ export function ChatPage() {
   const pendingRequestIdRef = useRef<string | null>(null);
   const pendingSendDraftRef = useRef<{ messageInput: string; pendingFiles: File[] } | null>(null);
   const activeSessionRef = useRef<string | null>(null);
+  const isNearBottomRef = useRef(true);
+  const prevActiveSessionRef = useRef<string | null>(null);
   const syntheticEventIdRef = useRef(-1);
   const pendingDraftInfoRef = useRef<{
     projectId?: number;
@@ -148,19 +150,21 @@ export function ChatPage() {
         new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
       ));
     });
-    setMessagesBySession((current) => ({
-      ...current,
-      [detail.session_id]: userViews,
-    }));
+    setMessagesBySession((current) => {
+      // Preserve optimistically-inserted messages (e.g. from draft transfer)
+      const existing = current[detail.session_id];
+      if (existing && existing.length > 0) {
+        return current;
+      }
+      return { ...current, [detail.session_id]: userViews };
+    });
     setLoadedSessions((current) => ({
       ...current,
       [detail.session_id]: true,
     }));
-    if (detail.session_id === activeSessionRef.current) {
-      setAvailableCommands(detail.available_commands ?? []);
-      setConfigOptions(detail.config_options ?? []);
-      setSessionModes(detail.modes ?? null);
-    }
+    setCommandsBySession((current) => ({ ...current, [detail.session_id]: detail.available_commands ?? [] }));
+    setConfigOptionsBySession((current) => ({ ...current, [detail.session_id]: detail.config_options ?? [] }));
+    setModesBySession((current) => ({ ...current, [detail.session_id]: detail.modes ?? null }));
   }, [t]);
 
   const syncSessionEvents = useCallback((sessionId: string, events: ApiEvent[]) => {
@@ -260,9 +264,6 @@ export function ChatPage() {
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
-    setAvailableCommands([]);
-    setConfigOptions([]);
-    setSessionModes(null);
   }, [activeSession]);
 
   useEffect(() => {
@@ -473,6 +474,18 @@ export function ChatPage() {
     () => (currentSession ? (activitiesBySession[currentSession.session_id] ?? []) : []),
     [activitiesBySession, currentSession],
   );
+  const availableCommands = useMemo(
+    () => (currentSession ? (commandsBySession[currentSession.session_id] ?? []) : []),
+    [currentSession, commandsBySession],
+  );
+  const configOptions = useMemo(
+    () => (currentSession ? (configOptionsBySession[currentSession.session_id] ?? []) : []),
+    [currentSession, configOptionsBySession],
+  );
+  const sessionModes = useMemo(
+    () => (currentSession ? (modesBySession[currentSession.session_id] ?? null) : null),
+    [currentSession, modesBySession],
+  );
   const isDraftSessionView = initialLoaded && !currentSession && currentMessages.length === 0;
   const currentUsage = useMemo(
     () =>
@@ -483,6 +496,14 @@ export function ChatPage() {
   );
 
   const currentUsagePercent = formatUsagePercent(currentUsage?.usageUsed, currentUsage?.usageSize);
+
+  const lastActivityText = useMemo(() => {
+    if (!submitting || currentActivities.length === 0) return "";
+    const last = [...currentActivities].reverse().find(
+      (a) => a.type === "agent_thought" || a.type === "tool_call",
+    );
+    return last ? (last.detail || last.title) : "";
+  }, [submitting, currentActivities]);
 
   const { chatFeedEntries, visibleFeedEntries, hasMoreFeedEntries } = useChatFeed(
     currentMessages, currentActivities, feedVisibleCount,
@@ -501,6 +522,8 @@ export function ChatPage() {
   const handleChatScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const el = e.currentTarget;
+      // Track whether user is near the bottom (within 80px)
+      isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       if (el.scrollTop < 80 && hasMoreFeedEntries && !loadingMore) {
         prevScrollHeightRef.current = el.scrollHeight;
         setLoadingMore(true);
@@ -524,9 +547,18 @@ export function ChatPage() {
   }, [visibleFeedEntries.length, loadingMore]);
 
   useEffect(() => {
+    const sessionChanged = prevActiveSessionRef.current !== activeSession;
+    prevActiveSessionRef.current = activeSession;
+    if (sessionChanged) {
+      // Switched session — jump instantly and reset scroll tracking
+      isNearBottomRef.current = true;
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      return;
+    }
+    if (!isNearBottomRef.current) return;
     const isStreaming = currentMessages.at(-1)?.id.endsWith("stream-assistant");
     messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? "auto" : "smooth" });
-  }, [currentEvents, currentMessages, currentActivities, detailView]);
+  }, [activeSession, currentEvents, currentMessages, currentActivities, detailView]);
 
   useEffect(() => {
     const unsubscribeOutput = wsClient.subscribe<RealtimeChatOutputPayload>(
@@ -693,8 +725,8 @@ export function ChatPage() {
       "chat.config_updated",
       (payload) => {
         const sessionId = payload.session_id?.trim();
-        if (sessionId && sessionId === activeSessionRef.current && payload.config_options) {
-          setConfigOptions(payload.config_options);
+        if (sessionId && payload.config_options) {
+          setConfigOptionsBySession((current) => ({ ...current, [sessionId]: payload.config_options! }));
         }
       },
     );
@@ -702,8 +734,8 @@ export function ChatPage() {
       "chat.mode_updated",
       (payload) => {
         const sessionId = payload.session_id?.trim();
-        if (sessionId && sessionId === activeSessionRef.current && payload.modes) {
-          setSessionModes(payload.modes);
+        if (sessionId && payload.modes) {
+          setModesBySession((current) => ({ ...current, [sessionId]: payload.modes! }));
         }
       },
     );
@@ -768,6 +800,10 @@ export function ChatPage() {
     };
   }, [activeSession, loadedSessions, loadSessionState]);
 
+  const handleGroupToggle = useCallback((key: string) => {
+    setCollapsedGroups((current) => ({ ...current, [key]: !current[key] }));
+  }, []);
+
   const createSession = () => {
     setDraftProjectId(selectedProjectId);
     setDraftProfileId((current) => {
@@ -789,7 +825,19 @@ export function ChatPage() {
     setError(null);
   };
 
-  const appendMessage = (sessionId: string | null, role: "user" | "assistant", content: string) => {
+  const archiveSession = useCallback(async (sessionId: string) => {
+    try {
+      await apiClient.archiveChatSession(sessionId, true);
+      setSessions((current) => current.filter((s) => s.session_id !== sessionId));
+      if (activeSession === sessionId) {
+        setActiveSession(null);
+      }
+    } catch {
+      // silently ignore — session list will refresh on next poll
+    }
+  }, [apiClient, activeSession]);
+
+  const appendMessage = (sessionId: string | null, role: "user" | "assistant", content: string, attachments?: { name: string; mime_type: string; data: string }[]) => {
     const now = new Date();
     const nowISO = now.toISOString();
     const view: ChatMessageView = {
@@ -798,6 +846,7 @@ export function ChatPage() {
       content,
       time: now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
       at: nowISO,
+      attachments: attachments && attachments.length > 0 ? attachments : undefined,
     };
 
     if (!sessionId) {
@@ -885,7 +934,7 @@ export function ChatPage() {
     const displayContent = content + (attachments.length > 0
       ? `\n${t("chat.attachmentLabel", { names: attachments.map((a) => a.name).join(", ") })}`
       : "");
-    appendMessage(workingSessionId, "user", displayContent);
+    appendMessage(workingSessionId, "user", displayContent, attachments);
     pendingSendDraftRef.current = {
       messageInput,
       pendingFiles,
@@ -937,6 +986,27 @@ export function ChatPage() {
       if (!pendingRequestIdRef.current) {
         setSubmitting(false);
       }
+    }
+  };
+
+  const sessionRunning = currentSession?.status === "running";
+
+  const cancelSession = async () => {
+    if (!currentSession) {
+      return;
+    }
+    try {
+      await apiClient.cancelChat(currentSession.session_id);
+      setSessions((current) =>
+        current.map((session) =>
+          session.session_id === currentSession.session_id
+            ? { ...session, status: "alive" }
+            : session,
+        ),
+      );
+      setSubmitting(false);
+    } catch (cancelError) {
+      setError(getErrorMessage(cancelError));
     }
   };
 
@@ -1127,13 +1197,9 @@ export function ChatPage() {
         collapsedGroups={collapsedGroups}
         onSearchChange={setSessionSearch}
         onSessionSelect={setActiveSession}
-        onGroupToggle={(key) =>
-          setCollapsedGroups((current) => ({
-            ...current,
-            [key]: !current[key],
-          }))
-        }
+        onGroupToggle={handleGroupToggle}
         onCreateSession={createSession}
+        onArchiveSession={archiveSession}
       />
 
       <div className="flex flex-1 flex-col">
@@ -1203,11 +1269,13 @@ export function ChatPage() {
           copiedMessageId={copiedMessageId}
           collapsedActivityGroups={collapsedActivityGroups}
           activeSession={activeSession}
+          sessionRunning={sessionRunning ?? false}
           chatContainerRef={chatContainerRef}
           messagesEndRef={messagesEndRef}
           onScroll={handleChatScroll}
           onCopyMessage={(id, content) => void handleCopyMessage(id, content)}
           onCreateWorkItem={handleCreateWorkItem}
+          lastActivityText={lastActivityText}
           onActivityGroupToggle={(id) =>
             setCollapsedActivityGroups((prev) => {
               const currentlyCollapsed = prev[id] === true;
@@ -1237,7 +1305,9 @@ export function ChatPage() {
             onMessageChange={handleInputChange}
             onPaste={handlePaste}
             onKeyDown={handleInputKeyDown}
+            sessionRunning={sessionRunning ?? false}
             onSend={() => void sendMessage()}
+            onCancel={() => void cancelSession()}
             onCommandSelect={handleCommandSelect}
             onRemovePendingFile={removePendingFile}
             onCommandPaletteClose={() => setShowCommandPalette(false)}

@@ -28,9 +28,7 @@ import (
 )
 
 const (
-	defaultLeadProfileID  = "lead"
-	defaultLeadTimeout    = 120 * time.Second
-	defaultSessionIdleTTL = 30 * time.Minute
+	defaultLeadProfileID = "lead"
 )
 
 // TextCompleter generates free-form text from a prompt (e.g. branch name
@@ -48,7 +46,6 @@ type LeadAgentConfig struct {
 	ResourceSpaceStore core.ResourceSpaceStore
 	LLM                TextCompleter
 	ProfileID          string
-	Timeout            time.Duration
 	IdleTTL            time.Duration
 	Sandbox            v2sandbox.Sandbox
 	DataDir            string
@@ -140,12 +137,6 @@ func (h *suppressibleEventHandler) HandleSessionUpdate(ctx context.Context, upda
 func NewLeadAgent(cfg LeadAgentConfig) *LeadAgent {
 	if cfg.ProfileID == "" {
 		cfg.ProfileID = defaultLeadProfileID
-	}
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = defaultLeadTimeout
-	}
-	if cfg.IdleTTL <= 0 {
-		cfg.IdleTTL = defaultSessionIdleTTL
 	}
 	if cfg.NewClient == nil {
 		cfg.NewClient = func(launch acpclient.LaunchConfig, h acpproto.Client, opts ...acpclient.Option) (ChatACPClient, error) {
@@ -271,7 +262,7 @@ func (l *LeadAgent) runPrompt(ctx context.Context, publicSessionID string, sess 
 		return "", errors.New("session is not initialized")
 	}
 
-	promptCtx, promptCancel := context.WithTimeout(ctx, l.cfg.Timeout)
+	promptCtx, promptCancel := context.WithCancel(ctx)
 	if err := l.beginRun(publicSessionID, promptCancel); err != nil {
 		promptCancel()
 		l.resetSessionIdle(publicSessionID, sess)
@@ -536,6 +527,25 @@ func (l *LeadAgent) DeleteSession(sessionID string) {
 		// Session not in memory but in catalog — clean up workspace.
 		cleanupIsolatedDir(record.Isolation, record.WorkDir, record.RepoPath)
 	}
+}
+
+// ArchiveSession toggles the archived flag on a session. Archived sessions
+// are hidden from the default listing but remain on disk.
+func (l *LeadAgent) ArchiveSession(sessionID string, archived bool) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session_id is required")
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	record, ok := l.catalog[sessionID]
+	if !ok {
+		return core.ErrNotFound
+	}
+	record.Archived = archived
+	return l.saveCatalogLocked()
 }
 
 func (l *LeadAgent) Shutdown() {
@@ -887,6 +897,9 @@ func (l *LeadAgent) removeSession(sessionID string) {
 }
 
 func (l *LeadAgent) resetSessionIdle(sessionID string, sess *leadSession) {
+	if l.cfg.IdleTTL <= 0 {
+		return
+	}
 	sess.resetIdleTimer(l.cfg.IdleTTL, func() {
 		l.removeSession(sessionID)
 	})
@@ -1300,6 +1313,7 @@ func buildSessionSummary(record *persistedLeadSession, live, running bool) chata
 		CreatedAt:    record.CreatedAt,
 		UpdatedAt:    record.UpdatedAt,
 		Status:       status,
+		Archived:     record.Archived,
 		MessageCount: len(record.Messages),
 	}
 

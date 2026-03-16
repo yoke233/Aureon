@@ -274,7 +274,6 @@ func setupLeadRealEnv(t *testing.T) *leadRealEnv {
 		Sandbox:   v2sandbox.NoopSandbox{},
 		DataDir:   dataDir,
 		ProfileID: testProfile.ID,
-		Timeout:   120 * time.Second,
 	}
 
 	agent := NewLeadAgent(agentCfg)

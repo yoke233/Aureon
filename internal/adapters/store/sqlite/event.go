@@ -60,8 +60,14 @@ func (s *Store) ListEvents(ctx context.Context, filter core.EventFilter) ([]*cor
 	}
 
 	var models []EventModel
-	if err := query.Order("id ASC").Find(&models).Error; err != nil {
+	// Fetch the most recent events first (DESC) so that LIMIT returns the
+	// latest N rather than the earliest N, then reverse to chronological order.
+	if err := query.Order("id DESC").Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
+	}
+	// Reverse to chronological (ASC) order.
+	for i, j := 0, len(models)-1; i < j; i, j = i+1, j-1 {
+		models[i], models[j] = models[j], models[i]
 	}
 	events := make([]*core.Event, 0, len(models))
 	for i := range models {

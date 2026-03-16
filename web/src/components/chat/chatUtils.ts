@@ -138,6 +138,19 @@ export const compactText = (value: string, maxLength = 160): string => {
   return `${normalized.slice(0, maxLength)}...`;
 };
 
+const resolveToolActivityId = (
+  sessionId: string,
+  toolCallId: string | undefined,
+  at: string,
+  index: number,
+): string => {
+  const normalizedToolCallId = toolCallId?.trim();
+  if (normalizedToolCallId) {
+    return `${sessionId}-tool-${normalizedToolCallId}`;
+  }
+  return `${sessionId}-tool-${Date.parse(at)}-${index}`;
+};
+
 export const stringifyJSON = (value: unknown): string | undefined => {
   if (value == null) {
     return undefined;
@@ -280,6 +293,7 @@ export const toRealtimePayload = (event: ApiEvent): RealtimeChatOutputPayload =>
   session_id: toStringValue(event.data?.session_id),
   type: toStringValue(event.data?.type),
   content: toStringValue(event.data?.content),
+  title: toStringValue(event.data?.title),
   tool_call_id: toStringValue(event.data?.tool_call_id),
   stderr: toStringValue(event.data?.stderr),
   exit_code: toNumberValue(event.data?.exit_code),
@@ -412,8 +426,12 @@ export const touchSessionList = (
   sessionId: string,
   status: "running" | "alive" | "closed",
   at: string,
-): SessionRecord[] => (
-  sessions.map((session) =>
+): SessionRecord[] => {
+  const target = sessions.find((s) => s.session_id === sessionId);
+  if (!target || target.status === status) {
+    return sessions;
+  }
+  return sessions.map((session) =>
     session.session_id === sessionId
       ? {
           ...session,
@@ -421,8 +439,8 @@ export const touchSessionList = (
           updated_at: at,
         }
       : session,
-  )
-);
+  );
+};
 
 export const applyActivityPayload = (
   current: ChatActivityView[],
@@ -470,16 +488,6 @@ export const applyActivityPayload = (
     if (!detail) {
       return current;
     }
-    const previous = next.at(-1);
-    if (previous?.type === "agent_message") {
-      next[next.length - 1] = {
-        ...previous,
-        detail: previous.detail ? `${previous.detail}\n${detail}` : detail,
-        time,
-        at,
-      };
-      return next;
-    }
     next.push({
       id: `${sessionId}-message-${Date.parse(at)}-${next.length}`,
       type: "agent_message",
@@ -498,7 +506,7 @@ export const applyActivityPayload = (
       : -1;
     const previous = existingIndex >= 0 ? next[existingIndex] : null;
     const activity: ChatActivityView = {
-      id: previous?.id ?? `${sessionId}-tool-${toolCallId ?? `${Date.parse(at)}-${next.length}`}`,
+      id: previous?.id ?? resolveToolActivityId(sessionId, toolCallId, at, next.length),
       type: "tool_call",
       title: payload.content?.trim() || previous?.title || t("chat.toolCall"),
       detail: previous?.detail || t("chat.executing"),
@@ -524,9 +532,9 @@ export const applyActivityPayload = (
     const status = payload.exit_code && payload.exit_code !== 0 ? "failed" : "completed";
     const detail = buildToolResultDetail(payload, t) || previous?.detail || t("chat.completed");
     const activity: ChatActivityView = {
-      id: previous?.id ?? `${sessionId}-tool-${toolCallId ?? `${Date.parse(at)}-${next.length}`}`,
+      id: previous?.id ?? resolveToolActivityId(sessionId, toolCallId, at, next.length),
       type: "tool_call",
-      title: previous?.title || payload.content?.trim() || t("chat.toolCall"),
+      title: previous?.title || payload.title?.trim() || payload.content?.trim() || t("chat.toolCall"),
       detail,
       time,
       at,
@@ -577,6 +585,7 @@ export const buildRealtimeEvent = (id: number, at: string, payload: RealtimeChat
     session_id: payload.session_id,
     type: payload.type,
     content: payload.content,
+    title: payload.title,
     tool_call_id: payload.tool_call_id,
     stderr: payload.stderr,
     exit_code: payload.exit_code,

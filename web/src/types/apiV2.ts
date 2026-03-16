@@ -475,6 +475,7 @@ export interface ChatSessionSummary {
   created_at: string;
   updated_at: string;
   status: "running" | "alive" | "closed" | string;
+  archived?: boolean;
   message_count: number;
   git?: GitStats;
 }

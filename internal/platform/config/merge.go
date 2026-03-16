@@ -217,7 +217,22 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 		}
 	}
 
+	if llmFilter := layer.LLMFilter; llmFilter != nil {
+		if llmFilter.Enabled != nil {
+			cfg.LLMFilter.Enabled = *llmFilter.Enabled
+		}
+		if llmFilter.Provider != nil {
+			cfg.LLMFilter.Provider = *llmFilter.Provider
+		}
+		if llmFilter.Model != nil {
+			cfg.LLMFilter.Model = *llmFilter.Model
+		}
+	}
+
 	if runtime := layer.Runtime; runtime != nil {
+		if runtime.MockExecutor != nil {
+			cfg.Runtime.MockExecutor = *runtime.MockExecutor
+		}
 		if collector := runtime.Collector; collector != nil {
 			if collector.MaxRetries != nil {
 				cfg.Runtime.Collector.MaxRetries = *collector.MaxRetries
@@ -237,6 +252,20 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 			}
 			if sandbox.Provider != nil {
 				cfg.Runtime.Sandbox.Provider = *sandbox.Provider
+			}
+			if gc := sandbox.GC; gc != nil {
+				if gc.ArchiveCleanup != nil {
+					cfg.Runtime.Sandbox.GC.ArchiveCleanup = *gc.ArchiveCleanup
+				}
+				if gc.StartupCleanup != nil {
+					cfg.Runtime.Sandbox.GC.StartupCleanup = *gc.StartupCleanup
+				}
+				if gc.Interval != nil {
+					cfg.Runtime.Sandbox.GC.Interval = *gc.Interval
+				}
+				if gc.RepoMaxAge != nil {
+					cfg.Runtime.Sandbox.GC.RepoMaxAge = *gc.RepoMaxAge
+				}
 			}
 			if litebox := sandbox.LiteBox; litebox != nil {
 				if litebox.BridgeCommand != nil {
@@ -349,6 +378,17 @@ func ApplyConfigLayer(cfg *Config, layer *ConfigLayer) {
 			}
 			if cron.Interval != nil {
 				cfg.Runtime.Cron.Interval = *cron.Interval
+			}
+		}
+		if inspection := runtime.Inspection; inspection != nil {
+			if inspection.Enabled != nil {
+				cfg.Runtime.Inspection.Enabled = *inspection.Enabled
+			}
+			if inspection.Interval != nil {
+				cfg.Runtime.Inspection.Interval = *inspection.Interval
+			}
+			if inspection.LookbackH != nil {
+				cfg.Runtime.Inspection.LookbackH = *inspection.LookbackH
 			}
 		}
 		if prompts := runtime.Prompts; prompts != nil {

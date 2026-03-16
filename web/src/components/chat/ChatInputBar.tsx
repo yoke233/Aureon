@@ -1,5 +1,4 @@
 import type React from "react";
-import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Paperclip, Send, Square } from "lucide-react";
 import type { ConfigOption, SessionModeState, SlashCommand } from "@/types/apiV2";

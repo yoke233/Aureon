@@ -73,7 +73,8 @@ describe("SandboxPage", () => {
     expect(saveButton.hasAttribute("disabled")).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "启用沙盒" }));
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "docker" } });
+    fireEvent.click(screen.getByRole("button", { name: "配置 provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "docker" }));
 
     expect(screen.getAllByText("已连接 docker").length).toBeGreaterThan(0);
     expect(saveButton.hasAttribute("disabled")).toBe(false);

@@ -58,7 +58,9 @@ function renderBar(props?: Partial<React.ComponentProps<typeof ChatInputBar>>) {
     onMessageChange: vi.fn(),
     onPaste: vi.fn(),
     onKeyDown: vi.fn(),
+    sessionRunning: false,
     onSend: vi.fn(),
+    onCancel: vi.fn(),
     onCommandSelect: vi.fn(),
     onRemovePendingFile: vi.fn(),
     onCommandPaletteClose: vi.fn(),
@@ -126,7 +128,7 @@ describe("ChatInputBar", () => {
     expect((screen.getByTitle("上传文件或图片") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("running 会话下仍允许输入和发送", () => {
+  it("running 会话下显示取消按钮并允许继续输入", () => {
     renderBar({
       currentSession: {
         session_id: "session-1",
@@ -146,10 +148,13 @@ describe("ChatInputBar", () => {
       pendingFiles: [],
       modes: null,
       configOptions: [],
+      sessionRunning: true,
     });
 
     expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(false);
     expect((screen.getByTitle("上传文件或图片") as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getAllByRole("button")[1] as HTMLButtonElement).disabled).toBe(false);
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(2);
+    expect((buttons[1] as HTMLButtonElement).disabled).toBe(false);
   });
 });

@@ -69,9 +69,8 @@ describe("LLMConfigPage", () => {
 
     const newConfigCard = (await screen.findByDisplayValue("llm-config-2")).closest(".rounded-2xl");
     expect(newConfigCard).toBeTruthy();
-    fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("类型"), {
-      target: { value: "anthropic" },
-    });
+    fireEvent.click(within(newConfigCard as HTMLElement).getByRole("button", { name: "类型" }));
+    fireEvent.click(screen.getByRole("button", { name: "Anthropic" }));
     fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("配置 ID"), {
       target: { value: "claude-backup" },
     });
@@ -84,13 +83,13 @@ describe("LLMConfigPage", () => {
     fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("最大输出 Tokens"), {
       target: { value: "4096" },
     });
-    fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("思考强度"), {
-      target: { value: "high" },
-    });
+    fireEvent.click(within(newConfigCard as HTMLElement).getByRole("button", { name: "思考强度" }));
+    fireEvent.click(screen.getByRole("button", { name: "High" }));
     fireEvent.change(within(newConfigCard as HTMLElement).getByLabelText("Thinking Budget"), {
       target: { value: "2048" },
     });
-    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "claude-backup" } });
+    fireEvent.click(screen.getByRole("button", { name: /openai-prod/i }));
+    fireEvent.click(screen.getByRole("button", { name: /claude-backup/i }));
 
     const originalCard = screen.getByDisplayValue("openai-prod").closest(".rounded-2xl");
     expect(originalCard).toBeTruthy();

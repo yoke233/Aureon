@@ -129,11 +129,11 @@ type RuntimeNATSConfig struct {
 
 // RuntimeSandboxConfig configures per-ACP-process sandbox isolation.
 type RuntimeSandboxConfig struct {
-	Enabled  bool                 `toml:"enabled"  yaml:"enabled"`
-	Provider string               `toml:"provider" yaml:"provider"`
+	Enabled  bool                   `toml:"enabled"  yaml:"enabled"`
+	Provider string                 `toml:"provider" yaml:"provider"`
 	GC       RuntimeSandboxGCConfig `toml:"gc"     yaml:"gc"`
-	LiteBox  RuntimeLiteBoxConfig `toml:"litebox"  yaml:"litebox"`
-	Docker   RuntimeDockerConfig  `toml:"docker"   yaml:"docker"`
+	LiteBox  RuntimeLiteBoxConfig   `toml:"litebox"  yaml:"litebox"`
+	Docker   RuntimeDockerConfig    `toml:"docker"   yaml:"docker"`
 }
 
 // RuntimeSandboxGCConfig controls workspace resource reclamation.
@@ -384,6 +384,7 @@ type ConfigLayer struct {
 	Context   *ContextLayer   `toml:"context"   yaml:"context"`
 	Log       *LogLayer       `toml:"log"       yaml:"log"`
 	Audit     *AuditLayer     `toml:"audit"     yaml:"audit"`
+	LLMFilter *LLMFilterLayer `toml:"llm_filter" yaml:"llm_filter"`
 	Runtime   *RuntimeLayer   `toml:"runtime"   yaml:"runtime"`
 }
 
@@ -401,7 +402,14 @@ type AuditOTLPLayer struct {
 	Headers  *map[string]string `toml:"headers" yaml:"headers"`
 }
 
+type LLMFilterLayer struct {
+	Enabled  *bool   `toml:"enabled" yaml:"enabled"`
+	Provider *string `toml:"provider" yaml:"provider"`
+	Model    *string `toml:"model" yaml:"model"`
+}
+
 type RuntimeLayer struct {
+	MockExecutor   *bool                       `toml:"mock_executor"    yaml:"mock_executor"`
 	Collector      *RuntimeCollectorLayer      `toml:"collector"       yaml:"collector"`
 	LLM            *RuntimeLLMLayer            `toml:"llm"             yaml:"llm"`
 	Sandbox        *RuntimeSandboxLayer        `toml:"sandbox"         yaml:"sandbox"`
@@ -411,6 +419,13 @@ type RuntimeLayer struct {
 	SessionManager *RuntimeSessionManagerLayer `toml:"session_manager" yaml:"session_manager"`
 	ExecutionProbe *RuntimeExecutionProbeLayer `toml:"execution_probe" yaml:"execution_probe"`
 	Cron           *RuntimeCronLayer           `toml:"cron"            yaml:"cron"`
+	Inspection     *RuntimeInspectionLayer     `toml:"inspection"      yaml:"inspection"`
+}
+
+type RuntimeInspectionLayer struct {
+	Enabled   *bool     `toml:"enabled" yaml:"enabled"`
+	Interval  *Duration `toml:"interval" yaml:"interval"`
+	LookbackH *int      `toml:"lookback_hours" yaml:"lookback_hours"`
 }
 
 type RuntimeSessionManagerLayer struct {
@@ -441,10 +456,18 @@ type RuntimeNATSLayer struct {
 }
 
 type RuntimeSandboxLayer struct {
-	Enabled  *bool                `toml:"enabled"  yaml:"enabled"`
-	Provider *string              `toml:"provider" yaml:"provider"`
-	LiteBox  *RuntimeLiteBoxLayer `toml:"litebox"  yaml:"litebox"`
-	Docker   *RuntimeDockerLayer  `toml:"docker"   yaml:"docker"`
+	Enabled  *bool                  `toml:"enabled"  yaml:"enabled"`
+	Provider *string                `toml:"provider" yaml:"provider"`
+	GC       *RuntimeSandboxGCLayer `toml:"gc"       yaml:"gc"`
+	LiteBox  *RuntimeLiteBoxLayer   `toml:"litebox"  yaml:"litebox"`
+	Docker   *RuntimeDockerLayer    `toml:"docker"   yaml:"docker"`
+}
+
+type RuntimeSandboxGCLayer struct {
+	ArchiveCleanup *bool     `toml:"archive_cleanup" yaml:"archive_cleanup"`
+	StartupCleanup *bool     `toml:"startup_cleanup" yaml:"startup_cleanup"`
+	Interval       *Duration `toml:"interval" yaml:"interval"`
+	RepoMaxAge     *Duration `toml:"repo_max_age" yaml:"repo_max_age"`
 }
 
 type RuntimeLiteBoxLayer struct {

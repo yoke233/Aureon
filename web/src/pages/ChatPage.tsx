@@ -285,11 +285,13 @@ export function ChatPage() {
       }
       // Show draft message optimistically
       if (state.pendingMessage) {
+        const now = new Date();
         setDraftMessages([{
           id: "draft-home-msg",
           role: "user" as const,
           content: state.pendingMessage,
-          timestamp: new Date().toISOString(),
+          time: now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+          at: now.toISOString(),
         }]);
       }
       // Clear navigation state to prevent re-triggering on remount

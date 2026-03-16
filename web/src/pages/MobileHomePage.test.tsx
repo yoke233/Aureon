@@ -130,8 +130,8 @@ describe("MobileHomePage", () => {
 
     renderPage();
 
-    const selectors = await screen.findAllByRole("combobox");
-    fireEvent.change(selectors[0], { target: { value: "2" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Alpha" }));
+    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
 
     expect(setSelectedProjectId).toHaveBeenCalledWith(2);
 
@@ -165,6 +165,20 @@ describe("MobileHomePage", () => {
       mime_type: "text/markdown",
       data: "aGk=",
     });
-    expect(mockNavigate).toHaveBeenCalledWith("/chat");
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/chat",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          pendingMessage: "请整理这次发布计划",
+          pendingDraftInfo: expect.objectContaining({
+            projectId: 2,
+            projectName: "Beta",
+            profileId: "lead-1",
+            driverId: "codex-cli",
+          }),
+          pendingRequestId: expect.any(String),
+        }),
+      }),
+    );
   });
 });

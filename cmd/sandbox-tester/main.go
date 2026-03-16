@@ -48,7 +48,7 @@ func run(args []string) error {
 }
 
 func printUsage() {
-	fmt.Println(`sandbox-tester - sandbox / ACP smoke tool
+	fmt.Print(`sandbox-tester - sandbox / ACP smoke tool
 
 Usage:
   go run ./cmd/sandbox-tester env  [flags]

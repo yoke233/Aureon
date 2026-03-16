@@ -133,8 +133,8 @@ describe("ScheduledTasksPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "添加定时任务" }));
 
     fireEvent.change(screen.getByPlaceholderText("搜索工作项标题或编号"), { target: { value: "汇总" } });
-    const comboBoxes = screen.getAllByRole("combobox");
-    fireEvent.change(comboBoxes[comboBoxes.length - 1], { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "选择一个工作项" }));
+    fireEvent.click(screen.getByRole("button", { name: "#8 · 每日汇总模板" }));
     fireEvent.change(screen.getByPlaceholderText("例如: 0 */6 * * * (每6小时)"), { target: { value: "0 2 * * *" } });
 
     fireEvent.click(screen.getByRole("button", { name: "保存并启用" }));

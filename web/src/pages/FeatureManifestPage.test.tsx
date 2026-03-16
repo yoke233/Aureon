@@ -154,9 +154,8 @@ describe("FeatureManifestPage", () => {
 
     const authFailRow = screen.getByText("auth.login.fail").closest("tr");
     expect(authFailRow).toBeTruthy();
-    fireEvent.change(within(authFailRow as HTMLElement).getByRole("combobox"), {
-      target: { value: "pass" },
-    });
+    fireEvent.click(within(authFailRow as HTMLElement).getByRole("button", { name: "pending" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "pass" }).at(-1) as HTMLButtonElement);
 
     await waitFor(() => {
       expect(apiClient.updateManifestEntryStatus).toHaveBeenCalledWith(2, "pass");

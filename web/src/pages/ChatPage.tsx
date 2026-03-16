@@ -48,6 +48,10 @@ const FEED_PAGE_SIZE = 100;
 const CRYSTALLIZE_SUMMARY_MESSAGE_LIMIT = 6;
 const CRYSTALLIZE_SUMMARY_MAX_CHARS = 220;
 
+function isSessionAlreadyRunningError(message: string | null | undefined): boolean {
+  return (message ?? "").toLowerCase().includes("session is already running");
+}
+
 function summarizeChatMessages(messages: ChatMessageView[]): string {
   return messages
     .filter((message) => message.content.trim().length > 0)
@@ -115,6 +119,7 @@ export function ChatPage() {
   const pendingChunkBuffersRef = useRef<Record<string, string>>({});
   const chunkFlushFrameRef = useRef<number | null>(null);
   const pendingRequestIdRef = useRef<string | null>(null);
+  const pendingSendDraftRef = useRef<{ messageInput: string; pendingFiles: File[] } | null>(null);
   const activeSessionRef = useRef<string | null>(null);
   const syntheticEventIdRef = useRef(-1);
   const pendingDraftInfoRef = useRef<{
@@ -569,6 +574,7 @@ export function ChatPage() {
           setSessions((current) => touchSessionList(current, sessionId, "alive", nowISO));
           setSubmitting(false);
           pendingRequestIdRef.current = null;
+          pendingSendDraftRef.current = null;
           return;
         }
 
@@ -612,6 +618,7 @@ export function ChatPage() {
         }
         pendingRequestIdRef.current = null;
         setSubmitting(false);
+        pendingSendDraftRef.current = null;
 
         // Transfer draft messages to the new session before clearing
         setDraftMessages((draftCurrent) => {
@@ -668,7 +675,13 @@ export function ChatPage() {
         }
         pendingRequestIdRef.current = null;
         setSubmitting(false);
-        setError(payload.error?.trim() || t("chat.sendFailed"));
+        const errorMessage = payload.error?.trim() || t("chat.sendFailed");
+        if (isSessionAlreadyRunningError(errorMessage) && pendingSendDraftRef.current) {
+          setMessageInput(pendingSendDraftRef.current.messageInput);
+          setPendingFiles(pendingSendDraftRef.current.pendingFiles);
+        }
+        pendingSendDraftRef.current = null;
+        setError(errorMessage);
         const sessionId = payload.session_id?.trim();
         if (sessionId) {
           setSessions((current) => touchSessionList(current, sessionId, "closed", new Date().toISOString()));
@@ -840,7 +853,7 @@ export function ChatPage() {
 
   const sendMessage = async () => {
     const content = messageInput.trim();
-    if ((!content && pendingFiles.length === 0) || currentSession?.status === "running") {
+    if (!content && pendingFiles.length === 0) {
       return;
     }
 
@@ -871,6 +884,10 @@ export function ChatPage() {
       ? `\n${t("chat.attachmentLabel", { names: attachments.map((a) => a.name).join(", ") })}`
       : "");
     appendMessage(workingSessionId, "user", displayContent);
+    pendingSendDraftRef.current = {
+      messageInput,
+      pendingFiles,
+    };
     setMessageInput("");
     setPendingFiles([]);
     setSubmitting(true);
@@ -903,7 +920,13 @@ export function ChatPage() {
       });
     } catch (sendError) {
       pendingRequestIdRef.current = null;
-      setError(getErrorMessage(sendError));
+      const errorMessage = getErrorMessage(sendError);
+      if (isSessionAlreadyRunningError(errorMessage) && pendingSendDraftRef.current) {
+        setMessageInput(pendingSendDraftRef.current.messageInput);
+        setPendingFiles(pendingSendDraftRef.current.pendingFiles);
+      }
+      pendingSendDraftRef.current = null;
+      setError(errorMessage);
       if (workingSessionId) {
         setSessions((current) => touchSessionList(current, workingSessionId, "closed", new Date().toISOString()));
       }

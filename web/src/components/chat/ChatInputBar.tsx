@@ -60,7 +60,7 @@ export function ChatInputBar(props: ChatInputBarProps) {
   } = props;
   const { t } = useTranslation();
 
-  const isDisabled = submitting || currentSession?.status === "running" || (!currentSession && !draftSessionReady);
+  const isDisabled = submitting || (!currentSession && !draftSessionReady);
   const filteredCommands = availableCommands.filter(
     (cmd) => !commandFilter || cmd.name.toLowerCase().includes(commandFilter.toLowerCase()),
   );

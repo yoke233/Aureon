@@ -125,4 +125,31 @@ describe("ChatInputBar", () => {
     expect(input.disabled).toBe(true);
     expect((screen.getByTitle("上传文件或图片") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("running 会话下仍允许输入和发送", () => {
+    renderBar({
+      currentSession: {
+        session_id: "session-1",
+        title: "发布流程",
+        project_name: "Alpha",
+        status: "running",
+        branch: "feature/release",
+        message_count: 4,
+        updated_at: "2026-03-14T00:00:00Z",
+        created_at: "2026-03-14T00:00:00Z",
+        project_id: 1,
+        profile_id: "lead-1",
+        profile_name: "Lead",
+        driver_id: "codex-cli",
+      },
+      showCommandPalette: false,
+      pendingFiles: [],
+      modes: null,
+      configOptions: [],
+    });
+
+    expect((screen.getByRole("textbox") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByTitle("上传文件或图片") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getAllByRole("button")[1] as HTMLButtonElement).disabled).toBe(false);
+  });
 });

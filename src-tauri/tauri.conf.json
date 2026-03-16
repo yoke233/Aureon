@@ -24,7 +24,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": ["nsis"],
     "externalBin": ["binaries/ai-flow"]
   }
 }

@@ -1209,7 +1209,10 @@ export function ChatPage() {
           onCopyMessage={(id, content) => void handleCopyMessage(id, content)}
           onCreateWorkItem={handleCreateWorkItem}
           onActivityGroupToggle={(id) =>
-            setCollapsedActivityGroups((prev) => ({ ...prev, [id]: !(collapsedActivityGroups[id] !== false) }))
+            setCollapsedActivityGroups((prev) => {
+              const currentlyCollapsed = prev[id] === true;
+              return { ...prev, [id]: !currentlyCollapsed };
+            })
           }
         />
 

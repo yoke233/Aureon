@@ -60,6 +60,7 @@ type LeadChatService interface {
 	SetSessionMode(ctx context.Context, sessionID, modeID string) (*chatapp.SessionModeState, error)
 	ResolvePermission(permissionID, optionID string, cancel bool) error
 	CancelChat(sessionID string) error
+	RenameSession(sessionID string, title string) error
 	ArchiveSession(sessionID string, archived bool) error
 	CloseSession(sessionID string)
 	DeleteSession(sessionID string)

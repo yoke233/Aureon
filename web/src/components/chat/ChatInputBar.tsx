@@ -1,44 +1,14 @@
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Paperclip, Send, Square, X } from "lucide-react";
+import { ChevronDown, Paperclip, Send, Square } from "lucide-react";
 import type { ConfigOption, SessionModeState, SlashCommand } from "@/types/apiV2";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { SessionRecord } from "./chatTypes";
-
-function ImagePreviewBadge({ file, onRemove }: { file: File; onRemove: () => void }) {
-  const [hover, setHover] = useState(false);
-  const previewUrl = useMemo(() => URL.createObjectURL(file), [file]);
-  useEffect(() => () => URL.revokeObjectURL(previewUrl), [previewUrl]);
-
-  return (
-    <div
-      className="relative"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <Badge variant="secondary" className="gap-1 text-xs">
-        {file.name}
-        <button type="button" onClick={onRemove} className="ml-1 hover:text-red-500">
-          <X className="h-3 w-3" />
-        </button>
-      </Badge>
-      {hover && (
-        <div className="absolute bottom-full left-0 z-50 mb-2 rounded-lg border bg-popover p-1.5 shadow-lg">
-          <img
-            src={previewUrl}
-            alt={file.name}
-            className="max-h-48 max-w-64 rounded object-contain"
-          />
-          <div className="mt-1 text-center text-[10px] text-muted-foreground">{file.name}</div>
-        </div>
-      )}
-    </div>
-  );
-}
+import { FilePreviewList } from "./FilePreviewList";
 
 interface ChatInputBarProps {
   messageInput: string;
@@ -106,22 +76,7 @@ export function ChatInputBar(props: ChatInputBarProps) {
 
   return (
     <div className="space-y-2 border-t px-6 py-4">
-      {pendingFiles.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {pendingFiles.map((file, idx) =>
-            file.type.startsWith("image/") ? (
-              <ImagePreviewBadge key={idx} file={file} onRemove={() => onRemovePendingFile(idx)} />
-            ) : (
-              <Badge key={idx} variant="secondary" className="gap-1 text-xs">
-                {file.name}
-                <button type="button" onClick={() => onRemovePendingFile(idx)} className="ml-1 hover:text-red-500">
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            ),
-          )}
-        </div>
-      )}
+      <FilePreviewList files={pendingFiles} onRemove={onRemovePendingFile} />
       <div className="relative">
         {showCommandPalette && availableCommands.length > 0 && (
           <div className="absolute bottom-full left-0 z-50 mb-2 w-[580px] rounded-xl border bg-popover shadow-lg">

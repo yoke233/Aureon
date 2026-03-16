@@ -7,7 +7,6 @@ import {
   Filter,
   Send,
   Paperclip,
-  X,
   Loader2,
 } from "lucide-react";
 import type {
@@ -29,6 +28,7 @@ import {
   driverLabelForId,
 } from "@/components/chat/chatUtils";
 import type { RuntimeConfigReloadedPayload } from "@/types/ws";
+import { FilePreviewList } from "@/components/chat/FilePreviewList";
 
 /** Status indicator dot color */
 function sessionStatusColor(status: string): string {
@@ -253,8 +253,20 @@ export function MobileHomePage() {
         },
       });
 
-      // Navigate to chat page — the ack handler there will pick up the new session
-      navigate("/chat");
+      // Navigate to chat page — pass requestId so the ack handler can match it
+      navigate("/chat", {
+        state: {
+          pendingRequestId: requestId,
+          pendingDraftInfo: {
+            projectId: resolvedProjectId,
+            projectName: resolvedProjectName,
+            profileId: draftProfileId,
+            driverId: draftDriverId,
+            title: (content || t("chat.attachment")).slice(0, 24),
+          },
+          pendingMessage: content || t("chat.attachment"),
+        },
+      });
     } catch (sendError) {
       setError(getErrorMessage(sendError));
       setSubmitting(false);
@@ -342,22 +354,10 @@ export function MobileHomePage() {
               />
 
               {/* Pending files */}
-              {pendingFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {pendingFiles.map((file, idx) => (
-                    <Badge key={idx} variant="secondary" className="gap-1 text-xs">
-                      {file.name}
-                      <button
-                        type="button"
-                        onClick={() => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
-                        className="ml-1 hover:text-red-500"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
+              <FilePreviewList
+                files={pendingFiles}
+                onRemove={(idx) => setPendingFiles((prev) => prev.filter((_, i) => i !== idx))}
+              />
 
               {/* Bottom bar: selectors + send */}
               <div className="flex items-center justify-between gap-2">

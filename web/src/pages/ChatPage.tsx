@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import type {
   AgentDriver,
   AgentProfile,
@@ -70,6 +70,7 @@ function summarizeChatMessages(messages: ChatMessageView[]): string {
 export function ChatPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     apiClient,
     wsClient,
@@ -133,6 +134,7 @@ export function ChatPage() {
     title: string;
   } | null>(null);
   const prevScrollHeightRef = useRef<number>(0);
+  const justSwitchedSessionRef = useRef(false);
 
   // Feed pagination: show last FEED_PAGE_SIZE entries, expand on scroll-to-top
   const [feedVisibleCount, setFeedVisibleCount] = useState(FEED_PAGE_SIZE);
@@ -261,6 +263,39 @@ export function ChatPage() {
   useEffect(() => {
     void refreshSessions();
   }, [refreshSessions]);
+
+  // Pick up pending request from homepage navigation state
+  useEffect(() => {
+    const state = location.state as {
+      pendingRequestId?: string;
+      pendingDraftInfo?: {
+        projectId?: number;
+        projectName?: string;
+        profileId: string;
+        driverId: string;
+        title: string;
+      };
+      pendingMessage?: string;
+    } | null;
+    if (state?.pendingRequestId) {
+      pendingRequestIdRef.current = state.pendingRequestId;
+      setSubmitting(true);
+      if (state.pendingDraftInfo) {
+        pendingDraftInfoRef.current = state.pendingDraftInfo;
+      }
+      // Show draft message optimistically
+      if (state.pendingMessage) {
+        setDraftMessages([{
+          id: "draft-home-msg",
+          role: "user" as const,
+          content: state.pendingMessage,
+          timestamp: new Date().toISOString(),
+        }]);
+      }
+      // Clear navigation state to prevent re-triggering on remount
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
@@ -505,6 +540,11 @@ export function ChatPage() {
     return last ? (last.detail || last.title) : "";
   }, [submitting, currentActivities]);
 
+  const lastUserMessage = useMemo(() => {
+    const last = [...currentMessages].reverse().find((m) => m.role === "user");
+    return last?.content.replace(/\s+/g, " ").trim() ?? "";
+  }, [currentMessages]);
+
   const { chatFeedEntries, visibleFeedEntries, hasMoreFeedEntries } = useChatFeed(
     currentMessages, currentActivities, feedVisibleCount,
   );
@@ -512,6 +552,11 @@ export function ChatPage() {
   const visiblePendingPermissions = useMemo(
     () => pendingPermissions.filter((perm) => perm.session_id === activeSession),
     [pendingPermissions, activeSession],
+  );
+
+  const pendingPermissionSessionIds = useMemo(
+    () => new Set(pendingPermissions.map((perm) => perm.session_id)),
+    [pendingPermissions],
   );
 
   // Reset feed pagination when switching sessions
@@ -552,10 +597,17 @@ export function ChatPage() {
     if (sessionChanged) {
       // Switched session — jump instantly and reset scroll tracking
       isNearBottomRef.current = true;
+      justSwitchedSessionRef.current = true;
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
       return;
     }
     if (!isNearBottomRef.current) return;
+    // After switching session, the first data load should also jump instantly (no smooth animation)
+    if (justSwitchedSessionRef.current) {
+      justSwitchedSessionRef.current = false;
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      return;
+    }
     const isStreaming = currentMessages.at(-1)?.id.endsWith("stream-assistant");
     messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? "auto" : "smooth" });
   }, [activeSession, currentEvents, currentMessages, currentActivities, detailView]);
@@ -588,16 +640,28 @@ export function ChatPage() {
 
         if (updateType === "agent_message" && payload.content) {
           flushBufferedChunks();
+          const finalContent = payload.content.trim();
+          const finalTime = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
           setMessagesBySession((current) => {
             const existing = current[sessionId] ?? [];
             const last = existing.at(-1);
+            const finalMsg: ChatMessageView = {
+              id: `${sessionId}-assistant-${Date.now()}`,
+              role: "assistant",
+              content: finalContent,
+              time: finalTime,
+              at: nowISO,
+            };
             if (last && last.id === `${sessionId}-stream-assistant`) {
               return {
                 ...current,
-                [sessionId]: existing.slice(0, -1),
+                [sessionId]: [...existing.slice(0, -1), finalMsg],
               };
             }
-            return current;
+            return {
+              ...current,
+              [sessionId]: [...existing, finalMsg],
+            };
           });
           setSessions((current) => touchSessionList(current, sessionId, "running", nowISO));
         }
@@ -875,7 +939,53 @@ export function ChatPage() {
     );
   };
 
-  const handlePaste = (e: React.ClipboardEvent) => {
+  const compressImage = useCallback((file: File, maxWidth = 1536, quality = 0.8): Promise<File> => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith("image/") || file.type === "image/gif") {
+        resolve(file);
+        return;
+      }
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        if (img.width <= maxWidth && file.size <= 512 * 1024) {
+          resolve(file);
+          return;
+        }
+        const scale = Math.min(1, maxWidth / img.width);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              resolve(new File([blob], file.name, { type: "image/jpeg", lastModified: Date.now() }));
+            } else {
+              resolve(file);
+            }
+          },
+          "image/jpeg",
+          quality,
+        );
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(file);
+      };
+      img.src = url;
+    });
+  }, []);
+
+  const compressFiles = useCallback(async (files: File[]): Promise<File[]> => {
+    return Promise.all(files.map((f) => compressImage(f)));
+  }, [compressImage]);
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     const newFiles: File[] = [];
@@ -886,14 +996,16 @@ export function ChatPage() {
       }
     }
     if (newFiles.length > 0) {
-      setPendingFiles((prev) => [...prev, ...newFiles]);
+      const compressed = await compressFiles(newFiles);
+      setPendingFiles((prev) => [...prev, ...compressed]);
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      setPendingFiles((prev) => [...prev, ...Array.from(files)]);
+      const compressed = await compressFiles(Array.from(files));
+      setPendingFiles((prev) => [...prev, ...compressed]);
     }
     e.target.value = "";
   };
@@ -927,7 +1039,13 @@ export function ChatPage() {
     const attachments: { name: string; mime_type: string; data: string }[] = [];
     for (const file of pendingFiles) {
       const buf = await file.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const bytes = new Uint8Array(buf);
+      let binary = "";
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      const b64 = btoa(binary);
       attachments.push({ name: file.name, mime_type: file.type || "application/octet-stream", data: b64 });
     }
 
@@ -1025,6 +1143,20 @@ export function ChatPage() {
       );
     } catch (closeError) {
       setError(getErrorMessage(closeError));
+    }
+  };
+
+  const renameSession = async (title: string) => {
+    if (!currentSession) return;
+    try {
+      await apiClient.renameChatSession(currentSession.session_id, title);
+      setSessions((current) =>
+        current.map((s) =>
+          s.session_id === currentSession.session_id ? { ...s, title } : s,
+        ),
+      );
+    } catch (renameError) {
+      setError(getErrorMessage(renameError));
     }
   };
 
@@ -1195,6 +1327,7 @@ export function ChatPage() {
         creatingSession={submitting && !activeSession}
         messagesBySession={messagesBySession}
         collapsedGroups={collapsedGroups}
+        pendingPermissionSessionIds={pendingPermissionSessionIds}
         onSearchChange={setSessionSearch}
         onSessionSelect={setActiveSession}
         onGroupToggle={handleGroupToggle}
@@ -1213,10 +1346,12 @@ export function ChatPage() {
             usage={currentUsage}
             usagePercent={currentUsagePercent}
             detailView={detailView}
+            lastUserMessage={lastUserMessage}
             onDetailViewChange={setDetailView}
             showCrystallize={Boolean(currentSession)}
             onCrystallize={openCrystallizeDialog}
             onCloseSession={() => void closeSession()}
+            onRenameSession={(title) => void renameSession(title)}
           />
         )}
 

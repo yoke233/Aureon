@@ -529,6 +529,29 @@ func (l *LeadAgent) DeleteSession(sessionID string) {
 	}
 }
 
+// RenameSession updates the title of a persisted session.
+func (l *LeadAgent) RenameSession(sessionID string, title string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session_id is required")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return errors.New("title is required")
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	record, ok := l.catalog[sessionID]
+	if !ok {
+		return core.ErrNotFound
+	}
+	record.Title = title
+	record.UpdatedAt = time.Now().UTC()
+	return l.saveCatalogLocked()
+}
+
 // ArchiveSession toggles the archived flag on a session. Archived sessions
 // are hidden from the default listing but remain on disk.
 func (l *LeadAgent) ArchiveSession(sessionID string, archived bool) error {

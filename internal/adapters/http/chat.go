@@ -25,6 +25,7 @@ func registerChatRoutes(r chi.Router, h *Handler) {
 	handlers := &chatHandlers{handler: h, lead: h.lead}
 	r.Get("/chat/sessions", handlers.listSessions)
 	r.Post("/chat/sessions/{sessionID}/archive", handlers.archiveSession)
+	r.Patch("/chat/sessions/{sessionID}/rename", handlers.renameSession)
 	r.Post("/chat/sessions/{sessionID}/crystallize-thread", handlers.crystallizeThread)
 	r.Post("/chat", handlers.sendMessage)
 	r.Get("/chat/{sessionID}", handlers.getSession)
@@ -88,6 +89,41 @@ func (h *chatHandlers) archiveSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"archived":   body.Archived,
+	})
+}
+
+// PATCH /chat/sessions/{sessionID}/rename — update session title.
+func (h *chatHandlers) renameSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(chi.URLParam(r, "sessionID"))
+	if sessionID == "" {
+		writeError(w, http.StatusBadRequest, "session_id is required", "BAD_REQUEST")
+		return
+	}
+
+	var body struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body", "BAD_REQUEST")
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title is required", "BAD_REQUEST")
+		return
+	}
+
+	if err := h.lead.RenameSession(sessionID, title); err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error(), "RENAME_SESSION_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": sessionID,
+		"title":      title,
 	})
 }
 

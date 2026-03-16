@@ -1,6 +1,6 @@
 import type React from "react";
 import { useTranslation } from "react-i18next";
-import { GitBranch, Paperclip, Send, X } from "lucide-react";
+import { GitBranch, Paperclip, Send } from "lucide-react";
 import type { AgentDriver, AgentProfile } from "@/types/apiV2";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { LeadDriverOption } from "./chatTypes";
 import { EMPTY_PROFILE_VALUE } from "./chatTypes";
+import { FilePreviewList } from "./FilePreviewList";
 
 interface DraftSessionSetupProps {
   projects: Array<{ id: number; name: string }>;
@@ -147,18 +148,7 @@ export function DraftSessionSetup(props: DraftSessionSetupProps) {
               }
             }}
           />
-          {pendingFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {pendingFiles.map((file, idx) => (
-                <Badge key={idx} variant="secondary" className="gap-1 text-xs">
-                  {file.name}
-                  <button type="button" onClick={() => onRemovePendingFile(idx)} className="ml-1 hover:text-red-500">
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-          )}
+          <FilePreviewList files={pendingFiles} onRemove={onRemovePendingFile} />
           <div className="flex items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="text-[10px]">

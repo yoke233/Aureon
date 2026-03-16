@@ -15,18 +15,31 @@ export function useChatFeed(
     for (const msg of currentMessages) {
       items.push({ kind: "message", data: msg });
     }
+
+    // Build a set of existing assistant message contents for dedup
+    const existingContents = new Set(
+      currentMessages
+        .filter((m) => m.role === "assistant")
+        .map((m) => m.content.trim()),
+    );
+
     for (const act of currentActivities) {
       if (act.type === "agent_thought") {
         items.push({ kind: "thought", data: act });
       } else if (act.type === "tool_call") {
         items.push({ kind: "tool_call", data: act });
       } else if (act.type === "agent_message") {
+        const content = (act.detail || act.title).trim();
+        // Skip if an identical assistant message already exists from the messages API
+        if (existingContents.has(content)) {
+          continue;
+        }
         items.push({
           kind: "message",
           data: {
             id: act.id,
             role: "assistant",
-            content: act.detail || act.title,
+            content,
             time: act.time,
             at: act.at,
           },

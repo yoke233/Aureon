@@ -1,6 +1,6 @@
 import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Archive, ChevronDown, ChevronRight, GitMerge, Loader2, Plus, Search } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, GitMerge, Loader2, Plus, Search, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,11 +13,12 @@ interface SessionItemProps {
   isActive: boolean;
   preview: string;
   turnCount: number;
+  hasPermission: boolean;
   onSelect: (sessionId: string) => void;
   onArchive?: (sessionId: string) => void;
 }
 
-const SessionItem = memo(function SessionItem({ session, isActive, preview, turnCount, onSelect, onArchive }: SessionItemProps) {
+const SessionItem = memo(function SessionItem({ session, isActive, preview, turnCount, hasPermission, onSelect, onArchive }: SessionItemProps) {
   const { t } = useTranslation();
   const canArchive = onArchive && session.status !== "running";
   return (
@@ -48,7 +49,7 @@ const SessionItem = memo(function SessionItem({ session, isActive, preview, turn
               session.status === "running"
                 ? "bg-blue-50 text-blue-500"
                 : session.status === "alive"
-                  ? "bg-amber-50 text-amber-500"
+                  ? "bg-emerald-50 text-emerald-600"
                   : "bg-muted text-muted-foreground",
             )}
           >
@@ -69,6 +70,12 @@ const SessionItem = memo(function SessionItem({ session, isActive, preview, turn
             <span className="inline-flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-px text-[10px] font-medium text-purple-600">
               <GitMerge className="h-3 w-3" />
               {t("chat.merged", { defaultValue: "已合并" })}
+            </span>
+          )}
+          {hasPermission && (
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold text-amber-700 animate-pulse">
+              <ShieldAlert className="h-3 w-3" />
+              {t("chat.needsPermission", { defaultValue: "待授权" })}
             </span>
           )}
         </div>
@@ -98,6 +105,7 @@ interface ChatSessionSidebarProps {
   creatingSession: boolean;
   messagesBySession: Record<string, ChatMessageView[]>;
   collapsedGroups: Record<string, boolean>;
+  pendingPermissionSessionIds: ReadonlySet<string>;
   onSearchChange: (value: string) => void;
   onSessionSelect: (sessionId: string) => void;
   onGroupToggle: (key: string) => void;
@@ -114,6 +122,7 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
     creatingSession,
     messagesBySession,
     collapsedGroups,
+    pendingPermissionSessionIds,
     onSearchChange,
     onSessionSelect,
     onGroupToggle,
@@ -195,6 +204,7 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
                   isActive={activeSession === session.session_id}
                   preview={info?.preview || t("chat.noMessages")}
                   turnCount={info?.turnCount ?? 0}
+                  hasPermission={pendingPermissionSessionIds.has(session.session_id)}
                   onSelect={onSessionSelect}
                   onArchive={onArchiveSession}
                 />

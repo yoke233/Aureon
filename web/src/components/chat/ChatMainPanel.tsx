@@ -141,10 +141,11 @@ export function ChatMainPanel({
         ) : (
           <div className="mx-auto w-full max-w-[1200px] space-y-1">
             {hasMoreFeedEntries && (
-              <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
+              <div className="flex items-center justify-center gap-1.5 py-3 text-xs text-muted-foreground">
+                {loadingMore && <Loader2 className="h-3 w-3 animate-spin" />}
                 {loadingMore
                   ? t("chat.loadingMore", { defaultValue: "加载中..." })
-                  : t("chat.scrollUpForMore", { defaultValue: "向上滚动加载更早消息" })}
+                  : t("chat.scrollUpForMore", { defaultValue: "↑ 向上滚动加载更早消息" })}
               </div>
             )}
             <MessageFeedView

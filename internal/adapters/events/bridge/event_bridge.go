@@ -52,15 +52,25 @@ func (b *EventBridge) SetSessionID(sessionID string) {
 func (b *EventBridge) HandleSessionUpdate(ctx context.Context, update acpclient.SessionUpdate) error {
 	b.lastActivity.Store(time.Now().UnixNano())
 
+	// Phase 1: flush the opposite pending buffer to avoid interleaving.
+	// For final "agent_message" / "agent_thought" events, discard (reset) their
+	// own pending buffer because the update itself carries the authoritative content.
 	switch update.Type {
 	case "agent_thought_chunk":
 		b.flushMessage(ctx)
 	case "agent_message_chunk":
 		b.flushThought(ctx)
+	case "agent_message":
+		b.flushThought(ctx)
+		b.resetPendingMessage()
+	case "agent_thought":
+		b.flushMessage(ctx)
+		b.resetPendingThought()
 	default:
 		b.FlushPending(ctx)
 	}
 
+	// Phase 2: publish the current update.
 	switch update.Type {
 	case "agent_thought_chunk":
 		b.mu.Lock()
@@ -96,6 +106,18 @@ func (b *EventBridge) FlushPending(ctx context.Context) {
 
 func (b *EventBridge) PublishData(ctx context.Context, data map[string]any) {
 	b.publish(ctx, data)
+}
+
+func (b *EventBridge) resetPendingMessage() {
+	b.mu.Lock()
+	b.pendingMessage.Reset()
+	b.mu.Unlock()
+}
+
+func (b *EventBridge) resetPendingThought() {
+	b.mu.Lock()
+	b.pendingThought.Reset()
+	b.mu.Unlock()
 }
 
 func (b *EventBridge) flushThought(ctx context.Context) {

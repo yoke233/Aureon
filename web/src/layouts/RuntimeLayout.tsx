@@ -5,12 +5,14 @@ import {
   Bot,
   Sparkles,
   FileStack,
+  Shield,
 } from "lucide-react";
 
 const tabs = [
   { to: "/runtime/agents", icon: Bot, labelKey: "nav.agents" },
   { to: "/runtime/skills", icon: Sparkles, labelKey: "nav.skills" },
   { to: "/runtime/templates", icon: FileStack, labelKey: "nav.templates" },
+  { to: "/runtime/sandbox", icon: Shield, labelKey: "nav.sandbox" },
 ];
 
 export function RuntimeLayout() {

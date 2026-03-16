@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Brain,
   Check,
@@ -156,7 +158,7 @@ export function MessageFeedView(props: MessageFeedViewProps) {
           const displayItems = isExpanded ? entry.items : summaryItems;
 
           return (
-            <div key={entry.id} className="rounded border border-amber-200/70 bg-amber-50/50 px-2 py-1 shadow-sm shadow-amber-100/40">
+            <div key={entry.id} className="rounded border border-amber-200/40 bg-amber-50/25 px-2 py-1">
               <button
                 type="button"
                 className="flex w-full items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
@@ -248,10 +250,16 @@ export function MessageFeedView(props: MessageFeedViewProps) {
               )}
             </div>
             <div className={cn(
-              "mt-0.5 whitespace-pre-wrap text-sm leading-relaxed",
-              isUser ? "border-l-2 border-blue-300 pl-3 text-foreground" : "border-l-2 border-emerald-200 pl-3 text-foreground/90",
+              "mt-0.5 text-sm leading-relaxed",
+              isUser
+                ? "whitespace-pre-wrap border-l-2 border-blue-300 pl-3 text-foreground"
+                : "prose prose-sm prose-slate max-w-none border-l-2 border-emerald-200 pl-3 text-foreground/90 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-pre:my-2 prose-pre:rounded-md prose-pre:bg-slate-900 prose-pre:text-slate-50 prose-pre:overflow-x-auto prose-code:rounded prose-code:text-[13px] prose-code:before:content-none prose-code:after:content-none [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_pre>code]:bg-transparent [&_pre>code]:p-0 prose-hr:my-4 prose-table:border prose-table:border-border prose-th:border prose-th:border-border prose-th:px-3 prose-th:py-1.5 prose-th:bg-muted/50 prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-1.5",
             )}>
-              {message.content}
+              {isUser ? message.content : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+              )}
               {message.attachments && message.attachments.length > 0 && (
                 <AttachmentImagePreviews attachments={message.attachments} />
               )}
@@ -260,10 +268,15 @@ export function MessageFeedView(props: MessageFeedViewProps) {
         );
       })}
       {(submitting || sessionRunning) && (
-        <div className="flex items-center gap-1.5 rounded border border-emerald-200/70 bg-emerald-50/40 px-2.5 py-1 text-xs text-emerald-700">
-          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-          <span className="min-w-0 truncate">
+        <div className="flex items-center gap-3 rounded-lg border border-emerald-300/60 bg-gradient-to-r from-emerald-50/80 to-teal-50/60 px-4 py-2.5 shadow-sm shadow-emerald-100/50">
+          <Loader2 className="h-4 w-4 animate-spin shrink-0 text-emerald-600" />
+          <span className="min-w-0 truncate text-sm font-medium text-emerald-700">
             {lastActivityText ? compactText(lastActivityText, 120) : `${t("chat.thinking")}...`}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 animate-dot-pulse rounded-full bg-emerald-500 [animation-delay:0ms]" />
+            <span className="h-2 w-2 animate-dot-pulse rounded-full bg-emerald-400 [animation-delay:200ms]" />
+            <span className="h-2 w-2 animate-dot-pulse rounded-full bg-emerald-300 [animation-delay:400ms]" />
           </span>
         </div>
       )}

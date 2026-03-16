@@ -245,6 +245,7 @@ export interface ApiClient {
   cancelChat(sessionId: string): Promise<{ session_id: string; status: string }>;
   closeChat(sessionId: string): Promise<{ session_id: string; status: string }>;
   archiveChatSession(sessionId: string, archived: boolean): Promise<{ session_id: string; archived: boolean }>;
+  renameChatSession(sessionId: string, title: string): Promise<{ session_id: string; title: string }>;
   getChatStatus(sessionId: string): Promise<ChatStatusResponse>;
 
   listWorkItems(params?: {
@@ -846,6 +847,12 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
         path: `/chat/sessions/${encodeURIComponent(sessionId)}/archive`,
         method: "POST",
         body: { archived },
+      }),
+    renameChatSession: (sessionId, title) =>
+      request<{ session_id: string; title: string }>({
+        path: `/chat/sessions/${encodeURIComponent(sessionId)}/rename`,
+        method: "PATCH",
+        body: { title },
       }),
     getChatStatus: (sessionId) =>
       request<ChatStatusResponse>({

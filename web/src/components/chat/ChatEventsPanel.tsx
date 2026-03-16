@@ -31,9 +31,25 @@ export function ChatEventsPanel({ events }: ChatEventsPanelProps) {
 
   const filteredEventItems = useMemo(
     () =>
-      sortedEventItems.filter(
-        (item) => EVENT_LEVEL_ORDER[computeEventLevel(item.rawType)] >= EVENT_LEVEL_ORDER[minEventLevel],
-      ),
+      sortedEventItems.filter((item, index) => {
+        if (EVENT_LEVEL_ORDER[computeEventLevel(item.rawType)] < EVENT_LEVEL_ORDER[minEventLevel]) {
+          return false;
+        }
+        // Hide "done" event when its summary duplicates the preceding "agent_message"
+        if (item.rawType === "done" && item.summary) {
+          for (let i = index - 1; i >= 0; i--) {
+            const prev = sortedEventItems[i];
+            if (prev.rawType === "agent_message" && prev.summary === item.summary) {
+              return false;
+            }
+            // Only look back through non-content events (usage_update, etc.)
+            if (prev.rawType === "agent_message" || prev.rawType === "agent_message_chunk") {
+              break;
+            }
+          }
+        }
+        return true;
+      }),
     [sortedEventItems, minEventLevel],
   );
 

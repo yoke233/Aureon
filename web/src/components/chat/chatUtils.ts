@@ -89,7 +89,7 @@ export const badgeVariantForStatus = (status?: string): "success" | "warning" | 
     case "running":
       return "success";
     case "alive":
-      return "warning";
+      return "success";
     default:
       return "secondary";
   }

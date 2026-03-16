@@ -13,7 +13,7 @@ import (
 	"github.com/yoke233/ai-workflow/internal/core"
 )
 
-const defaultPermissionTimeout = 60 * time.Second
+const defaultPermissionTimeout = 5 * time.Minute
 
 // leadChatHandler wraps ACPHandler and intercepts RequestPermission so it can
 // be forwarded to the frontend for interactive approval.

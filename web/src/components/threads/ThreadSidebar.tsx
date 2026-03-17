@@ -110,6 +110,8 @@ export interface ThreadSidebarProps {
   participants: ThreadParticipant[];
 
   // Tasks: task groups
+  threadTaskGroupsEnabled: boolean;
+  onToggleThreadTaskGroups: () => void;
   taskGroups: ThreadTaskGroup[];
   taskGroupsLoading: boolean;
   taskGroupStatusTone: (status: string) => string;
@@ -172,7 +174,9 @@ export function ThreadSidebar(props: ThreadSidebarProps) {
 
   const memberCount =
     props.agentSessionsWithProfileID.length + props.participants.length;
-  const taskCount = props.taskGroups.length + props.workItemLinks.length;
+  const taskCount =
+    (props.threadTaskGroupsEnabled ? props.taskGroups.length : 0) +
+    props.workItemLinks.length;
 
   return (
     <div className="flex h-full flex-col">
@@ -437,6 +441,8 @@ function readIssueSourceType(issue: Issue | undefined): string | null {
 }
 
 function TasksSection({
+  threadTaskGroupsEnabled,
+  onToggleThreadTaskGroups,
   taskGroups,
   taskGroupsLoading,
   taskGroupStatusTone,
@@ -469,12 +475,29 @@ function TasksSection({
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
             Task Groups
-            {taskGroupsLoading && (
+            {threadTaskGroupsEnabled && taskGroupsLoading && (
               <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />
             )}
           </span>
+          <Button
+            type="button"
+            variant={threadTaskGroupsEnabled ? "default" : "outline"}
+            size="sm"
+            className="h-6 px-2 text-[10px]"
+            onClick={onToggleThreadTaskGroups}
+          >
+            {threadTaskGroupsEnabled
+              ? t("threads.taskGroupsDisable", { defaultValue: "关闭" })
+              : t("threads.taskGroupsEnable", { defaultValue: "开启" })}
+          </Button>
         </div>
-        {taskGroups.length === 0 ? (
+        {!threadTaskGroupsEnabled ? (
+          <p className="mt-1 text-[11px] text-slate-400">
+            {t("threads.taskGroupsDisabledHint", {
+              defaultValue: "前端已关闭 Task Group 流程；开启后才会加载和展示。",
+            })}
+          </p>
+        ) : taskGroups.length === 0 ? (
           <p className="mt-1 text-[11px] text-slate-400">
             {t("threads.noTaskGroups", "No task groups yet")}
           </p>

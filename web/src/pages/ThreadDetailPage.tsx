@@ -36,34 +36,50 @@ import type { ThreadAckPayload, ThreadEventPayload } from "@/types/ws";
 
 /* ── helper functions (unchanged) ── */
 
-
 function deriveWorkItemTitle(thread: Thread): string {
   const title = thread.title.trim();
   return title.length > 80 ? `${title.slice(0, 77)}...` : title;
 }
 
-function readTargetAgentID(metadata: Record<string, unknown> | undefined): string | null {
+function readTargetAgentID(
+  metadata: Record<string, unknown> | undefined,
+): string | null {
   const value = metadata?.target_agent_id;
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
-function readAutoRoutedTo(metadata: Record<string, unknown> | undefined): string[] {
+function readAutoRoutedTo(
+  metadata: Record<string, unknown> | undefined,
+): string[] {
   const value = metadata?.auto_routed_to;
   if (!Array.isArray(value)) return [];
-  return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim());
+  return value
+    .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    .map((v) => v.trim());
 }
 
-function readTaskGroupID(metadata: Record<string, unknown> | undefined): number | null {
+function readTaskGroupID(
+  metadata: Record<string, unknown> | undefined,
+): number | null {
   const value = metadata?.task_group_id;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function readMetadataType(metadata: Record<string, unknown> | undefined): string | null {
+function readMetadataType(
+  metadata: Record<string, unknown> | undefined,
+): string | null {
   const value = metadata?.type;
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
-function parseMentionTarget(message: string, activeAgentProfileIDs: string[]): { targetAgentID: string | null; broadcast: boolean; error: string | null } {
+function parseMentionTarget(
+  message: string,
+  activeAgentProfileIDs: string[],
+): { targetAgentID: string | null; broadcast: boolean; error: string | null } {
   const trimmed = message.trim();
   const match = trimmed.match(/^@([A-Za-z0-9._:-]+)\s+(.+)$/s);
   if (!match) {
@@ -75,27 +91,38 @@ function parseMentionTarget(message: string, activeAgentProfileIDs: string[]): {
     return { targetAgentID: null, broadcast: true, error: null };
   }
   if (!activeAgentProfileIDs.includes(targetAgentID)) {
-    return { targetAgentID: null, broadcast: false, error: `未找到活跃 agent：${targetAgentID}` };
+    return {
+      targetAgentID: null,
+      broadcast: false,
+      error: `未找到活跃 agent：${targetAgentID}`,
+    };
   }
 
   return { targetAgentID, broadcast: false, error: null };
 }
 
-function readAgentRoutingMode(thread: Thread | null): "mention_only" | "broadcast" | "auto" {
+function readAgentRoutingMode(
+  thread: Thread | null,
+): "mention_only" | "broadcast" | "auto" {
   const value = thread?.metadata?.agent_routing_mode;
   if (value === "broadcast") return "broadcast";
   if (value === "auto") return "auto";
   return "mention_only";
 }
 
-function readMeetingMode(thread: Thread | null): "direct" | "concurrent" | "group_chat" {
+function readMeetingMode(
+  thread: Thread | null,
+): "direct" | "concurrent" | "group_chat" {
   const value = thread?.metadata?.meeting_mode;
   if (value === "concurrent") return "concurrent";
   if (value === "group_chat") return "group_chat";
   return "direct";
 }
 
-function detectMentionDraft(message: string, caretPosition: number | null): { start: number; end: number; query: string } | null {
+function detectMentionDraft(
+  message: string,
+  caretPosition: number | null,
+): { start: number; end: number; query: string } | null {
   if (caretPosition == null || caretPosition < 0) {
     return null;
   }
@@ -120,7 +147,11 @@ function detectMentionDraft(message: string, caretPosition: number | null): { st
   };
 }
 
-function replaceMentionDraft(message: string, draft: { start: number; end: number }, profileID: string): { nextMessage: string; caretPosition: number } {
+function replaceMentionDraft(
+  message: string,
+  draft: { start: number; end: number },
+  profileID: string,
+): { nextMessage: string; caretPosition: number } {
   const replacement = `@${profileID} `;
   const nextMessage = `${message.slice(0, draft.start)}${replacement}${message.slice(draft.end)}`;
   return {
@@ -129,14 +160,23 @@ function replaceMentionDraft(message: string, draft: { start: number; end: numbe
   };
 }
 
-function splitMessageMentions(content: string): Array<{ type: "text" | "mention"; value: string; profileID?: string }> {
-  const parts: Array<{ type: "text" | "mention"; value: string; profileID?: string }> = [];
+function splitMessageMentions(
+  content: string,
+): Array<{ type: "text" | "mention"; value: string; profileID?: string }> {
+  const parts: Array<{
+    type: "text" | "mention";
+    value: string;
+    profileID?: string;
+  }> = [];
   const mentionPattern = /@([A-Za-z0-9._:-]+)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null = mentionPattern.exec(content);
   while (match) {
     if (match.index > lastIndex) {
-      parts.push({ type: "text", value: content.slice(lastIndex, match.index) });
+      parts.push({
+        type: "text",
+        value: content.slice(lastIndex, match.index),
+      });
     }
     parts.push({ type: "mention", value: match[0], profileID: match[1] });
     lastIndex = match.index + match[0].length;
@@ -148,7 +188,10 @@ function splitMessageMentions(content: string): Array<{ type: "text" | "mention"
   return parts.length > 0 ? parts : [{ type: "text", value: content }];
 }
 
-function detectHashDraft(message: string, caretPosition: number | null): { start: number; end: number; query: string } | null {
+function detectHashDraft(
+  message: string,
+  caretPosition: number | null,
+): { start: number; end: number; query: string } | null {
   if (caretPosition == null || caretPosition < 0) return null;
   const left = message.slice(0, caretPosition);
   const leftMatch = left.match(/(^|\s)#([^\s#]*)$/);
@@ -162,7 +205,10 @@ function detectHashDraft(message: string, caretPosition: number | null): { start
   return { start, end, query: message.slice(start + 1, end) };
 }
 
-function readCommittedMentionTarget(message: string, activeAgentProfileIDs: string[]): string | null {
+function readCommittedMentionTarget(
+  message: string,
+  activeAgentProfileIDs: string[],
+): string | null {
   const trimmed = message.trimStart();
   const match = trimmed.match(/^@([A-Za-z0-9._:-]+)(?:\s|$)/);
   if (!match) {
@@ -174,11 +220,16 @@ function readCommittedMentionTarget(message: string, activeAgentProfileIDs: stri
 
 function agentStatusColor(status: string): string {
   switch (status) {
-    case "active": return "bg-emerald-500";
-    case "booting": return "bg-amber-500";
-    case "paused": return "bg-slate-400";
-    case "joining": return "bg-blue-400";
-    default: return "bg-rose-500";
+    case "active":
+      return "bg-emerald-500";
+    case "booting":
+      return "bg-amber-500";
+    case "paused":
+      return "bg-slate-400";
+    case "joining":
+      return "bg-blue-400";
+    default:
+      return "bg-rose-500";
   }
 }
 
@@ -198,7 +249,10 @@ interface InviteIntentMatch {
   matchedProfiles: AgentProfile[];
 }
 
-function detectInviteIntent(message: string, inviteableProfiles: AgentProfile[]): InviteIntentMatch | null {
+function detectInviteIntent(
+  message: string,
+  inviteableProfiles: AgentProfile[],
+): InviteIntentMatch | null {
   const trimmed = message.trim();
   if (!trimmed) return null;
 
@@ -213,14 +267,21 @@ function detectInviteIntent(message: string, inviteableProfiles: AgentProfile[])
     const matched = inviteableProfiles.filter((profile) => {
       const name = (profile.name ?? "").toLowerCase();
       const id = profile.id.toLowerCase();
-      const role = (typeof profile.role === "string" ? profile.role : "").toLowerCase();
+      const role = (
+        typeof profile.role === "string" ? profile.role : ""
+      ).toLowerCase();
       const caps = (profile.capabilities ?? []).map((c) => c.toLowerCase());
 
       // Check if query contains or is contained by any field
-      return name.includes(query) || query.includes(name)
-        || id.includes(query) || query.includes(id)
-        || role.includes(query) || query.includes(role)
-        || caps.some((c) => c.includes(query) || query.includes(c));
+      return (
+        name.includes(query) ||
+        query.includes(name) ||
+        id.includes(query) ||
+        query.includes(id) ||
+        role.includes(query) ||
+        query.includes(role) ||
+        caps.some((c) => c.includes(query) || query.includes(c))
+      );
     });
 
     if (matched.length > 0) {
@@ -244,7 +305,19 @@ function taskGroupStatusTone(status: string): string {
   }
 }
 
-type ThreadAgentSessionWithProfileID = ThreadAgentSession & { agent_profile_id: string };
+type ThreadAgentSessionWithProfileID = ThreadAgentSession & {
+  agent_profile_id: string;
+};
+
+const THREAD_TASK_GROUPS_STORAGE_KEY = "thread-task-groups-enabled";
+
+function readThreadTaskGroupsEnabled(): boolean {
+  try {
+    return localStorage.getItem(THREAD_TASK_GROUPS_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 export function ThreadDetailPage() {
   const { t } = useTranslation();
@@ -257,6 +330,8 @@ export function ThreadDetailPage() {
   const [participants, setParticipants] = useState<ThreadParticipant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [threadTaskGroupsEnabled, setThreadTaskGroupsEnabled] =
+    useState<boolean>(() => readThreadTaskGroupsEnabled());
   const [taskGroups, setTaskGroups] = useState<ThreadTaskGroup[]>([]);
   const [taskGroupsLoading, setTaskGroupsLoading] = useState(false);
   const [workItemLinks, setWorkItemLinks] = useState<ThreadWorkItemLink[]>([]);
@@ -271,23 +346,47 @@ export function ThreadDetailPage() {
   const [agentSessions, setAgentSessions] = useState<ThreadAgentSession[]>([]);
   const [attachments, setAttachments] = useState<ThreadAttachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
-  const [availableProfiles, setAvailableProfiles] = useState<AgentProfile[]>([]);
-  const [selectedInviteIDs, setSelectedInviteIDs] = useState<Set<string>>(new Set());
+  const [availableProfiles, setAvailableProfiles] = useState<AgentProfile[]>(
+    [],
+  );
+  const [selectedInviteIDs, setSelectedInviteIDs] = useState<Set<string>>(
+    new Set(),
+  );
   const [invitingAgent, setInvitingAgent] = useState(false);
   const [removingAgentID, setRemovingAgentID] = useState<number | null>(null);
   const [savingRoutingMode, setSavingRoutingMode] = useState(false);
   const [savingMeetingMode, setSavingMeetingMode] = useState(false);
-  const [mentionDraft, setMentionDraft] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [mentionDraft, setMentionDraft] = useState<{
+    start: number;
+    end: number;
+    query: string;
+  } | null>(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
-  const [hashDraft, setHashDraft] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [hashDraft, setHashDraft] = useState<{
+    start: number;
+    end: number;
+    query: string;
+  } | null>(null);
   const [selectedHashIndex, setSelectedHashIndex] = useState(0);
   const [fileCandidates, setFileCandidates] = useState<ThreadFileRef[]>([]);
-  const [selectedFileRefs, setSelectedFileRefs] = useState<MessageFileRef[]>([]);
-  const [highlightedAgentProfileID, setHighlightedAgentProfileID] = useState<string | null>(null);
-  const [hoveredMentionProfileID, setHoveredMentionProfileID] = useState<string | null>(null);
-  const [thinkingAgentIDs, setThinkingAgentIDs] = useState<Set<string>>(new Set());
-  const [invitePickerCandidates, setInvitePickerCandidates] = useState<AgentProfile[]>([]);
-  const [invitePickerSelected, setInvitePickerSelected] = useState<Set<string>>(new Set());
+  const [selectedFileRefs, setSelectedFileRefs] = useState<MessageFileRef[]>(
+    [],
+  );
+  const [highlightedAgentProfileID, setHighlightedAgentProfileID] = useState<
+    string | null
+  >(null);
+  const [hoveredMentionProfileID, setHoveredMentionProfileID] = useState<
+    string | null
+  >(null);
+  const [thinkingAgentIDs, setThinkingAgentIDs] = useState<Set<string>>(
+    new Set(),
+  );
+  const [invitePickerCandidates, setInvitePickerCandidates] = useState<
+    AgentProfile[]
+  >([]);
+  const [invitePickerSelected, setInvitePickerSelected] = useState<Set<string>>(
+    new Set(),
+  );
   const [invitePickerBusy, setInvitePickerBusy] = useState(false);
   const pendingThreadRequestIdRef = useRef<string | null>(null);
   const syntheticMessageIDRef = useRef(-1);
@@ -298,20 +397,41 @@ export function ThreadDetailPage() {
   const id = Number(threadId);
   const agentSessionsWithProfileID = agentSessions.filter(
     (session): session is ThreadAgentSessionWithProfileID =>
-      typeof session.agent_profile_id === "string" && session.agent_profile_id.trim().length > 0,
+      typeof session.agent_profile_id === "string" &&
+      session.agent_profile_id.trim().length > 0,
   );
-  const joinedAgentProfileIDs = new Set(agentSessionsWithProfileID.map((session) => session.agent_profile_id));
-  const inviteableProfiles = availableProfiles.filter((profile) => !joinedAgentProfileIDs.has(profile.id));
+  const joinedAgentProfileIDs = new Set(
+    agentSessionsWithProfileID.map((session) => session.agent_profile_id),
+  );
+  const inviteableProfiles = availableProfiles.filter(
+    (profile) => !joinedAgentProfileIDs.has(profile.id),
+  );
   const activeAgentProfileIDs = agentSessionsWithProfileID
-    .filter((session) => session.status === "active" || session.status === "booting")
+    .filter(
+      (session) => session.status === "active" || session.status === "booting",
+    )
     .map((session) => session.agent_profile_id);
   const agentRoutingMode = readAgentRoutingMode(thread);
   const meetingMode = readMeetingMode(thread);
-  const profileByID = new Map(availableProfiles.map((profile) => [profile.id, profile]));
-  const agentSessionByProfileID = new Map(agentSessionsWithProfileID.map((session) => [session.agent_profile_id, session]));
-  const committedMentionTargetID = readCommittedMentionTarget(newMessage, activeAgentProfileIDs);
-  const committedMentionProfile = committedMentionTargetID ? profileByID.get(committedMentionTargetID) : undefined;
-  const committedMentionSession = committedMentionTargetID ? agentSessionByProfileID.get(committedMentionTargetID) : undefined;
+  const profileByID = new Map(
+    availableProfiles.map((profile) => [profile.id, profile]),
+  );
+  const agentSessionByProfileID = new Map(
+    agentSessionsWithProfileID.map((session) => [
+      session.agent_profile_id,
+      session,
+    ]),
+  );
+  const committedMentionTargetID = readCommittedMentionTarget(
+    newMessage,
+    activeAgentProfileIDs,
+  );
+  const committedMentionProfile = committedMentionTargetID
+    ? profileByID.get(committedMentionTargetID)
+    : undefined;
+  const committedMentionSession = committedMentionTargetID
+    ? agentSessionByProfileID.get(committedMentionTargetID)
+    : undefined;
   const mentionCandidates = (() => {
     if (!mentionDraft) return [];
     const query = mentionDraft.query.trim().toLowerCase();
@@ -325,15 +445,21 @@ export function ThreadDetailPage() {
           status: session?.status ?? ("active" as string),
         };
       })
-      .filter((candidate) =>
-        query === ""
-        || candidate.id.toLowerCase().includes(query)
-        || candidate.label.toLowerCase().includes(query),
+      .filter(
+        (candidate) =>
+          query === "" ||
+          candidate.id.toLowerCase().includes(query) ||
+          candidate.label.toLowerCase().includes(query),
       );
     // Prepend @all option when there are multiple active agents.
-    const allEntry = { id: "all", label: "All agents (broadcast)", status: "active" as string };
-    const showAll = activeAgentProfileIDs.length > 1
-      && (query === "" || "all".includes(query));
+    const allEntry = {
+      id: "all",
+      label: "All agents (broadcast)",
+      status: "active" as string,
+    };
+    const showAll =
+      activeAgentProfileIDs.length > 1 &&
+      (query === "" || "all".includes(query));
     return (showAll ? [allEntry, ...agents] : agents).slice(0, 8);
   })();
   const selectedMentionCandidate = mentionCandidates[selectedMentionIndex];
@@ -351,24 +477,38 @@ export function ThreadDetailPage() {
   }, [messages.length]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(
+        THREAD_TASK_GROUPS_STORAGE_KEY,
+        String(threadTaskGroupsEnabled),
+      );
+    } catch {
+      // Ignore storage failures and fall back to in-memory state.
+    }
+  }, [threadTaskGroupsEnabled]);
+
+  useEffect(() => {
     if (!id || isNaN(id)) return;
     let cancelled = false;
 
     const load = async () => {
       setLoading(true);
-      setTaskGroupsLoading(true);
+      setTaskGroupsLoading(threadTaskGroupsEnabled);
       setError(null);
       try {
-        const [th, msgs, parts, links, tgItems, agents, profiles, atts] = await Promise.all([
-          apiClient.getThread(id),
-          apiClient.listThreadMessages(id, { limit: 100 }),
-          apiClient.listThreadParticipants(id),
-          apiClient.listWorkItemsByThread(id),
-          apiClient.listThreadTaskGroups(id),
-          apiClient.listThreadAgents(id),
-          apiClient.listProfiles(),
-          apiClient.listThreadAttachments(id),
-        ]);
+        const [th, msgs, parts, links, tgItems, agents, profiles, atts] =
+          await Promise.all([
+            apiClient.getThread(id),
+            apiClient.listThreadMessages(id, { limit: 100 }),
+            apiClient.listThreadParticipants(id),
+            apiClient.listWorkItemsByThread(id),
+            threadTaskGroupsEnabled
+              ? apiClient.listThreadTaskGroups(id)
+              : Promise.resolve([]),
+            apiClient.listThreadAgents(id),
+            apiClient.listProfiles(),
+            apiClient.listThreadAttachments(id),
+          ]);
         if (!cancelled) {
           setThread(th);
           setMessages(msgs);
@@ -383,7 +523,8 @@ export function ThreadDetailPage() {
             links.map((l) => apiClient.getWorkItem(l.work_item_id)),
           );
           issueResults.forEach((r, i) => {
-            if (r.status === "fulfilled") issueMap[links[i].work_item_id] = r.value;
+            if (r.status === "fulfilled")
+              issueMap[links[i].work_item_id] = r.value;
           });
           if (!cancelled) setLinkedIssues(issueMap);
         }
@@ -395,8 +536,10 @@ export function ThreadDetailPage() {
       }
     };
     void load();
-    return () => { cancelled = true; };
-  }, [apiClient, id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, id, threadTaskGroupsEnabled]);
 
   useEffect(() => {
     // Remove selections that are no longer inviteable (e.g. agent already joined)
@@ -422,30 +565,41 @@ export function ThreadDetailPage() {
       return;
     }
 
-    const appendRealtimeMessage = (payload: ThreadEventPayload, roleFallback: "human" | "agent") => {
-      const content = typeof payload.content === "string" && payload.content.trim().length > 0
-        ? payload.content
-        : typeof payload.message === "string"
-          ? payload.message
-          : "";
+    const appendRealtimeMessage = (
+      payload: ThreadEventPayload,
+      roleFallback: "human" | "agent",
+    ) => {
+      const content =
+        typeof payload.content === "string" && payload.content.trim().length > 0
+          ? payload.content
+          : typeof payload.message === "string"
+            ? payload.message
+            : "";
       if (!content.trim()) {
         return;
       }
 
-      const senderID = typeof payload.sender_id === "string" && payload.sender_id.trim().length > 0
-        ? payload.sender_id.trim()
-        : typeof payload.profile_id === "string" && payload.profile_id.trim().length > 0
-          ? payload.profile_id.trim()
+      const senderID =
+        typeof payload.sender_id === "string" &&
+        payload.sender_id.trim().length > 0
+          ? payload.sender_id.trim()
+          : typeof payload.profile_id === "string" &&
+              payload.profile_id.trim().length > 0
+            ? payload.profile_id.trim()
+            : roleFallback;
+      const role =
+        typeof payload.role === "string" && payload.role.trim().length > 0
+          ? payload.role.trim()
           : roleFallback;
-      const role = typeof payload.role === "string" && payload.role.trim().length > 0
-        ? payload.role.trim()
-        : roleFallback;
 
       const msgMetadata: Record<string, unknown> = {};
       if (payload.target_agent_id) {
         msgMetadata.target_agent_id = payload.target_agent_id;
       }
-      if (Array.isArray(payload.auto_routed_to) && payload.auto_routed_to.length > 0) {
+      if (
+        Array.isArray(payload.auto_routed_to) &&
+        payload.auto_routed_to.length > 0
+      ) {
         msgMetadata.auto_routed_to = payload.auto_routed_to;
       }
       if (payload.metadata && typeof payload.metadata === "object") {
@@ -460,7 +614,8 @@ export function ThreadDetailPage() {
           sender_id: senderID,
           role,
           content,
-          metadata: Object.keys(msgMetadata).length > 0 ? msgMetadata : undefined,
+          metadata:
+            Object.keys(msgMetadata).length > 0 ? msgMetadata : undefined,
           created_at: new Date().toISOString(),
         },
       ]);
@@ -476,6 +631,7 @@ export function ThreadDetailPage() {
     };
 
     const syncTaskGroupFromPayload = async (payload: ThreadEventPayload) => {
+      if (!threadTaskGroupsEnabled) return;
       if (payload.thread_id !== id) return;
       const groupId = payload.task_group_id;
       if (typeof groupId !== "number") return;
@@ -490,7 +646,9 @@ export function ThreadDetailPage() {
       }
     };
 
-    const sendThreadSubscription = (type: "subscribe_thread" | "unsubscribe_thread") => {
+    const sendThreadSubscription = (
+      type: "subscribe_thread" | "unsubscribe_thread",
+    ) => {
       try {
         wsClient.send({
           type,
@@ -501,86 +659,150 @@ export function ThreadDetailPage() {
       }
     };
 
-    const unsubscribeThreadMessage = wsClient.subscribe<ThreadEventPayload>("thread.message", (payload) => {
-      if (payload.thread_id !== id) return;
-      appendRealtimeMessage(payload, "human");
-    });
-    const unsubscribeThreadOutput = wsClient.subscribe<ThreadEventPayload>("thread.agent_output", (payload) => {
-      if (payload.thread_id !== id) return;
-      // Clear thinking state for this agent since it has responded.
-      const agentID = payload.profile_id?.trim() || payload.sender_id?.trim();
-      if (agentID) {
-        setThinkingAgentIDs((prev) => {
-          if (!prev.has(agentID)) return prev;
-          const next = new Set(prev);
-          next.delete(agentID);
-          return next;
-        });
-      }
-      appendRealtimeMessage(payload, "agent");
-    });
-    const unsubscribeThreadAck = wsClient.subscribe<ThreadAckPayload>("thread.ack", (payload) => {
-      if (payload.thread_id !== id) return;
-      if (pendingThreadRequestIdRef.current && payload.request_id && payload.request_id !== pendingThreadRequestIdRef.current) return;
+    const unsubscribeThreadMessage = wsClient.subscribe<ThreadEventPayload>(
+      "thread.message",
+      (payload) => {
+        if (payload.thread_id !== id) return;
+        appendRealtimeMessage(payload, "human");
+      },
+    );
+    const unsubscribeThreadOutput = wsClient.subscribe<ThreadEventPayload>(
+      "thread.agent_output",
+      (payload) => {
+        if (payload.thread_id !== id) return;
+        // Clear thinking state for this agent since it has responded.
+        const agentID = payload.profile_id?.trim() || payload.sender_id?.trim();
+        if (agentID) {
+          setThinkingAgentIDs((prev) => {
+            if (!prev.has(agentID)) return prev;
+            const next = new Set(prev);
+            next.delete(agentID);
+            return next;
+          });
+        }
+        appendRealtimeMessage(payload, "agent");
+      },
+    );
+    const unsubscribeThreadAck = wsClient.subscribe<ThreadAckPayload>(
+      "thread.ack",
+      (payload) => {
+        if (payload.thread_id !== id) return;
+        if (
+          pendingThreadRequestIdRef.current &&
+          payload.request_id &&
+          payload.request_id !== pendingThreadRequestIdRef.current
+        )
+          return;
+        pendingThreadRequestIdRef.current = null;
+        setSending(false);
+        clearMentionComposerState();
+      },
+    );
+    const unsubscribeThreadError = wsClient.subscribe<{
+      request_id?: string;
+      error?: string;
+    }>("thread.error", (payload) => {
+      if (
+        pendingThreadRequestIdRef.current &&
+        payload.request_id &&
+        payload.request_id !== pendingThreadRequestIdRef.current
+      )
+        return;
       pendingThreadRequestIdRef.current = null;
       setSending(false);
       clearMentionComposerState();
+      setError(
+        payload.error?.trim() ||
+          t("threads.sendFailed", "Thread message failed to send"),
+      );
     });
-    const unsubscribeThreadError = wsClient.subscribe<{ request_id?: string; error?: string }>("thread.error", (payload) => {
-      if (pendingThreadRequestIdRef.current && payload.request_id && payload.request_id !== pendingThreadRequestIdRef.current) return;
-      pendingThreadRequestIdRef.current = null;
-      setSending(false);
-      clearMentionComposerState();
-      setError(payload.error?.trim() || t("threads.sendFailed", "Thread message failed to send"));
-    });
-    const unsubscribeThreadAgentEvent = wsClient.subscribe<ThreadEventPayload>("thread.agent_joined", (payload) => {
-      if (payload.thread_id === id) void refreshAgentSessions();
-    });
-    const unsubscribeThreadAgentLeft = wsClient.subscribe<ThreadEventPayload>("thread.agent_left", (payload) => {
-      if (payload.thread_id === id) void refreshAgentSessions();
-    });
-    const unsubscribeThreadAgentBooted = wsClient.subscribe<ThreadEventPayload>("thread.agent_booted", (payload) => {
-      if (payload.thread_id === id) void refreshAgentSessions();
-    });
-    const unsubscribeThreadAgentFailed = wsClient.subscribe<ThreadEventPayload>("thread.agent_failed", (payload) => {
-      if (payload.thread_id !== id) return;
-      // Clear thinking state for failed agent.
-      const failedID = payload.profile_id?.trim();
-      if (failedID) {
-        setThinkingAgentIDs((prev) => {
-          if (!prev.has(failedID)) return prev;
-          const next = new Set(prev);
-          next.delete(failedID);
-          return next;
-        });
-      }
-      setError(payload.error?.trim() || t("threads.agentFailed", "An agent in this thread failed."));
-      void refreshAgentSessions();
-    });
-    const unsubscribeThreadAgentThinking = wsClient.subscribe<ThreadEventPayload>("thread.agent_thinking", (payload) => {
-      if (payload.thread_id !== id) return;
-      const thinkingID = payload.profile_id?.trim();
-      if (thinkingID) {
-        setThinkingAgentIDs((prev) => {
-          if (prev.has(thinkingID)) return prev;
-          const next = new Set(prev);
-          next.add(thinkingID);
-          return next;
-        });
-      }
-    });
-    const unsubscribeTaskGroupCreated = wsClient.subscribe<ThreadEventPayload>("thread.task_group.created", (payload) => {
-      void syncTaskGroupFromPayload(payload);
-    });
-    const unsubscribeTaskGroupCompleted = wsClient.subscribe<ThreadEventPayload>("thread.task_group.completed", (payload) => {
-      void syncTaskGroupFromPayload(payload);
-    });
-    const unsubscribeTaskStarted = wsClient.subscribe<ThreadEventPayload>("thread.task.started", (payload) => {
-      void syncTaskGroupFromPayload(payload);
-    });
-    const unsubscribeTaskCompleted = wsClient.subscribe<ThreadEventPayload>("thread.task.completed", (payload) => {
-      void syncTaskGroupFromPayload(payload);
-    });
+    const unsubscribeThreadAgentEvent = wsClient.subscribe<ThreadEventPayload>(
+      "thread.agent_joined",
+      (payload) => {
+        if (payload.thread_id === id) void refreshAgentSessions();
+      },
+    );
+    const unsubscribeThreadAgentLeft = wsClient.subscribe<ThreadEventPayload>(
+      "thread.agent_left",
+      (payload) => {
+        if (payload.thread_id === id) void refreshAgentSessions();
+      },
+    );
+    const unsubscribeThreadAgentBooted = wsClient.subscribe<ThreadEventPayload>(
+      "thread.agent_booted",
+      (payload) => {
+        if (payload.thread_id === id) void refreshAgentSessions();
+      },
+    );
+    const unsubscribeThreadAgentFailed = wsClient.subscribe<ThreadEventPayload>(
+      "thread.agent_failed",
+      (payload) => {
+        if (payload.thread_id !== id) return;
+        // Clear thinking state for failed agent.
+        const failedID = payload.profile_id?.trim();
+        if (failedID) {
+          setThinkingAgentIDs((prev) => {
+            if (!prev.has(failedID)) return prev;
+            const next = new Set(prev);
+            next.delete(failedID);
+            return next;
+          });
+        }
+        setError(
+          payload.error?.trim() ||
+            t("threads.agentFailed", "An agent in this thread failed."),
+        );
+        void refreshAgentSessions();
+      },
+    );
+    const unsubscribeThreadAgentThinking =
+      wsClient.subscribe<ThreadEventPayload>(
+        "thread.agent_thinking",
+        (payload) => {
+          if (payload.thread_id !== id) return;
+          const thinkingID = payload.profile_id?.trim();
+          if (thinkingID) {
+            setThinkingAgentIDs((prev) => {
+              if (prev.has(thinkingID)) return prev;
+              const next = new Set(prev);
+              next.add(thinkingID);
+              return next;
+            });
+          }
+        },
+      );
+    const unsubscribeTaskGroupCreated = threadTaskGroupsEnabled
+      ? wsClient.subscribe<ThreadEventPayload>(
+          "thread.task_group.created",
+          (payload) => {
+            void syncTaskGroupFromPayload(payload);
+          },
+        )
+      : () => {};
+    const unsubscribeTaskGroupCompleted = threadTaskGroupsEnabled
+      ? wsClient.subscribe<ThreadEventPayload>(
+          "thread.task_group.completed",
+          (payload) => {
+            void syncTaskGroupFromPayload(payload);
+          },
+        )
+      : () => {};
+    const unsubscribeTaskStarted = threadTaskGroupsEnabled
+      ? wsClient.subscribe<ThreadEventPayload>(
+          "thread.task.started",
+          (payload) => {
+            void syncTaskGroupFromPayload(payload);
+          },
+        )
+      : () => {};
+    const unsubscribeTaskCompleted = threadTaskGroupsEnabled
+      ? wsClient.subscribe<ThreadEventPayload>(
+          "thread.task.completed",
+          (payload) => {
+            void syncTaskGroupFromPayload(payload);
+          },
+        )
+      : () => {};
     const unsubscribeStatus = wsClient.onStatusChange((status) => {
       if (status === "open") sendThreadSubscription("subscribe_thread");
     });
@@ -610,7 +832,7 @@ export function ThreadDetailPage() {
         sendThreadSubscription("unsubscribe_thread");
       }
     };
-  }, [apiClient, id, t, wsClient]);
+  }, [apiClient, id, t, threadTaskGroupsEnabled, wsClient]);
 
   /* ── handlers (unchanged) ── */
 
@@ -623,7 +845,8 @@ export function ThreadDetailPage() {
     setHashDraft(nextHash);
     setSelectedHashIndex(0);
     if (nextHash && id) {
-      apiClient.searchThreadFiles(id, nextHash.query || undefined, "all", 8)
+      apiClient
+        .searchThreadFiles(id, nextHash.query || undefined, "all", 8)
         .then(setFileCandidates)
         .catch(() => setFileCandidates([]));
     } else if (!nextHash) {
@@ -631,14 +854,21 @@ export function ThreadDetailPage() {
     }
   };
 
-  const handleMessageInputChange = (value: string, caretPosition: number | null) => {
+  const handleMessageInputChange = (
+    value: string,
+    caretPosition: number | null,
+  ) => {
     setNewMessage(value);
     updateMentionDraft(value, caretPosition);
   };
 
   const applyMentionCandidate = (profileID: string) => {
     if (!mentionDraft) return;
-    const { nextMessage, caretPosition } = replaceMentionDraft(newMessage, mentionDraft, profileID);
+    const { nextMessage, caretPosition } = replaceMentionDraft(
+      newMessage,
+      mentionDraft,
+      profileID,
+    );
     setNewMessage(nextMessage);
     setMentionDraft(null);
     setSelectedMentionIndex(0);
@@ -659,7 +889,8 @@ export function ThreadDetailPage() {
   const applyHashCandidate = (file: ThreadFileRef) => {
     if (!hashDraft) return;
     // Remove the #query text from input (don't insert #filename — show chip instead).
-    const nextMessage = newMessage.slice(0, hashDraft.start) + newMessage.slice(hashDraft.end);
+    const nextMessage =
+      newMessage.slice(0, hashDraft.start) + newMessage.slice(hashDraft.end);
     const caretPosition = hashDraft.start;
     setNewMessage(nextMessage);
     setHashDraft(null);
@@ -667,7 +898,10 @@ export function ThreadDetailPage() {
     setFileCandidates([]);
     setSelectedFileRefs((prev) => {
       if (prev.some((r) => r.path === file.path)) return prev;
-      return [...prev, { source: file.source, name: file.name, path: file.path }];
+      return [
+        ...prev,
+        { source: file.source, name: file.name, path: file.path },
+      ];
     });
     requestAnimationFrame(() => {
       messageInputRef.current?.focus();
@@ -702,7 +936,9 @@ export function ThreadDetailPage() {
         setInvitingAgent(true);
         setError(null);
         try {
-          await apiClient.inviteThreadAgent(id, { agent_profile_id: profile.id });
+          await apiClient.inviteThreadAgent(id, {
+            agent_profile_id: profile.id,
+          });
           // Agent is now booting — WS events (agent_booted/agent_joined/agent_failed)
           // will drive the UI updates via refreshAgentSessions().
           setMessages((prev) => [
@@ -756,7 +992,8 @@ export function ThreadDetailPage() {
             : newMessage.trim(),
           sender_id: thread?.owner_id || "human",
           target_agent_id: mention.targetAgentID ?? undefined,
-          metadata: Object.keys(sendMetadata).length > 0 ? sendMetadata : undefined,
+          metadata:
+            Object.keys(sendMetadata).length > 0 ? sendMetadata : undefined,
         },
       });
     } catch (e) {
@@ -831,7 +1068,10 @@ export function ThreadDetailPage() {
       const savedSummary = thread?.summary?.trim() ?? "";
       const issue = await apiClient.createWorkItemFromThread(id, {
         title: newWITitle.trim(),
-        body: trimmedBody !== "" && trimmedBody !== savedSummary ? trimmedBody : undefined,
+        body:
+          trimmedBody !== "" && trimmedBody !== savedSummary
+            ? trimmedBody
+            : undefined,
       });
       const links = await apiClient.listWorkItemsByThread(id);
       setWorkItemLinks(links);
@@ -849,13 +1089,18 @@ export function ThreadDetailPage() {
     if (!wiId || isNaN(wiId) || !id) return;
     setError(null);
     try {
-      await apiClient.createThreadWorkItemLink(id, { work_item_id: wiId, relation_type: "related" });
+      await apiClient.createThreadWorkItemLink(id, {
+        work_item_id: wiId,
+        relation_type: "related",
+      });
       const links = await apiClient.listWorkItemsByThread(id);
       setWorkItemLinks(links);
       try {
         const issue = await apiClient.getWorkItem(wiId);
         setLinkedIssues((prev) => ({ ...prev, [wiId]: issue }));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       setLinkWIId("");
       setShowLinkWI(false);
     } catch (e) {
@@ -864,6 +1109,7 @@ export function ThreadDetailPage() {
   };
 
   const handleDeleteTaskGroup = async (groupId: number) => {
+    if (!threadTaskGroupsEnabled) return;
     setError(null);
     try {
       await apiClient.deleteThreadTaskGroup(groupId);
@@ -874,7 +1120,7 @@ export function ThreadDetailPage() {
   };
 
   const handleRetryTaskGroup = async (groupId: number) => {
-    if (!id) return;
+    if (!id || !threadTaskGroupsEnabled) return;
     setError(null);
     try {
       const detail = await apiClient.getThreadTaskGroup(groupId);
@@ -882,7 +1128,9 @@ export function ThreadDetailPage() {
 
       // Build ID → index mapping for dependency resolution
       const idToIndex = new Map<number, number>();
-      detail.tasks.forEach((t, i) => { idToIndex.set(t.id, i); });
+      detail.tasks.forEach((t, i) => {
+        idToIndex.set(t.id, i);
+      });
 
       const newDetail = await apiClient.createThreadTaskGroup(id, {
         tasks: detail.tasks.map((t) => ({
@@ -933,7 +1181,9 @@ export function ThreadDetailPage() {
       try {
         const sessions = await apiClient.listThreadAgents(id);
         setAgentSessions(sessions);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     } finally {
       setInvitingAgent(false);
     }
@@ -980,7 +1230,9 @@ export function ThreadDetailPage() {
     }
   };
 
-  const handleSetRoutingMode = async (nextMode: "mention_only" | "broadcast" | "auto") => {
+  const handleSetRoutingMode = async (
+    nextMode: "mention_only" | "broadcast" | "auto",
+  ) => {
     if (!thread || !id || nextMode === agentRoutingMode) return;
     setSavingRoutingMode(true);
     setError(null);
@@ -999,7 +1251,9 @@ export function ThreadDetailPage() {
     }
   };
 
-  const handleSetMeetingMode = async (nextMode: "direct" | "concurrent" | "group_chat") => {
+  const handleSetMeetingMode = async (
+    nextMode: "direct" | "concurrent" | "group_chat",
+  ) => {
     if (!thread || !id || nextMode === meetingMode) return;
     setSavingMeetingMode(true);
     setError(null);
@@ -1029,13 +1283,18 @@ export function ThreadDetailPage() {
       const session = agentSessionByProfileID.get(profileID);
       const profile = profileByID.get(profileID);
       return (
-        <span key={`${msg.id}-mention-${index}`} className="relative mx-0.5 inline-flex align-baseline">
+        <span
+          key={`${msg.id}-mention-${index}`}
+          className="relative mx-0.5 inline-flex align-baseline"
+        >
           <button
             type="button"
             className="inline-flex items-center rounded-md bg-blue-100 px-1.5 py-0.5 text-xs font-semibold text-blue-800 transition-colors hover:bg-blue-200"
             onClick={() => focusAgentProfile(profileID)}
             onMouseEnter={() => setHoveredMentionProfileID(profileID)}
-            onMouseLeave={() => setHoveredMentionProfileID((c) => (c === profileID ? null : c))}
+            onMouseLeave={() =>
+              setHoveredMentionProfileID((c) => (c === profileID ? null : c))
+            }
           >
             {part.value}
           </button>
@@ -1047,13 +1306,26 @@ export function ThreadDetailPage() {
               <span className="block text-sm font-semibold text-slate-900">
                 {profile?.name ?? profileID}
               </span>
-              <span className="mt-0.5 block text-xs text-slate-500">@{profileID}</span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                @{profileID}
+              </span>
               <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
-                <span className={cn("h-1.5 w-1.5 rounded-full", agentStatusColor(session?.status ?? "unknown"))} />
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    agentStatusColor(session?.status ?? "unknown"),
+                  )}
+                />
                 {session?.status ?? "not_joined"}
               </span>
               <span className="mt-2 block text-xs text-slate-500">
-                {t("threads.turns", "Turns")}: {session?.turn_count ?? 0} | {(((session?.total_input_tokens ?? 0) + (session?.total_output_tokens ?? 0)) / 1000).toFixed(1)}k {t("threads.tokens", "tokens")}
+                {t("threads.turns", "Turns")}: {session?.turn_count ?? 0} |{" "}
+                {(
+                  ((session?.total_input_tokens ?? 0) +
+                    (session?.total_output_tokens ?? 0)) /
+                  1000
+                ).toFixed(1)}
+                k {t("threads.tokens", "tokens")}
               </span>
             </span>
           ) : null}
@@ -1069,7 +1341,9 @@ export function ThreadDetailPage() {
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-          <span className="text-sm text-muted-foreground">{t("common.loading", "Loading...")}</span>
+          <span className="text-sm text-muted-foreground">
+            {t("common.loading", "Loading...")}
+          </span>
         </div>
       </div>
     );
@@ -1079,7 +1353,9 @@ export function ThreadDetailPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4">
         <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-6 py-4 text-center">
-          <p className="text-sm text-destructive">{error || t("threads.notFound", "Thread not found")}</p>
+          <p className="text-sm text-destructive">
+            {error || t("threads.notFound", "Thread not found")}
+          </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => navigate("/threads")}>
           <ArrowLeft className="mr-1.5 h-4 w-4" />
@@ -1108,13 +1384,19 @@ export function ThreadDetailPage() {
               <MessageSquare className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold leading-tight">{thread.title}</h1>
+              <h1 className="truncate text-sm font-semibold leading-tight">
+                {thread.title}
+              </h1>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
-                  <span className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    thread.status === "active" ? "bg-emerald-500" : "bg-slate-400",
-                  )} />
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      thread.status === "active"
+                        ? "bg-emerald-500"
+                        : "bg-slate-400",
+                    )}
+                  />
                   {thread.status}
                 </span>
                 {thread.owner_id && (
@@ -1135,7 +1417,9 @@ export function ThreadDetailPage() {
               type="button"
               className={cn(
                 "rounded-md px-2.5 py-1 transition-colors",
-                agentRoutingMode === "mention_only" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                agentRoutingMode === "mention_only"
+                  ? "bg-background font-medium shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => void handleSetRoutingMode("mention_only")}
               disabled={savingRoutingMode}
@@ -1146,7 +1430,9 @@ export function ThreadDetailPage() {
               type="button"
               className={cn(
                 "rounded-md px-2.5 py-1 transition-colors",
-                agentRoutingMode === "broadcast" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                agentRoutingMode === "broadcast"
+                  ? "bg-background font-medium shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => void handleSetRoutingMode("broadcast")}
               disabled={savingRoutingMode}
@@ -1157,7 +1443,9 @@ export function ThreadDetailPage() {
               type="button"
               className={cn(
                 "rounded-md px-2.5 py-1 transition-colors",
-                agentRoutingMode === "auto" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                agentRoutingMode === "auto"
+                  ? "bg-background font-medium shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => void handleSetRoutingMode("auto")}
               disabled={savingRoutingMode}
@@ -1170,7 +1458,9 @@ export function ThreadDetailPage() {
               type="button"
               className={cn(
                 "rounded-md px-2.5 py-1 transition-colors",
-                meetingMode === "direct" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                meetingMode === "direct"
+                  ? "bg-background font-medium shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => void handleSetMeetingMode("direct")}
               disabled={savingMeetingMode}
@@ -1181,7 +1471,9 @@ export function ThreadDetailPage() {
               type="button"
               className={cn(
                 "rounded-md px-2.5 py-1 transition-colors",
-                meetingMode === "concurrent" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                meetingMode === "concurrent"
+                  ? "bg-background font-medium shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => void handleSetMeetingMode("concurrent")}
               disabled={savingMeetingMode}
@@ -1192,7 +1484,9 @@ export function ThreadDetailPage() {
               type="button"
               className={cn(
                 "rounded-md px-2.5 py-1 transition-colors",
-                meetingMode === "group_chat" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                meetingMode === "group_chat"
+                  ? "bg-background font-medium shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => void handleSetMeetingMode("group_chat")}
               disabled={savingMeetingMode}
@@ -1215,7 +1509,11 @@ export function ThreadDetailPage() {
       {error ? (
         <div className="flex items-center justify-between border-b border-destructive/20 bg-destructive/5 px-5 py-2">
           <span className="text-xs text-destructive">{error}</span>
-          <button type="button" className="text-destructive/60 hover:text-destructive" onClick={() => setError(null)}>
+          <button
+            type="button"
+            className="text-destructive/60 hover:text-destructive"
+            onClick={() => setError(null)}
+          >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -1240,7 +1538,6 @@ export function ThreadDetailPage() {
         }}
         onConfirm={handleInvitePickerConfirm}
       />
-
 
       {/* ── Main content: chat + sidebar ── */}
       <div className="flex min-h-0 flex-1">
@@ -1271,7 +1568,9 @@ export function ThreadDetailPage() {
               {committedMentionTargetID ? (
                 <div className="mb-2 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-1.5 text-xs">
                   <Bot className="h-3.5 w-3.5 text-blue-500" />
-                  <span className="text-slate-600">{t("threads.mentionResolved", "Target agent")}:</span>
+                  <span className="text-slate-600">
+                    {t("threads.mentionResolved", "Target agent")}:
+                  </span>
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-100"
@@ -1283,7 +1582,14 @@ export function ThreadDetailPage() {
                     {committedMentionProfile?.name ?? committedMentionTargetID}
                   </span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                    <span className={cn("h-1.5 w-1.5 rounded-full", agentStatusColor(committedMentionSession?.status ?? "active"))} />
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        agentStatusColor(
+                          committedMentionSession?.status ?? "active",
+                        ),
+                      )}
+                    />
                     {committedMentionSession?.status ?? "active"}
                   </span>
                 </div>
@@ -1307,7 +1613,9 @@ export function ThreadDetailPage() {
                           type="button"
                           className={cn(
                             "flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors",
-                            index === selectedHashIndex ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-accent/50",
+                            index === selectedHashIndex
+                              ? "bg-blue-100 dark:bg-blue-900/40"
+                              : "hover:bg-accent/50",
                           )}
                           onMouseDown={(e) => {
                             e.preventDefault();
@@ -1316,7 +1624,9 @@ export function ThreadDetailPage() {
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span className="font-medium truncate">{file.name}</span>
+                            <span className="font-medium truncate">
+                              {file.name}
+                            </span>
                           </div>
                           <span className="ml-2 shrink-0 text-xs text-muted-foreground">
                             {file.source}
@@ -1342,7 +1652,9 @@ export function ThreadDetailPage() {
                           type="button"
                           className={cn(
                             "flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors",
-                            index === selectedMentionIndex ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-accent/50",
+                            index === selectedMentionIndex
+                              ? "bg-blue-100 dark:bg-blue-900/40"
+                              : "hover:bg-accent/50",
                           )}
                           onMouseDown={(e) => {
                             e.preventDefault();
@@ -1350,22 +1662,37 @@ export function ThreadDetailPage() {
                           }}
                         >
                           <div className="flex items-center gap-2">
-                            <div className={cn(
-                              "flex h-6 w-6 items-center justify-center rounded-full",
-                              candidate.id === "all" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700",
-                            )}>
-                              {candidate.id === "all" ? <Users className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                            <div
+                              className={cn(
+                                "flex h-6 w-6 items-center justify-center rounded-full",
+                                candidate.id === "all"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-emerald-100 text-emerald-700",
+                              )}
+                            >
+                              {candidate.id === "all" ? (
+                                <Users className="h-3 w-3" />
+                              ) : (
+                                <Bot className="h-3 w-3" />
+                              )}
                             </div>
                             <span className="font-medium">@{candidate.id}</span>
                             {candidate.id === "all" && (
-                              <span className="text-xs text-muted-foreground">广播给所有 agent</span>
+                              <span className="text-xs text-muted-foreground">
+                                广播给所有 agent
+                              </span>
                             )}
                           </div>
                           {candidate.id !== "all" && (
-                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <span className={cn("h-1.5 w-1.5 rounded-full", agentStatusColor(candidate.status))} />
-                            {candidate.status}
-                          </span>
+                            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <span
+                                className={cn(
+                                  "h-1.5 w-1.5 rounded-full",
+                                  agentStatusColor(candidate.status),
+                                )}
+                              />
+                              {candidate.status}
+                            </span>
                           )}
                         </button>
                       ))}
@@ -1397,22 +1724,55 @@ export function ThreadDetailPage() {
                       thread.status !== "active"
                         ? t("threads.threadClosed", "Thread is closed")
                         : meetingMode === "concurrent"
-                          ? t("threads.messagePlaceholderConcurrent", "Type a message (concurrent meeting with routed agents)...")
+                          ? t(
+                              "threads.messagePlaceholderConcurrent",
+                              "Type a message (concurrent meeting with routed agents)...",
+                            )
                           : meetingMode === "group_chat"
-                            ? t("threads.messagePlaceholderGroupChat", "Type a message (round-robin discussion with routed agents)...")
+                            ? t(
+                                "threads.messagePlaceholderGroupChat",
+                                "Type a message (round-robin discussion with routed agents)...",
+                              )
                             : agentRoutingMode === "auto"
-                              ? t("threads.messagePlaceholderAuto", "Type a message (auto-routed to the best-fit agent)...")
+                              ? t(
+                                  "threads.messagePlaceholderAuto",
+                                  "Type a message (auto-routed to the best-fit agent)...",
+                                )
                               : agentRoutingMode === "broadcast"
-                                ? t("threads.messagePlaceholderBroadcast", "Type a message (broadcasts to all agents)...")
-                                : t("threads.messagePlaceholder", "Type @ to mention an agent, # to reference a file...")
+                                ? t(
+                                    "threads.messagePlaceholderBroadcast",
+                                    "Type a message (broadcasts to all agents)...",
+                                  )
+                                : t(
+                                    "threads.messagePlaceholder",
+                                    "Type @ to mention an agent, # to reference a file...",
+                                  )
                     }
                     className="flex-1 resize-none border-0 bg-transparent p-0 text-sm shadow-none outline-none focus:ring-0"
                     value={newMessage}
-                    onChange={(e) => handleMessageInputChange(e.target.value, e.target.selectionStart)}
-                    onClick={(e) => updateMentionDraft(e.currentTarget.value, e.currentTarget.selectionStart)}
+                    onChange={(e) =>
+                      handleMessageInputChange(
+                        e.target.value,
+                        e.target.selectionStart,
+                      )
+                    }
+                    onClick={(e) =>
+                      updateMentionDraft(
+                        e.currentTarget.value,
+                        e.currentTarget.selectionStart,
+                      )
+                    }
                     onKeyUp={(e) => {
-                      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Tab") return;
-                      updateMentionDraft(e.currentTarget.value, e.currentTarget.selectionStart);
+                      if (
+                        e.key === "ArrowDown" ||
+                        e.key === "ArrowUp" ||
+                        e.key === "Tab"
+                      )
+                        return;
+                      updateMentionDraft(
+                        e.currentTarget.value,
+                        e.currentTarget.selectionStart,
+                      );
                     }}
                     onBlur={() => {
                       window.setTimeout(() => {
@@ -1425,12 +1785,18 @@ export function ThreadDetailPage() {
                       if (hashDraft && fileCandidates.length > 0) {
                         if (e.key === "ArrowDown") {
                           e.preventDefault();
-                          setSelectedHashIndex((prev) => (prev + 1) % fileCandidates.length);
+                          setSelectedHashIndex(
+                            (prev) => (prev + 1) % fileCandidates.length,
+                          );
                           return;
                         }
                         if (e.key === "ArrowUp") {
                           e.preventDefault();
-                          setSelectedHashIndex((prev) => (prev - 1 + fileCandidates.length) % fileCandidates.length);
+                          setSelectedHashIndex(
+                            (prev) =>
+                              (prev - 1 + fileCandidates.length) %
+                              fileCandidates.length,
+                          );
                           return;
                         }
                         if (e.key === "Enter" || e.key === "Tab") {
@@ -1448,12 +1814,18 @@ export function ThreadDetailPage() {
                       if (mentionDraft && mentionCandidates.length > 0) {
                         if (e.key === "ArrowDown") {
                           e.preventDefault();
-                          setSelectedMentionIndex((prev) => (prev + 1) % mentionCandidates.length);
+                          setSelectedMentionIndex(
+                            (prev) => (prev + 1) % mentionCandidates.length,
+                          );
                           return;
                         }
                         if (e.key === "ArrowUp") {
                           e.preventDefault();
-                          setSelectedMentionIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+                          setSelectedMentionIndex(
+                            (prev) =>
+                              (prev - 1 + mentionCandidates.length) %
+                              mentionCandidates.length,
+                          );
                           return;
                         }
                         if (e.key === "Enter" || e.key === "Tab") {
@@ -1468,9 +1840,15 @@ export function ThreadDetailPage() {
                           return;
                         }
                       }
-                      if (e.key === "Backspace" && selectedFileRefs.length > 0) {
+                      if (
+                        e.key === "Backspace" &&
+                        selectedFileRefs.length > 0
+                      ) {
                         const input = e.currentTarget;
-                        if (input.selectionStart === 0 && input.selectionEnd === 0) {
+                        if (
+                          input.selectionStart === 0 &&
+                          input.selectionEnd === 0
+                        ) {
                           e.preventDefault();
                           setSelectedFileRefs((prev) => prev.slice(0, -1));
                           return;
@@ -1500,7 +1878,9 @@ export function ThreadDetailPage() {
                     id="chat-file-upload"
                     multiple
                     onChange={(e) => {
-                      Array.from(e.target.files ?? []).forEach((f) => void handleUploadAttachment(f));
+                      Array.from(e.target.files ?? []).forEach(
+                        (f) => void handleUploadAttachment(f),
+                      );
                       e.target.value = "";
                     }}
                   />
@@ -1515,24 +1895,46 @@ export function ThreadDetailPage() {
                     size="icon"
                     className="h-8 w-8 shrink-0 rounded-lg"
                     onClick={handleSend}
-                    disabled={!newMessage.trim() || sending || thread.status !== "active"}
+                    disabled={
+                      !newMessage.trim() ||
+                      sending ||
+                      thread.status !== "active"
+                    }
                   >
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
                 <p className="mt-1.5 text-[11px] text-muted-foreground">
                   {agentRoutingMode === "auto"
-                    ? t("threads.mentionHintAuto", "Auto mode: messages are automatically routed to the best-fit agent based on content analysis.")
+                    ? t(
+                        "threads.mentionHintAuto",
+                        "Auto mode: messages are automatically routed to the best-fit agent based on content analysis.",
+                      )
                     : agentRoutingMode === "broadcast"
-                      ? t("threads.mentionHintBroadcast", "Broadcast mode: messages go to all active agents. Use @agent-id for targeting.")
-                      : t("threads.mentionHintMentionOnly", "Mention-only mode: use @agent-id to direct messages to specific agents.")}
+                      ? t(
+                          "threads.mentionHintBroadcast",
+                          "Broadcast mode: messages go to all active agents. Use @agent-id for targeting.",
+                        )
+                      : t(
+                          "threads.mentionHintMentionOnly",
+                          "Mention-only mode: use @agent-id to direct messages to specific agents.",
+                        )}
                 </p>
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {meetingMode === "concurrent"
-                    ? t("threads.meetingHintConcurrent", "Concurrent meeting: routed agents reply in parallel, then the thread posts a summary.")
+                    ? t(
+                        "threads.meetingHintConcurrent",
+                        "Concurrent meeting: routed agents reply in parallel, then the thread posts a summary.",
+                      )
                     : meetingMode === "group_chat"
-                      ? t("threads.meetingHintGroupChat", "Group chat meeting: routed agents speak round by round using the configured selector.")
-                      : t("threads.meetingHintDirect", "Direct mode: each routed agent receives the message independently. Use @agent-id for lightweight handoff.")}
+                      ? t(
+                          "threads.meetingHintGroupChat",
+                          "Group chat meeting: routed agents speak round by round using the configured selector.",
+                        )
+                      : t(
+                          "threads.meetingHintDirect",
+                          "Direct mode: each routed agent receives the message independently. Use @agent-id for lightweight handoff.",
+                        )}
                 </p>
               </div>
             </div>
@@ -1548,21 +1950,33 @@ export function ThreadDetailPage() {
             selectedInviteIDs={selectedInviteIDs}
             invitingAgent={invitingAgent}
             onToggleInviteSelection={toggleInviteSelection}
-            onInviteAgent={() => { void handleInviteAgent(); }}
+            onInviteAgent={() => {
+              void handleInviteAgent();
+            }}
             onClearInviteSelection={() => setSelectedInviteIDs(new Set())}
             agentSessionsWithProfileID={agentSessionsWithProfileID}
             profileByID={profileByID}
             highlightedAgentProfileID={highlightedAgentProfileID}
             agentCardRefs={agentCardRefs}
             removingAgentID={removingAgentID}
-            onRemoveAgent={(id) => { void handleRemoveAgent(id); }}
+            onRemoveAgent={(id) => {
+              void handleRemoveAgent(id);
+            }}
             agentStatusColor={agentStatusColor}
             participants={participants}
+            threadTaskGroupsEnabled={threadTaskGroupsEnabled}
+            onToggleThreadTaskGroups={() =>
+              setThreadTaskGroupsEnabled((prev) => !prev)
+            }
             taskGroups={orderedTaskGroups}
             taskGroupsLoading={taskGroupsLoading}
             taskGroupStatusTone={taskGroupStatusTone}
-            onDeleteTaskGroup={(groupId) => { void handleDeleteTaskGroup(groupId); }}
-            onRetryTaskGroup={(groupId) => { void handleRetryTaskGroup(groupId); }}
+            onDeleteTaskGroup={(groupId) => {
+              void handleDeleteTaskGroup(groupId);
+            }}
+            onRetryTaskGroup={(groupId) => {
+              void handleRetryTaskGroup(groupId);
+            }}
             workItemLinks={workItemLinks}
             orderedWorkItemLinks={orderedWorkItemLinks}
             linkedIssues={linkedIssues}
@@ -1579,11 +1993,18 @@ export function ThreadDetailPage() {
             onShowLinkWIChange={setShowLinkWI}
             onLinkWIIdChange={setLinkWIId}
             onLinkWorkItem={handleLinkWorkItem}
-            onResetCreateWorkItemDraft={() => { setNewWITitle(""); setNewWIBody(""); }}
+            onResetCreateWorkItemDraft={() => {
+              setNewWITitle("");
+              setNewWIBody("");
+            }}
             attachments={attachments}
             attachmentsLoading={attachmentsLoading}
-            onUploadAttachment={(file) => { void handleUploadAttachment(file); }}
-            onDeleteAttachment={(attId) => { void handleDeleteAttachment(attId); }}
+            onUploadAttachment={(file) => {
+              void handleUploadAttachment(file);
+            }}
+            onDeleteAttachment={(attId) => {
+              void handleDeleteAttachment(attId);
+            }}
             getAttachmentDownloadUrl={apiClient.getThreadAttachmentDownloadUrl}
           />
         </div>

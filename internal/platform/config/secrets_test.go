@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadSecrets_StrictRejectsLegacyTopLevelPATFields(t *testing.T) {
+func TestLoadSecrets_MigratesLegacyTopLevelPATFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.toml")
 	content := `
@@ -17,12 +17,33 @@ commit_pat = "legacy-token"
 		t.Fatalf("write secrets: %v", err)
 	}
 
-	_, err := LoadSecrets(path)
-	if err == nil {
-		t.Fatal("expected legacy top-level PAT fields to be rejected by strict parsing")
+	secrets, err := LoadSecrets(path)
+	if err != nil {
+		t.Fatalf("LoadSecrets error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "strict mode") {
-		t.Fatalf("expected strict-mode decode error, got %v", err)
+	if got := secrets.GitHub.PAT; got != "legacy-token" {
+		t.Fatalf("GitHub.PAT = %q, want %q", got, "legacy-token")
+	}
+}
+
+func TestLoadSecrets_MigratesLegacyNestedPATFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.toml")
+	content := `
+[github]
+commit_pat = "legacy-commit"
+merge_pat = "legacy-merge"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
+
+	secrets, err := LoadSecrets(path)
+	if err != nil {
+		t.Fatalf("LoadSecrets error: %v", err)
+	}
+	if got := secrets.GitHub.PAT; got != "legacy-commit" {
+		t.Fatalf("GitHub.PAT = %q, want %q", got, "legacy-commit")
 	}
 }
 
@@ -49,5 +70,24 @@ pat = "codeup-pat-token"
 	}
 	if got := secrets.Codeup.PAT; got != "codeup-pat-token" {
 		t.Fatalf("Codeup.PAT = %q, want codeup-pat-token", got)
+	}
+}
+
+func TestLoadSecrets_StillRejectsUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.toml")
+	content := `
+unexpected = "value"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
+
+	_, err := LoadSecrets(path)
+	if err == nil {
+		t.Fatal("expected unknown field to be rejected")
+	}
+	if !strings.Contains(err.Error(), "strict mode") {
+		t.Fatalf("expected strict-mode decode error, got %v", err)
 	}
 }

@@ -193,6 +193,7 @@ export function WorkbenchProvider({ children }: ProviderProps) {
   useEffect(() => {
     const resolvedToken = resolveTokenFromLocation();
     let cancelled = false;
+    const runningInTauri = isTauri();
 
     const checkAuthRequired = async (baseUrl: string): Promise<boolean> => {
       try {
@@ -212,6 +213,28 @@ export function WorkbenchProvider({ children }: ProviderProps) {
       let tokenSource = resolvedToken.source;
       let effectiveApiBaseUrl = apiBaseUrl;
       let effectiveWsBaseUrl = wsBaseUrl;
+
+      if (runningInTauri) {
+        try {
+          const desktop = await fetchDesktopBootstrap();
+          if (cancelled) {
+            return;
+          }
+          token = desktop.token;
+          tokenSource = "storage";
+          effectiveApiBaseUrl = desktop.api_base_url;
+          effectiveWsBaseUrl = desktop.api_base_url;
+          setApiBaseUrl(desktop.api_base_url);
+          setWsBaseUrl(desktop.api_base_url);
+          persistTokenToStorage(desktop.token);
+        } catch (error) {
+          if (!cancelled) {
+            setAuthStatus("error");
+            setAuthError(`桌面版启动失败：${getErrorMessage(error)}`);
+          }
+          return;
+        }
+      }
 
       // Check if server requires authentication at all.
       const authRequired = await checkAuthRequired(effectiveApiBaseUrl);
@@ -243,28 +266,6 @@ export function WorkbenchProvider({ children }: ProviderProps) {
           }
         }
         return;
-      }
-
-      if (!token && isTauri()) {
-        try {
-          const desktop = await fetchDesktopBootstrap();
-          if (cancelled) {
-            return;
-          }
-          token = desktop.token;
-          tokenSource = "storage";
-          effectiveApiBaseUrl = desktop.api_base_url;
-          effectiveWsBaseUrl = desktop.api_base_url;
-          setApiBaseUrl(desktop.api_base_url);
-          setWsBaseUrl(desktop.api_base_url);
-          persistTokenToStorage(desktop.token);
-        } catch (error) {
-          if (!cancelled) {
-            setAuthStatus("error");
-            setAuthError(`桌面版启动失败：${getErrorMessage(error)}`);
-          }
-          return;
-        }
       }
 
       if (!token) {
@@ -385,5 +386,4 @@ export const useWorkbench = (): WorkbenchContextValue => {
   }
   return value;
 };
-
 

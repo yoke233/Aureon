@@ -161,7 +161,7 @@ func TokenAuthMiddleware(registry *TokenRegistry, opts ...AuthMiddlewareOption) 
 			if cfg.rateLimiter != nil {
 				cfg.rateLimiter.Reset(extractClientIP(r))
 			}
-			if source == "query" && cfg.logger != nil {
+			if source == "query" && cfg.logger != nil && !isWebSocketUpgrade(r) {
 				cfg.logger.Printf("SECURITY WARNING: token passed via URL query parameter from %s — use Authorization header instead", extractClientIP(r))
 			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authInfoKey, info)))
@@ -220,6 +220,13 @@ func extractRequestTokenWithSource(r *http.Request) (string, string) {
 		return "", ""
 	}
 	return strings.TrimSpace(auth[len(prefix):]), "header"
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket")
 }
 
 func scopeMatches(userScopes []string, required string) bool {

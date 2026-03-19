@@ -25,6 +25,16 @@ struct DesktopState {
   sidecar: Mutex<Option<CommandChild>>,
 }
 
+impl Drop for DesktopState {
+  fn drop(&mut self) {
+    if let Ok(mut sidecar) = self.sidecar.lock() {
+      if let Some(child) = sidecar.take() {
+        let _ = child.kill();
+      }
+    }
+  }
+}
+
 #[tauri::command]
 fn desktop_bootstrap(state: State<'_, DesktopState>) -> Result<DesktopBootstrap, String> {
   let token = read_admin_token(&state.data_dir)?;
@@ -152,5 +162,4 @@ fn read_admin_token_from_toml(path: &Path) -> Result<String, String> {
   }
   Ok(token)
 }
-
 

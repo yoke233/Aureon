@@ -51,6 +51,84 @@ func TestLoadConfigReadsGlobalYAML(t *testing.T) {
 	}
 }
 
+func TestLoadConfigGeneratesAdminTokenInSecretsToml(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("AI_WORKFLOW_DATA_DIR", dataDir)
+
+	cfg, _, secrets, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("LoadConfig() returned nil config")
+	}
+	adminToken := secrets.AdminToken()
+	if adminToken == "" {
+		t.Fatal("expected generated admin token, got empty")
+	}
+
+	secretsPath := filepath.Join(dataDir, "secrets.toml")
+	saved, err := config.LoadSecrets(secretsPath)
+	if err != nil {
+		t.Fatalf("LoadSecrets(secrets.toml) error = %v", err)
+	}
+	if saved.AdminToken() != adminToken {
+		t.Fatalf("saved admin token = %q, want %q", saved.AdminToken(), adminToken)
+	}
+	entry := saved.Tokens["admin"]
+	if len(entry.Scopes) != 1 || entry.Scopes[0] != "*" {
+		t.Fatalf("admin scopes = %#v, want [\"*\"]", entry.Scopes)
+	}
+	if entry.Submitter != "system.bootstrap" {
+		t.Fatalf("admin submitter = %q, want %q", entry.Submitter, "system.bootstrap")
+	}
+}
+
+func TestLoadConfigDoesNotGenerateAdminTokenWhenAuthDisabled(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("AI_WORKFLOW_DATA_DIR", dataDir)
+
+	configToml := []byte("[server]\nauth_required = false\n")
+	if err := os.WriteFile(filepath.Join(dataDir, "config.toml"), configToml, 0o644); err != nil {
+		t.Fatalf("WriteFile(config.toml) error = %v", err)
+	}
+
+	cfg, _, secrets, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg.Server.IsAuthRequired() {
+		t.Fatal("expected auth to be disabled")
+	}
+	if secrets.AdminToken() != "" {
+		t.Fatalf("expected no generated admin token, got %q", secrets.AdminToken())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "secrets.toml")); !os.IsNotExist(err) {
+		t.Fatalf("expected secrets.toml not to be created when auth disabled, err=%v", err)
+	}
+}
+
+func TestLoadConfigFallsBackFromLegacyConfigToml(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("AI_WORKFLOW_DATA_DIR", dataDir)
+
+	legacyConfig := []byte("[agents]\n[[roles]]\nname = \"worker\"\n[a2a]\nenabled = true\n")
+	if err := os.WriteFile(filepath.Join(dataDir, "config.toml"), legacyConfig, 0o644); err != nil {
+		t.Fatalf("WriteFile(config.toml) error = %v", err)
+	}
+
+	cfg, _, secrets, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg.Server.Host != "127.0.0.1" || cfg.Server.Port != 8080 {
+		t.Fatalf("expected defaults to be used, got host=%q port=%d", cfg.Server.Host, cfg.Server.Port)
+	}
+	if secrets.AdminToken() == "" {
+		t.Fatal("expected admin token to still be generated when falling back from legacy config")
+	}
+}
+
 func TestExpandStorePathUsesDataDirForRelativePaths(t *testing.T) {
 	t.Parallel()
 

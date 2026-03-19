@@ -10,12 +10,12 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	acphandler "github.com/yoke233/ai-workflow/internal/adapters/agent/acp"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	probeacp "github.com/yoke233/ai-workflow/internal/adapters/probe/acp"
-	v2sandbox "github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
-	"github.com/yoke233/ai-workflow/internal/core"
+	acphandler "github.com/yoke233/zhanggui/internal/adapters/agent/acp"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	probeacp "github.com/yoke233/zhanggui/internal/adapters/probe/acp"
+	v2sandbox "github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // LocalSessionManager manages ACP sessions in the same process.

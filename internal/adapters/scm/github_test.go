@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
 )
 
 func TestGitHubProviderMerge_405NotMergedReturnsError(t *testing.T) {

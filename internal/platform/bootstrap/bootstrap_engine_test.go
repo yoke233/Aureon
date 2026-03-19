@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	"github.com/yoke233/ai-workflow/internal/adapters/llm"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	"github.com/yoke233/zhanggui/internal/adapters/llm"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 func TestResolveWorkItemSchedulerConfigUsesConfiguredProjectRuns(t *testing.T) {

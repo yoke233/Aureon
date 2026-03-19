@@ -7,10 +7,10 @@ import (
 
 	acpproto "github.com/coder/acp-go-sdk"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	eventbridge "github.com/yoke233/ai-workflow/internal/adapters/events/bridge"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	eventbridge "github.com/yoke233/zhanggui/internal/adapters/events/bridge"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestBuildRunInputFromSnapshot(t *testing.T) {

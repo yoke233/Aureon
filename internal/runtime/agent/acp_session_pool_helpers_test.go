@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	sqlitestore "github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	sqlitestore "github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type recordingEventHandler struct {

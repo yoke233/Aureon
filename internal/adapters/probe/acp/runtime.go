@@ -7,9 +7,9 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acp"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	probeapp "github.com/yoke233/ai-workflow/internal/application/probe"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acp"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	probeapp "github.com/yoke233/zhanggui/internal/application/probe"
 )
 
 type Target struct {

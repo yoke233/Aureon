@@ -5,15 +5,15 @@ import (
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
-	chatacp "github.com/yoke233/ai-workflow/internal/adapters/chat/acp"
-	api "github.com/yoke233/ai-workflow/internal/adapters/http"
-	llmplanning "github.com/yoke233/ai-workflow/internal/adapters/planning/llm"
-	inspectionapp "github.com/yoke233/ai-workflow/internal/application/inspection"
-	planningapp "github.com/yoke233/ai-workflow/internal/application/planning"
-	probeapp "github.com/yoke233/ai-workflow/internal/application/probe"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	agentruntime "github.com/yoke233/ai-workflow/internal/runtime/agent"
+	chatacp "github.com/yoke233/zhanggui/internal/adapters/chat/acp"
+	api "github.com/yoke233/zhanggui/internal/adapters/http"
+	llmplanning "github.com/yoke233/zhanggui/internal/adapters/planning/llm"
+	inspectionapp "github.com/yoke233/zhanggui/internal/application/inspection"
+	planningapp "github.com/yoke233/zhanggui/internal/application/planning"
+	probeapp "github.com/yoke233/zhanggui/internal/application/probe"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	agentruntime "github.com/yoke233/zhanggui/internal/runtime/agent"
 )
 
 type apiStack struct {

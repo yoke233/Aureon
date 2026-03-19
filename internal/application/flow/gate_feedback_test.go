@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestBuildRunInputForAction_ReusedSessionUsesFollowupTemplates(t *testing.T) {

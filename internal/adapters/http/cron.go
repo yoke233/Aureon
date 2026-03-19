@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	cronapp "github.com/yoke233/ai-workflow/internal/application/cron"
-	"github.com/yoke233/ai-workflow/internal/core"
+	cronapp "github.com/yoke233/zhanggui/internal/application/cron"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type setupCronRequest struct {

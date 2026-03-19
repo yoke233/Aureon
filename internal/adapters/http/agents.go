@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
-	"github.com/yoke233/ai-workflow/internal/platform/profilellm"
-	skillset "github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
+	"github.com/yoke233/zhanggui/internal/platform/profilellm"
+	skillset "github.com/yoke233/zhanggui/internal/skills"
 )
 
 type DriverConfigService interface {

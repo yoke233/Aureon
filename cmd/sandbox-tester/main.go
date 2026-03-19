@@ -14,9 +14,9 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	v2sandbox "github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	v2sandbox "github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func main() {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 func TestResolveGlobalConfigFilePathPrefersExistingYAML(t *testing.T) {

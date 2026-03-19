@@ -7,15 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/appdata"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
-	"github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/appdata"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
+	"github.com/yoke233/zhanggui/internal/skills"
 )
 
 type bootstrapBase struct {

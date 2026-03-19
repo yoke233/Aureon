@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yoke233/ai-workflow/internal/platform/appcmd"
+	"github.com/yoke233/zhanggui/internal/platform/appcmd"
 )
 
 func main() {

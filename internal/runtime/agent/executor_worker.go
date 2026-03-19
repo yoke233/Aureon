@@ -13,12 +13,12 @@ import (
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	probeacp "github.com/yoke233/ai-workflow/internal/adapters/probe/acp"
-	natsprobe "github.com/yoke233/ai-workflow/internal/adapters/probe/nats"
-	v2sandbox "github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	probeacp "github.com/yoke233/zhanggui/internal/adapters/probe/acp"
+	natsprobe "github.com/yoke233/zhanggui/internal/adapters/probe/nats"
+	v2sandbox "github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // ExecutorWorkerConfig configures a remote executor worker.

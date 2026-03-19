@@ -3,8 +3,8 @@ package threadtaskapp
 import (
 	"context"
 
-	"github.com/yoke233/ai-workflow/internal/application/planning"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/application/planning"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Store is the persistence contract for ThreadTask operations.

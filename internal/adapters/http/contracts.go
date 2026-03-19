@@ -3,9 +3,9 @@ package api
 import (
 	"context"
 
-	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
-	planningapp "github.com/yoke233/ai-workflow/internal/application/planning"
-	"github.com/yoke233/ai-workflow/internal/core"
+	chatapp "github.com/yoke233/zhanggui/internal/application/chat"
+	planningapp "github.com/yoke233/zhanggui/internal/application/planning"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Store is the persistence contract required by the HTTP adapter.

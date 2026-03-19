@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/skills"
 )
 
 // ContextRefType classifies the kind of context reference used in input building.

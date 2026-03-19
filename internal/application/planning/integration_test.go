@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	llmadapter "github.com/yoke233/ai-workflow/internal/adapters/llm"
-	llmplanning "github.com/yoke233/ai-workflow/internal/adapters/planning/llm"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	agentapp "github.com/yoke233/ai-workflow/internal/application/agent"
-	planning "github.com/yoke233/ai-workflow/internal/application/planning"
-	"github.com/yoke233/ai-workflow/internal/core"
+	llmadapter "github.com/yoke233/zhanggui/internal/adapters/llm"
+	llmplanning "github.com/yoke233/zhanggui/internal/adapters/planning/llm"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	agentapp "github.com/yoke233/zhanggui/internal/application/agent"
+	planning "github.com/yoke233/zhanggui/internal/application/planning"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func newPlanningIntegrationStore(t *testing.T) core.Store {

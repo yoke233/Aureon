@@ -16,8 +16,8 @@ import (
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/fsnotify/fsnotify"
 	toml "github.com/pelletier/go-toml/v2"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 var ErrInvalidConfig = errors.New("invalid config")

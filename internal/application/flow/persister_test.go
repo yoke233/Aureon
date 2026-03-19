@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestEventPersister_PersistsEvents(t *testing.T) {

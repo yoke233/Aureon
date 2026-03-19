@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func runToDeliverableResponse(run *core.Run, assets []*core.Resource) map[string]any {

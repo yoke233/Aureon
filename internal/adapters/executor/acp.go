@@ -11,14 +11,14 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	eventbridge "github.com/yoke233/ai-workflow/internal/adapters/events/bridge"
-	httpx "github.com/yoke233/ai-workflow/internal/adapters/http/server"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
-	"github.com/yoke233/ai-workflow/internal/audit"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	eventbridge "github.com/yoke233/zhanggui/internal/adapters/events/bridge"
+	httpx "github.com/yoke233/zhanggui/internal/adapters/http/server"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/audit"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/skills"
 )
 
 // ACPExecutorConfig configures the ACP step executor.

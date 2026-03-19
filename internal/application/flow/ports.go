@@ -3,7 +3,7 @@ package flow
 import (
 	"context"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Store is the application-facing persistence port required by work item orchestration.

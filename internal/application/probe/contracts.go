@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Service is the minimal application contract required by transport adapters.

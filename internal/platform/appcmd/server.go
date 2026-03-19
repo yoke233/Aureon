@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	httpx "github.com/yoke233/ai-workflow/internal/adapters/http/server"
-	"github.com/yoke233/ai-workflow/internal/platform/bootstrap"
+	httpx "github.com/yoke233/zhanggui/internal/adapters/http/server"
+	"github.com/yoke233/zhanggui/internal/platform/bootstrap"
 )
 
 func RunServer(args []string) error {

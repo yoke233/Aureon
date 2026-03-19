@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type sqliteTxAdapter struct {

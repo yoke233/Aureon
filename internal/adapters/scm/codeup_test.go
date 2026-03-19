@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
 )
 
 func TestCodeupProviderDetect_SSHRemote(t *testing.T) {

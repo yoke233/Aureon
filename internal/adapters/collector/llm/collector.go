@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	basellm "github.com/yoke233/ai-workflow/internal/adapters/llm"
-	"github.com/yoke233/ai-workflow/internal/core"
+	basellm "github.com/yoke233/zhanggui/internal/adapters/llm"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type LLMCollector struct {

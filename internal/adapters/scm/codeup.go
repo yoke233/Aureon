@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
 )
 
 type CodeupProviderConfig struct {

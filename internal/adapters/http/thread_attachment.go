@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 const maxAttachmentSize = 50 << 20 // 50 MB

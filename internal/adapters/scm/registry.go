@@ -3,7 +3,7 @@ package scm
 import (
 	"context"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
 )
 
 func NewChangeRequestProviders(token string) []flowapp.ChangeRequestProvider {

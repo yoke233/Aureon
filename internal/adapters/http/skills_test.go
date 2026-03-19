@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	agentapp "github.com/yoke233/ai-workflow/internal/application/agent"
-	"github.com/yoke233/ai-workflow/internal/core"
-	skillset "github.com/yoke233/ai-workflow/internal/skills"
+	agentapp "github.com/yoke233/zhanggui/internal/application/agent"
+	"github.com/yoke233/zhanggui/internal/core"
+	skillset "github.com/yoke233/zhanggui/internal/skills"
 	"net/http/httptest"
 )
 

@@ -1,6 +1,6 @@
 package flow
 
-import "github.com/yoke233/ai-workflow/internal/core"
+import "github.com/yoke233/zhanggui/internal/core"
 
 // validWorkItemTransitions defines legal WorkItem status transitions.
 var validWorkItemTransitions = map[core.WorkItemStatus][]core.WorkItemStatus{

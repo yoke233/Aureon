@@ -5,14 +5,14 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yoke233/ai-workflow/internal/adapters/http/server"
-	"github.com/yoke233/ai-workflow/internal/adapters/llmconfig"
-	"github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	issueapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	inspectionapp "github.com/yoke233/ai-workflow/internal/application/inspection"
-	probeapp "github.com/yoke233/ai-workflow/internal/application/probe"
-	"github.com/yoke233/ai-workflow/internal/core"
-	skillset "github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/adapters/http/server"
+	"github.com/yoke233/zhanggui/internal/adapters/llmconfig"
+	"github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	issueapp "github.com/yoke233/zhanggui/internal/application/flow"
+	inspectionapp "github.com/yoke233/zhanggui/internal/application/inspection"
+	probeapp "github.com/yoke233/zhanggui/internal/application/probe"
+	"github.com/yoke233/zhanggui/internal/core"
+	skillset "github.com/yoke233/zhanggui/internal/skills"
 )
 
 // Handler is the top-level HTTP handler for the workflow API.

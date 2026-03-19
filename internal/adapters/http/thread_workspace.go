@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yoke233/ai-workflow/internal/threadctx"
+	"github.com/yoke233/zhanggui/internal/threadctx"
 )
 
 type threadWorkspaceManager struct {

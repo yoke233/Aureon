@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/appdata"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/appdata"
 )
 
 // EnsureSkillsLinked links each skill directory from skillsRoot into targetSkillsDir.

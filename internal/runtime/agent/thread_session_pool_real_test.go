@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/core"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 const realCodexACPVersion = "0.9.5"

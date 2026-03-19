@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	workspaceclone "github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
+	workspaceclone "github.com/yoke233/zhanggui/internal/adapters/workspace/clone"
 )
 
 var (

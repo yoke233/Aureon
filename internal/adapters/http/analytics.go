@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func (h *Handler) getProjectErrorRanking(w http.ResponseWriter, r *http.Request) {

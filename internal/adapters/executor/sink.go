@@ -3,8 +3,8 @@ package executor
 import (
 	"context"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
 )
 
 type multiSink struct {

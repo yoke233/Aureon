@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Metadata keys used in WorkItem.Metadata to define cron triggers.

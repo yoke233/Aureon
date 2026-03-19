@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	"github.com/yoke233/ai-workflow/internal/core"
-	skillset "github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	"github.com/yoke233/zhanggui/internal/core"
+	skillset "github.com/yoke233/zhanggui/internal/skills"
 )
 
 func TestDetectHome(t *testing.T) {

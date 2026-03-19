@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // WorkItemScheduler manages a queue of WorkItems and limits concurrent execution.

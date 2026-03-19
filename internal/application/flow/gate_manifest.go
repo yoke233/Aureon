@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // manifestCheckEnabled returns true if the gate action has manifest_check: true.

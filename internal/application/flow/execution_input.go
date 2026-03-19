@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // BuildRunInputFromSnapshot constructs the run input sent to an agent.

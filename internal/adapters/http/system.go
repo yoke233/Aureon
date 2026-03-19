@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/llmconfig"
-	v2sandbox "github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/adapters/llmconfig"
+	v2sandbox "github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 func (h *Handler) getSandboxSupport(w http.ResponseWriter, r *http.Request) {

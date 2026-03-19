@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // TestGateReworkLimit_DefaultBlocksAfter3Rounds: gate always rejects → blocks after 3 rework rounds.

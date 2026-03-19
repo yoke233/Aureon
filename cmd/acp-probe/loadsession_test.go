@@ -16,8 +16,8 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	acphandler "github.com/yoke233/ai-workflow/internal/adapters/agent/acp"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
+	acphandler "github.com/yoke233/zhanggui/internal/adapters/agent/acp"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
 )
 
 // codexLaunchConfig returns a LaunchConfig that spawns a real codex-acp process.

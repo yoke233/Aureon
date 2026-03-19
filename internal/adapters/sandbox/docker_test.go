@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
 )
 
 func TestDockerSandboxPrepareWrapsLaunch(t *testing.T) {

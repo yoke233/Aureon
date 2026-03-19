@@ -19,15 +19,15 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	eventbridge "github.com/yoke233/ai-workflow/internal/adapters/events/bridge"
-	v2sandbox "github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	workspaceclone "github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
-	workspacegit "github.com/yoke233/ai-workflow/internal/adapters/workspace/git"
-	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/profilellm"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	eventbridge "github.com/yoke233/zhanggui/internal/adapters/events/bridge"
+	v2sandbox "github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	workspaceclone "github.com/yoke233/zhanggui/internal/adapters/workspace/clone"
+	workspacegit "github.com/yoke233/zhanggui/internal/adapters/workspace/git"
+	chatapp "github.com/yoke233/zhanggui/internal/application/chat"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/profilellm"
 )
 
 const (

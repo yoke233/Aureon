@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	scmadapter "github.com/yoke233/ai-workflow/internal/adapters/scm"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
+	scmadapter "github.com/yoke233/zhanggui/internal/adapters/scm"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // runBuiltinSCMOpenPR creates or finds an open change request using the registered SCM providers.

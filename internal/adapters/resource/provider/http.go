@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // HTTPProvider fetches resources from HTTP/HTTPS URLs.

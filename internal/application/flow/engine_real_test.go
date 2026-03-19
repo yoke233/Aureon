@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	executoradapter "github.com/yoke233/ai-workflow/internal/adapters/executor"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	agentapp "github.com/yoke233/ai-workflow/internal/application/agent"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
-	agentruntime "github.com/yoke233/ai-workflow/internal/runtime/agent"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	executoradapter "github.com/yoke233/zhanggui/internal/adapters/executor"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	agentapp "github.com/yoke233/zhanggui/internal/application/agent"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
+	agentruntime "github.com/yoke233/zhanggui/internal/runtime/agent"
 )
 
 // TestReal_WorkItemActionRun runs a single-action WorkItem through the full

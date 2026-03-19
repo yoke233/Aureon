@@ -1,9 +1,9 @@
 package bootstrap
 
 import (
-	"github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
+	"github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
 )
 
 func buildSandbox(cfg *config.Config, runtimeManager *configruntime.Manager, dataDir string) sandbox.Sandbox {

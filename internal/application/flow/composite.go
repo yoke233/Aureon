@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // ExpandComposite creates a child WorkItem for a composite Action and links them.

@@ -4,10 +4,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
 )
 
 // seedRegistry seeds agent profiles into the SQLite store from TOML config.

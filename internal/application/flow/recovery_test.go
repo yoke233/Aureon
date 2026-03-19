@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestRecoverInterruptedWorkItems_RunningWorkItem(t *testing.T) {

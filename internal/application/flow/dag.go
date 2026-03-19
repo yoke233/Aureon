@@ -5,8 +5,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/dagutil"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/dagutil"
 )
 
 // hasDependsOn returns true if any action in the set has a non-empty DependsOn list.

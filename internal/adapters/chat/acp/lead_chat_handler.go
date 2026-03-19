@@ -9,8 +9,8 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	acphandler "github.com/yoke233/ai-workflow/internal/adapters/agent/acp"
-	"github.com/yoke233/ai-workflow/internal/core"
+	acphandler "github.com/yoke233/zhanggui/internal/adapters/agent/acp"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 const defaultPermissionTimeout = 5 * time.Minute

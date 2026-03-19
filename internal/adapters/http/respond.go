@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/yoke233/ai-workflow/internal/platform/i18n"
+	"github.com/yoke233/zhanggui/internal/platform/i18n"
 )
 
 // writeJSON encodes v as JSON and writes it with the given status code.

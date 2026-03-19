@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	gitutil "github.com/yoke233/ai-workflow/internal/adapters/workspace/git"
+	gitutil "github.com/yoke233/zhanggui/internal/adapters/workspace/git"
 )
 
 type detectGitRequest struct {

@@ -3,8 +3,8 @@ package sandbox
 import (
 	"context"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Sandbox prepares a launch environment for an ACP agent process.

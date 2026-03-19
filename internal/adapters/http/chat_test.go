@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	chatapp "github.com/yoke233/zhanggui/internal/application/chat"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type stubLeadChatService struct {

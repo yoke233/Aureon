@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // SchedulerConfig configures the inspection scheduler.

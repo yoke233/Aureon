@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	probeapp "github.com/yoke233/ai-workflow/internal/application/probe"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	probeapp "github.com/yoke233/zhanggui/internal/application/probe"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type probeRuntimeStub struct {

@@ -13,9 +13,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	"github.com/yoke233/ai-workflow/internal/platform/appdata"
-	v2skills "github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	"github.com/yoke233/zhanggui/internal/platform/appdata"
+	v2skills "github.com/yoke233/zhanggui/internal/skills"
 )
 
 // HomeDirSandbox isolates each ACP process by assigning a per-scope home/config directory:

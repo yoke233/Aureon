@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
-	"github.com/yoke233/ai-workflow/internal/core"
+	chatapp "github.com/yoke233/zhanggui/internal/application/chat"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 var upgrader = websocket.Upgrader{

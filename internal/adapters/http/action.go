@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // createStepRequest is the request body for POST /work-items/{issueID}/steps.

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	planningapp "github.com/yoke233/ai-workflow/internal/application/planning"
-	"github.com/yoke233/ai-workflow/internal/core"
+	planningapp "github.com/yoke233/zhanggui/internal/application/planning"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type generateStepsRequest struct {

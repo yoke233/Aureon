@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	threadapp "github.com/yoke233/ai-workflow/internal/application/threadapp"
-	"github.com/yoke233/ai-workflow/internal/core"
+	threadapp "github.com/yoke233/zhanggui/internal/application/threadapp"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // chatHandlers holds the lead agent chat endpoint handlers.

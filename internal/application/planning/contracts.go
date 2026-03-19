@@ -3,7 +3,7 @@ package planning
 import (
 	"context"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // ActionMaterializer is the minimal store contract for materializing a DAG into Actions.

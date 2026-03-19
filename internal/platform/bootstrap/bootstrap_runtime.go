@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/appdata"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/appdata"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
 )
 
 func buildRuntimeManager(store *sqlite.Store, runtimeDBPath string, bus core.EventBus) *configruntime.Manager {

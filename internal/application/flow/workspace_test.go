@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	workspaceprovider "github.com/yoke233/ai-workflow/internal/adapters/workspace/provider"
-	"github.com/yoke233/ai-workflow/internal/core"
+	workspaceprovider "github.com/yoke233/zhanggui/internal/adapters/workspace/provider"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestLocalDirProvider(t *testing.T) {

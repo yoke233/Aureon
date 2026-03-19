@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	probeapp "github.com/yoke233/ai-workflow/internal/application/probe"
-	"github.com/yoke233/ai-workflow/internal/core"
+	probeapp "github.com/yoke233/zhanggui/internal/application/probe"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type createRunProbeRequest struct {

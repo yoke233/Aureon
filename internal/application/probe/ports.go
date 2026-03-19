@@ -3,7 +3,7 @@ package probe
 import (
 	"context"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Store is the application-facing persistence port required by run probe use cases.

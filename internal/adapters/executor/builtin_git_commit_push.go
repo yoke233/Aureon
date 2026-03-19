@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	workspaceclone "github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
+	workspaceclone "github.com/yoke233/zhanggui/internal/adapters/workspace/clone"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func runBuiltinGitCommitPush(ctx context.Context, store core.Store, bus core.EventBus, tokens flowapp.SCMTokens, step *core.Action, execRec *core.Run) error {

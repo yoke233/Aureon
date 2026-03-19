@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yoke233/ai-workflow/internal/core"
-	skillset "github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/core"
+	skillset "github.com/yoke233/zhanggui/internal/skills"
 )
 
 type skillInfo struct {

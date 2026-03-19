@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	threadapp "github.com/yoke233/ai-workflow/internal/application/threadapp"
-	"github.com/yoke233/ai-workflow/internal/core"
+	threadapp "github.com/yoke233/zhanggui/internal/application/threadapp"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type threadAppRuntime struct {

@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // getUsageSummary returns aggregated usage analytics: totals, by project, by agent, by profile.

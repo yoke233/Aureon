@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/yoke233/ai-workflow/internal/platform/profilellm"
+	"github.com/yoke233/zhanggui/internal/platform/profilellm"
 )
 
 func Validate(cfg *Config) error {

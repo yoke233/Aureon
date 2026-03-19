@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	legacycore "github.com/yoke233/ai-workflow/internal/legacy/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	legacycore "github.com/yoke233/zhanggui/internal/legacy/core"
 )
 
 func TestACPHandlerResolveThreadPaths(t *testing.T) {

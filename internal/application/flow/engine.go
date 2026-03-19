@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // ActionExecutor is the callback that actually runs an action (e.g. calls an ACP agent).

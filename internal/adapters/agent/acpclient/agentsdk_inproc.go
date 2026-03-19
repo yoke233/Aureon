@@ -14,8 +14,8 @@ import (
 	agentsdkapi "github.com/cexll/agentsdk-go/pkg/api"
 	agentsdkmodel "github.com/cexll/agentsdk-go/pkg/model"
 	acpproto "github.com/coder/acp-go-sdk"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/profilellm"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/profilellm"
 )
 
 const inProcAdapterAgentSDK = "agentsdk-go"

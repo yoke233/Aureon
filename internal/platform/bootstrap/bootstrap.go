@@ -5,13 +5,13 @@ import (
 	"log/slog"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	executoradapter "github.com/yoke233/ai-workflow/internal/adapters/executor"
-	httpx "github.com/yoke233/ai-workflow/internal/adapters/http/server"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	executoradapter "github.com/yoke233/zhanggui/internal/adapters/executor"
+	httpx "github.com/yoke233/zhanggui/internal/adapters/http/server"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
 )
 
 type SCMTokens struct {

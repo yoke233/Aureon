@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
 )
 
 // LiteBoxSandbox rewrites ACP launch config to run through the litebox-acp bridge.

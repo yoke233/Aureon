@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	httpx "github.com/yoke233/ai-workflow/internal/adapters/http/server"
-	threadapp "github.com/yoke233/ai-workflow/internal/application/threadapp"
-	"github.com/yoke233/ai-workflow/internal/core"
+	httpx "github.com/yoke233/zhanggui/internal/adapters/http/server"
+	threadapp "github.com/yoke233/zhanggui/internal/application/threadapp"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type createThreadRequest struct {

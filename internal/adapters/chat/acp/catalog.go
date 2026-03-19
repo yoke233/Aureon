@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
+	chatapp "github.com/yoke233/zhanggui/internal/application/chat"
 )
 
 const leadSessionCatalogFileName = "lead-chat-sessions.json"

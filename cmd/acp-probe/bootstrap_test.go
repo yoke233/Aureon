@@ -19,7 +19,7 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
 )
 
 // bootstrapTestSetup creates a codex ACP client with our MCP dev tools configured.

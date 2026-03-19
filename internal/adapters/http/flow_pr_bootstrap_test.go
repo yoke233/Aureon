@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestDefaultPRTemplates(t *testing.T) {

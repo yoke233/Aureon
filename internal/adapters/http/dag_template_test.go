@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestAPI_CreateDAGTemplateRejectsDuplicateStepNames(t *testing.T) {

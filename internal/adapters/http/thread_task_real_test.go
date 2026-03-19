@@ -15,15 +15,15 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	agentapp "github.com/yoke233/ai-workflow/internal/application/agent"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
-	agentruntime "github.com/yoke233/ai-workflow/internal/runtime/agent"
-	"github.com/yoke233/ai-workflow/internal/skills"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	agentapp "github.com/yoke233/zhanggui/internal/application/agent"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
+	agentruntime "github.com/yoke233/zhanggui/internal/runtime/agent"
+	"github.com/yoke233/zhanggui/internal/skills"
 )
 
 // TestReal_ThreadTask_WithACP runs the full ThreadTask flow with a real ACP agent.

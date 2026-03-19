@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 // NewConfigRegistryFromConfig creates a ConfigRegistry populated from TOML configuration.

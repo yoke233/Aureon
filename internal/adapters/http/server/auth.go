@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 const (

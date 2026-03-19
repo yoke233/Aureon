@@ -3,9 +3,9 @@ package bootstrap
 import (
 	"strings"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
 )
 
 func currentPRFlowPrompts(runtimeManager *configruntime.Manager, bootstrapCfg *config.Config) flowapp.PRFlowPrompts {

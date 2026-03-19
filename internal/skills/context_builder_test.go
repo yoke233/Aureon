@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // mockStore implements the subset of core.Store used by ActionContextBuilder.

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yoke233/ai-workflow/internal/skills/builtin"
+	"github.com/yoke233/zhanggui/internal/skills/builtin"
 )
 
 // EnsureBuiltinSkills extracts embedded builtin skills to skillsRoot.

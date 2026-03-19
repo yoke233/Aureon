@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yoke233/ai-workflow/internal/application/threadtaskapp"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/threadctx"
+	"github.com/yoke233/zhanggui/internal/application/threadtaskapp"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/threadctx"
 )
 
 // ---------------------------------------------------------------------------

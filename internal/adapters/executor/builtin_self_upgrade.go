@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // UpgradeFunc is called after a successful build to trigger a restart with the new binary.

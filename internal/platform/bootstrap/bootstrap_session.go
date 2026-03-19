@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	agentruntime "github.com/yoke233/ai-workflow/internal/runtime/agent"
+	"github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	agentruntime "github.com/yoke233/zhanggui/internal/runtime/agent"
 )
 
 func buildSessionManager(

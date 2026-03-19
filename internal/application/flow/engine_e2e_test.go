@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // TestE2E_WorkItemResolverInputCollector covers resolver, input builder, and collector wiring.

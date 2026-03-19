@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	webassets "github.com/yoke233/ai-workflow/web"
+	webassets "github.com/yoke233/zhanggui/web"
 )
 
 type Config struct {

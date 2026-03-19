@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
-	skillset "github.com/yoke233/ai-workflow/internal/skills"
+	"github.com/yoke233/zhanggui/internal/core"
+	skillset "github.com/yoke233/zhanggui/internal/skills"
 )
 
 func newAgentTestStore(t *testing.T) *Store {

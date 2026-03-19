@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	"github.com/yoke233/ai-workflow/internal/platform/bootstrap"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	agentruntime "github.com/yoke233/ai-workflow/internal/runtime/agent"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	"github.com/yoke233/zhanggui/internal/platform/bootstrap"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	agentruntime "github.com/yoke233/zhanggui/internal/runtime/agent"
 )
 
 func RunExecutor(args []string) error {

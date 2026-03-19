@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	workspaceclone "github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
-	workspacegit "github.com/yoke233/ai-workflow/internal/adapters/workspace/git"
-	"github.com/yoke233/ai-workflow/internal/core"
+	workspaceclone "github.com/yoke233/zhanggui/internal/adapters/workspace/clone"
+	workspacegit "github.com/yoke233/zhanggui/internal/adapters/workspace/git"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // GitProvider handles workspace preparation for git resource spaces.

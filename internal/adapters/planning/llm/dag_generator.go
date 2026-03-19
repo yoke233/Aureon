@@ -7,8 +7,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/llm"
-	planningapp "github.com/yoke233/ai-workflow/internal/application/planning"
+	"github.com/yoke233/zhanggui/internal/adapters/llm"
+	planningapp "github.com/yoke233/zhanggui/internal/application/planning"
 )
 
 // Completer adapts an llm.Client to the planning.LLMCompleter port.

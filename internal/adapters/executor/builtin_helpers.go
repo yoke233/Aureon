@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func storeBuiltinArtifact(ctx context.Context, store core.Store, bus core.EventBus, step *core.Action, execRec *core.Run, markdown string, metadata map[string]any) error {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 func TestValidateSkillMD(t *testing.T) {

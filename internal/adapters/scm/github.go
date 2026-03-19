@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	ghapi "github.com/google/go-github/v68/github"
-	workspaceclone "github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
+	workspaceclone "github.com/yoke233/zhanggui/internal/adapters/workspace/clone"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
 	"golang.org/x/oauth2"
 )
 

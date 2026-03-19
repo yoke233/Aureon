@@ -3,14 +3,14 @@ package bootstrap
 import (
 	"path/filepath"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/http"
-	"github.com/yoke233/ai-workflow/internal/adapters/llmconfig"
-	"github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/appdata"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
+	"github.com/yoke233/zhanggui/internal/adapters/http"
+	"github.com/yoke233/zhanggui/internal/adapters/llmconfig"
+	"github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/appdata"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
 )
 
 func buildAPIOptions(

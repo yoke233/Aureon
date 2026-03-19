@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	resourceprovider "github.com/yoke233/ai-workflow/internal/adapters/resource/provider"
-	"github.com/yoke233/ai-workflow/internal/core"
+	resourceprovider "github.com/yoke233/zhanggui/internal/adapters/resource/provider"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type stubWorkspaceProvider struct {

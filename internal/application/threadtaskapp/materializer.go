@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/yoke233/ai-workflow/internal/application/planning"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/application/planning"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // MaterializerStore is the persistence contract needed by DefaultMaterializer.

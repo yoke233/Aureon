@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Bus is an in-memory channel-based EventBus implementation.

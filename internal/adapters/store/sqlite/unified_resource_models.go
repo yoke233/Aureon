@@ -3,7 +3,7 @@ package sqlite
 import (
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type ResourceSpaceModel struct {

@@ -13,11 +13,11 @@ import (
 	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
-	acphandler "github.com/yoke233/ai-workflow/internal/adapters/agent/acp"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	eventbridge "github.com/yoke233/ai-workflow/internal/adapters/events/bridge"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/threadctx"
+	acphandler "github.com/yoke233/zhanggui/internal/adapters/agent/acp"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	eventbridge "github.com/yoke233/zhanggui/internal/adapters/events/bridge"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/threadctx"
 )
 
 type threadSessionKey struct {

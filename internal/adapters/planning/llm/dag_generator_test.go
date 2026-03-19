@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/application/planning"
+	"github.com/yoke233/zhanggui/internal/application/planning"
 )
 
 type mockLLMClient struct {

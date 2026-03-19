@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // Resolver selects an agent for an action based on role and required capabilities.

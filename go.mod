@@ -1,4 +1,4 @@
-module github.com/yoke233/ai-workflow
+module github.com/yoke233/zhanggui
 
 go 1.24.7
 

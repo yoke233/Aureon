@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	workspaceclone "github.com/yoke233/ai-workflow/internal/adapters/workspace/clone"
-	issueapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
+	workspaceclone "github.com/yoke233/zhanggui/internal/adapters/workspace/clone"
+	issueapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type bootstrapPRWorkItemRequest struct {

@@ -13,10 +13,10 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	natsprobe "github.com/yoke233/ai-workflow/internal/adapters/probe/nats"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	natsprobe "github.com/yoke233/zhanggui/internal/adapters/probe/nats"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // NATSSessionManagerConfig configures the NATS-backed session manager.

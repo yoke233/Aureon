@@ -14,17 +14,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	membus "github.com/yoke233/ai-workflow/internal/adapters/events/memory"
-	"github.com/yoke233/ai-workflow/internal/adapters/llmconfig"
-	v2sandbox "github.com/yoke233/ai-workflow/internal/adapters/sandbox"
-	"github.com/yoke233/ai-workflow/internal/adapters/store/sqlite"
-	chatapp "github.com/yoke233/ai-workflow/internal/application/chat"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	inspectionapp "github.com/yoke233/ai-workflow/internal/application/inspection"
-	"github.com/yoke233/ai-workflow/internal/audit"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	membus "github.com/yoke233/zhanggui/internal/adapters/events/memory"
+	"github.com/yoke233/zhanggui/internal/adapters/llmconfig"
+	v2sandbox "github.com/yoke233/zhanggui/internal/adapters/sandbox"
+	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
+	chatapp "github.com/yoke233/zhanggui/internal/application/chat"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	inspectionapp "github.com/yoke233/zhanggui/internal/application/inspection"
+	"github.com/yoke233/zhanggui/internal/audit"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 type failingCreateThreadMessageStore struct {

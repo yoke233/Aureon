@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	"github.com/yoke233/ai-workflow/internal/core"
-	skillset "github.com/yoke233/ai-workflow/internal/skills"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	"github.com/yoke233/zhanggui/internal/core"
+	skillset "github.com/yoke233/zhanggui/internal/skills"
 )
 
 // Ensure ConfigRegistry satisfies both AgentRegistry and the flow resolver interface.

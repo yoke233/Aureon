@@ -3,7 +3,7 @@ package flow
 import (
 	"context"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type workspaceKey struct{}

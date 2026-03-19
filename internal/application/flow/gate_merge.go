@@ -12,7 +12,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // mergePRIfConfigured attempts to merge the associated PR/MR when merge_on_pass is enabled.

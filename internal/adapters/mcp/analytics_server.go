@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // AnalyticsServer exposes system analytics data as MCP tool calls.

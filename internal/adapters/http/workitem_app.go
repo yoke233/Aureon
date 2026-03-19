@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/yoke233/ai-workflow/internal/application/workitemapp"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/application/workitemapp"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type workItemAppBootstrapper struct {

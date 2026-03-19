@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/adapters/agent/acpclient"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	runtimeapp "github.com/yoke233/ai-workflow/internal/application/runtime"
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 type recordingSink struct {

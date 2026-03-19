@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/config"
 )
 
 func TestTokenAuthMiddleware_DoesNotWarnForWebSocketQueryToken(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yoke233/ai-workflow/internal/core"
+	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // stubInputStore is a minimal in-memory store for InputBuilder tests.

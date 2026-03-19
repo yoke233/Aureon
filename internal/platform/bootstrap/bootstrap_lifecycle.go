@@ -4,14 +4,14 @@ import (
 	"context"
 	"log/slog"
 
-	chatacp "github.com/yoke233/ai-workflow/internal/adapters/chat/acp"
-	cronapp "github.com/yoke233/ai-workflow/internal/application/cron"
-	flowapp "github.com/yoke233/ai-workflow/internal/application/flow"
-	inspectionapp "github.com/yoke233/ai-workflow/internal/application/inspection"
-	probeapp "github.com/yoke233/ai-workflow/internal/application/probe"
-	"github.com/yoke233/ai-workflow/internal/core"
-	"github.com/yoke233/ai-workflow/internal/platform/config"
-	"github.com/yoke233/ai-workflow/internal/platform/configruntime"
+	chatacp "github.com/yoke233/zhanggui/internal/adapters/chat/acp"
+	cronapp "github.com/yoke233/zhanggui/internal/application/cron"
+	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
+	inspectionapp "github.com/yoke233/zhanggui/internal/application/inspection"
+	probeapp "github.com/yoke233/zhanggui/internal/application/probe"
+	"github.com/yoke233/zhanggui/internal/core"
+	"github.com/yoke233/zhanggui/internal/platform/config"
+	"github.com/yoke233/zhanggui/internal/platform/configruntime"
 )
 
 type bootstrapLifecycle struct {

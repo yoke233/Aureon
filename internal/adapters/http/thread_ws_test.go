@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 )
 
 type stubThreadAgentRuntime struct {
+	mu               sync.Mutex
 	activeProfileIDs []string
 	sendCalls        []stubThreadSendCall
 	sendErr          error
@@ -38,6 +41,8 @@ func (s *stubThreadAgentRuntime) WaitAgentReady(context.Context, int64, string) 
 }
 
 func (s *stubThreadAgentRuntime) PromptAgent(_ context.Context, threadID int64, profileID string, message string) (*core.ThreadAgentPromptResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.promptErr != nil {
 		return nil, s.promptErr
 	}
@@ -52,6 +57,8 @@ func (s *stubThreadAgentRuntime) PromptAgent(_ context.Context, threadID int64, 
 }
 
 func (s *stubThreadAgentRuntime) SendMessage(_ context.Context, threadID int64, profileID string, message string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.sendErr != nil {
 		return s.sendErr
 	}
@@ -68,6 +75,8 @@ func (s *stubThreadAgentRuntime) RemoveAgent(context.Context, int64, int64) erro
 }
 
 func (s *stubThreadAgentRuntime) CleanupThread(_ context.Context, threadID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.cleanupErr != nil {
 		return s.cleanupErr
 	}
@@ -76,12 +85,48 @@ func (s *stubThreadAgentRuntime) CleanupThread(_ context.Context, threadID int64
 }
 
 func (s *stubThreadAgentRuntime) ActiveAgentProfileIDs(threadID int64) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.activeProfileIDs))
 	for _, profileID := range s.activeProfileIDs {
 		out = append(out, profileID)
 	}
 	_ = threadID
 	return out
+}
+
+func (s *stubThreadAgentRuntime) snapshotPromptCalls() []stubThreadSendCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]stubThreadSendCall, len(s.promptCalls))
+	copy(out, s.promptCalls)
+	return out
+}
+
+func (s *stubThreadAgentRuntime) snapshotSendCalls() []stubThreadSendCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]stubThreadSendCall, len(s.sendCalls))
+	copy(out, s.sendCalls)
+	return out
+}
+
+func waitForThreadCondition(t *testing.T, timeout time.Duration, check func() error) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := check(); err == nil {
+			return
+		} else {
+			lastErr = err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+	t.Fatalf("condition not met within %s", timeout)
 }
 
 type stubThreadAgentRegistry struct {
@@ -598,12 +643,28 @@ func TestAPI_WebSocket_ThreadSend_ConcurrentMeetingAggregatesReplies(t *testing.
 		t.Fatalf("ack type = %q, want thread.ack", ack.Type)
 	}
 
-	time.Sleep(150 * time.Millisecond)
-	if len(threadPool.sendCalls) != 0 {
-		t.Fatalf("send calls = %d, want 0 in concurrent meeting mode", len(threadPool.sendCalls))
-	}
-	if len(threadPool.promptCalls) != 2 {
-		t.Fatalf("prompt calls = %d, want 2", len(threadPool.promptCalls))
+	waitForThreadCondition(t, 2*time.Second, func() error {
+		sendCalls := threadPool.snapshotSendCalls()
+		promptCalls := threadPool.snapshotPromptCalls()
+		if len(sendCalls) != 0 {
+			return fmt.Errorf("send calls = %d, want 0 in concurrent meeting mode", len(sendCalls))
+		}
+		if len(promptCalls) != 2 {
+			return fmt.Errorf("prompt calls = %d, want 2", len(promptCalls))
+		}
+		msgs, err := h.store.ListThreadMessages(context.Background(), thread.ID, 10, 0)
+		if err != nil {
+			return err
+		}
+		if len(msgs) != 4 {
+			return fmt.Errorf("messages = %d, want 4 (1 human + 2 agent + 1 summary)", len(msgs))
+		}
+		return nil
+	})
+
+	promptCalls := threadPool.snapshotPromptCalls()
+	if !strings.Contains(promptCalls[0].message, "会议模式：concurrent") || !strings.Contains(promptCalls[1].message, "会议模式：concurrent") {
+		t.Fatalf("unexpected concurrent prompt calls: %+v", promptCalls)
 	}
 
 	msgs, err := h.store.ListThreadMessages(context.Background(), thread.ID, 10, 0)
@@ -615,6 +676,15 @@ func TestAPI_WebSocket_ThreadSend_ConcurrentMeetingAggregatesReplies(t *testing.
 	}
 	if msgs[1].Role != "agent" || msgs[2].Role != "agent" {
 		t.Fatalf("expected agent messages in the middle, got roles %q and %q", msgs[1].Role, msgs[2].Role)
+	}
+	runID := fmt.Sprint(msgs[3].Metadata["meeting_run_id"])
+	for i := 1; i <= 2; i++ {
+		if got := msgs[i].Metadata["meeting_round"]; got != int64(1) && got != 1 && got != float64(1) {
+			t.Fatalf("agent message %d round = %v, want 1", i, got)
+		}
+		if fmt.Sprint(msgs[i].Metadata["meeting_run_id"]) != runID {
+			t.Fatalf("agent message %d run_id = %v, want %s", i, msgs[i].Metadata["meeting_run_id"], runID)
+		}
 	}
 	if msgs[3].Role != "system" {
 		t.Fatalf("summary role = %q, want system", msgs[3].Role)
@@ -683,12 +753,26 @@ func TestAPI_WebSocket_ThreadSend_GroupChatMeetingRotatesSpeakers(t *testing.T) 
 		t.Fatalf("ack type = %q, want thread.ack", ack.Type)
 	}
 
-	time.Sleep(150 * time.Millisecond)
-	if len(threadPool.promptCalls) != 2 {
-		t.Fatalf("prompt calls = %d, want 2", len(threadPool.promptCalls))
+	waitForThreadCondition(t, 2*time.Second, func() error {
+		promptCalls := threadPool.snapshotPromptCalls()
+		if len(promptCalls) != 2 {
+			return fmt.Errorf("prompt calls = %d, want 2", len(promptCalls))
+		}
+		msgs, err := h.store.ListThreadMessages(context.Background(), thread.ID, 10, 0)
+		if err != nil {
+			return err
+		}
+		if len(msgs) != 4 {
+			return fmt.Errorf("messages = %d, want 4 (1 human + 2 rounds + 1 summary)", len(msgs))
+		}
+		return nil
+	})
+	promptCalls := threadPool.snapshotPromptCalls()
+	if promptCalls[0].profileID != "worker-a" || promptCalls[1].profileID != "worker-b" {
+		t.Fatalf("unexpected speaker order: %+v", promptCalls)
 	}
-	if threadPool.promptCalls[0].profileID != "worker-a" || threadPool.promptCalls[1].profileID != "worker-b" {
-		t.Fatalf("unexpected speaker order: %+v", threadPool.promptCalls)
+	if !strings.Contains(promptCalls[1].message, "本次会议已有发言") {
+		t.Fatalf("second prompt missing prior turns context: %q", promptCalls[1].message)
 	}
 
 	msgs, err := h.store.ListThreadMessages(context.Background(), thread.ID, 10, 0)
@@ -704,15 +788,171 @@ func TestAPI_WebSocket_ThreadSend_GroupChatMeetingRotatesSpeakers(t *testing.T) 
 	if got := msgs[2].Metadata["meeting_round"]; got != int64(2) && got != 2 && got != float64(2) {
 		t.Fatalf("round 2 metadata = %v, want 2", got)
 	}
+	if strings.Contains(msgs[2].Content, "[FINAL]") {
+		t.Fatalf("round 2 content = %q, want FINAL marker removed", msgs[2].Content)
+	}
 	if msgs[3].Role != "system" {
 		t.Fatalf("summary role = %q, want system", msgs[3].Role)
 	}
 	if got := msgs[3].Metadata["meeting_mode"]; got != "group_chat" {
 		t.Fatalf("summary meeting_mode = %v, want group_chat", got)
 	}
+	if got := msgs[3].Metadata["meeting_selector"]; got != "round_robin" {
+		t.Fatalf("summary meeting_selector = %v, want round_robin", got)
+	}
+	if got := msgs[3].Metadata["meeting_rounds"]; got != int64(2) && got != 2 && got != float64(2) {
+		t.Fatalf("summary meeting_rounds = %v, want 2", got)
+	}
+	if got := msgs[3].Metadata["stop_reason"]; got != "worker-b declared final" {
+		t.Fatalf("summary stop_reason = %v, want worker-b declared final", got)
+	}
 	if !strings.Contains(msgs[3].Content, "主持人会议已完成") {
 		t.Fatalf("summary content = %q, want group chat summary", msgs[3].Content)
 	}
+}
+
+func TestAPI_WebSocket_ThreadSend_GroupChatMeetingPersistsSummaryWhenNoTurns(t *testing.T) {
+	h, ts := setupAPI(t)
+	h.threadPool = &stubThreadAgentRuntime{
+		activeProfileIDs: []string{"worker-a", "worker-b"},
+		promptErr:        errors.New("agent offline"),
+	}
+
+	resp, err := post(ts, "/threads", map[string]any{
+		"title": "ws-group-chat-empty-thread",
+		"metadata": map[string]any{
+			"agent_routing_mode": "broadcast",
+			"meeting_mode":       "group_chat",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	var thread core.Thread
+	if err := decodeJSON(resp, &thread); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	wsURL := "ws" + ts.URL[4:] + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"type": "thread.send",
+		"data": map[string]any{
+			"request_id": "req-group-chat-empty",
+			"thread_id":  thread.ID,
+			"message":    "请轮流讨论这个问题",
+		},
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var ack struct {
+		Type string `json:"type"`
+	}
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if ack.Type != "thread.ack" {
+		t.Fatalf("ack type = %q, want thread.ack", ack.Type)
+	}
+
+	waitForThreadCondition(t, 2*time.Second, func() error {
+		msgs, err := h.store.ListThreadMessages(context.Background(), thread.ID, 10, 0)
+		if err != nil {
+			return err
+		}
+		if len(msgs) != 2 {
+			return fmt.Errorf("messages = %d, want 2 (1 human + 1 summary)", len(msgs))
+		}
+		return nil
+	})
+
+	msgs, err := h.store.ListThreadMessages(context.Background(), thread.ID, 10, 0)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if msgs[1].Role != "system" {
+		t.Fatalf("summary role = %q, want system", msgs[1].Role)
+	}
+	if got := msgs[1].Metadata["meeting_rounds"]; got != int64(0) && got != 0 && got != float64(0) {
+		t.Fatalf("summary meeting_rounds = %v, want 0", got)
+	}
+	if got := msgs[1].Metadata["stop_reason"]; got != "worker-a failed" {
+		t.Fatalf("summary stop_reason = %v, want worker-a failed", got)
+	}
+	if !strings.Contains(msgs[1].Content, "未产生有效发言") {
+		t.Fatalf("summary content = %q, want empty-turns hint", msgs[1].Content)
+	}
+}
+
+func TestAPI_WebSocket_ThreadSend_ConcurrentMeetingDeduplicatesRecipients(t *testing.T) {
+	h, ts := setupAPI(t)
+	threadPool := &stubThreadAgentRuntime{
+		activeProfileIDs: []string{"worker-a", "worker-a", "worker-b"},
+		promptReplies: map[string]string{
+			"worker-a": "A",
+			"worker-b": "B",
+		},
+	}
+	h.threadPool = threadPool
+
+	resp, err := post(ts, "/threads", map[string]any{
+		"title": "ws-concurrent-dedupe-thread",
+		"metadata": map[string]any{
+			"agent_routing_mode": "broadcast",
+			"meeting_mode":       "concurrent",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	var thread core.Thread
+	if err := decodeJSON(resp, &thread); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	wsURL := "ws" + ts.URL[4:] + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"type": "thread.send",
+		"data": map[string]any{
+			"request_id": "req-concurrent-dedupe",
+			"thread_id":  thread.ID,
+			"message":    "请并行分析这个问题",
+		},
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var ack struct {
+		Type string `json:"type"`
+	}
+	if err := conn.ReadJSON(&ack); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if ack.Type != "thread.ack" {
+		t.Fatalf("ack type = %q, want thread.ack", ack.Type)
+	}
+
+	waitForThreadCondition(t, 2*time.Second, func() error {
+		promptCalls := threadPool.snapshotPromptCalls()
+		if len(promptCalls) != 2 {
+			return fmt.Errorf("prompt calls = %d, want 2 after dedupe", len(promptCalls))
+		}
+		return nil
+	})
 }
 
 func TestAPI_WebSocket_ThreadSend_TargetAgentUnavailable(t *testing.T) {

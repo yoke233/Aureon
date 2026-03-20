@@ -73,11 +73,12 @@ func readThreadMeetingSelector(thread *core.Thread) string {
 		return "round_robin"
 	}
 	value, _ := thread.Metadata["meeting_selector"].(string)
-	value = strings.TrimSpace(value)
-	if value == "" {
+	switch strings.TrimSpace(value) {
+	case "", "round_robin":
+		return "round_robin"
+	default:
 		return "round_robin"
 	}
-	return value
 }
 
 func (h *Handler) dispatchThreadAgentWork(thread *core.Thread, message *core.ThreadMessage, recipients []string, targetAgentID string) {
@@ -85,7 +86,10 @@ func (h *Handler) dispatchThreadAgentWork(thread *core.Thread, message *core.Thr
 		return
 	}
 
-	normalized := sortedProfileIDs(recipients)
+	normalized := uniqueSortedProfileIDs(recipients)
+	if len(normalized) == 0 {
+		return
+	}
 	mode := readThreadMeetingMode(thread)
 	if targetAgentID != "" || len(normalized) <= 1 || mode == threadMeetingModeDirect {
 		for _, profileID := range normalized {
@@ -312,12 +316,13 @@ func buildConcurrentMeetingSummary(results []threadConcurrentReply) string {
 }
 
 func buildGroupChatMeetingSummary(turns []threadMeetingTurn, selector string, stopReason string) string {
-	if len(turns) == 0 {
-		return ""
-	}
 	lines := []string{
 		fmt.Sprintf("主持人会议已完成，选择器：%s。", selector),
 		fmt.Sprintf("停止原因：%s。", stopReason),
+	}
+	if len(turns) == 0 {
+		lines = append(lines, "- 本次会议未产生有效发言。")
+		return strings.Join(lines, "\n")
 	}
 	for _, turn := range turns {
 		lines = append(lines, fmt.Sprintf("- 第 %d 轮 %s：%s", turn.Round, turn.ProfileID, compactMeetingReply(turn.Content, 160)))
@@ -364,6 +369,25 @@ func compactMeetingReply(content string, limit int) string {
 func sortedProfileIDs(ids []string) []string {
 	out := append([]string(nil), ids...)
 	sort.Strings(out)
+	return out
+}
+
+func uniqueSortedProfileIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	sorted := sortedProfileIDs(ids)
+	out := make([]string, 0, len(sorted))
+	for _, id := range sorted {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] == id {
+			continue
+		}
+		out = append(out, id)
+	}
 	return out
 }
 

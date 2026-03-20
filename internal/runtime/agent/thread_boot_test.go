@@ -233,3 +233,21 @@ func TestBuildBootPrompt_WorkspaceContext(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildBootPrompt_InstructionsEncourageRelayCollaboration(t *testing.T) {
+	out := BuildBootPrompt(ThreadBootInput{
+		Thread:       newThread("Relay thread", core.ThreadActive),
+		AgentProfile: newProfile("agent-1", core.RoleWorker),
+	})
+
+	for _, want := range []string{
+		"baton currently in your hand",
+		"waiting on someone",
+		"handing off to the next participant",
+		"avoid trying to finish everyone else's work in one turn",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output should contain %q.\nOutput:\n%s", want, out)
+		}
+	}
+}

@@ -708,6 +708,17 @@ export function ThreadDetailPage() {
       });
     };
 
+    const clearLiveAgentOutput = (profileID: string) => {
+      setLiveAgentOutputsByID((prev) => {
+        if (!(profileID in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[profileID];
+        return next;
+      });
+    };
+
     const flushAgentChunkBuffers = () => {
       if (agentChunkFlushFrameRef.current != null) {
         cancelAnimationFrame(agentChunkFlushFrameRef.current);
@@ -918,7 +929,11 @@ export function ThreadDetailPage() {
             next.delete(agentID);
             return next;
           });
-          clearAgentActivityState(agentID);
+          clearLiveAgentOutput(agentID);
+          setCollapsedAgentActivityPanels((prev) => ({
+            ...prev,
+            [agentID]: true,
+          }));
         }
         appendRealtimeMessage(payload, "agent");
       },
@@ -987,7 +1002,11 @@ export function ThreadDetailPage() {
             next.delete(failedID);
             return next;
           });
-          clearAgentActivityState(failedID);
+          clearLiveAgentOutput(failedID);
+          setCollapsedAgentActivityPanels((prev) => ({
+            ...prev,
+            [failedID]: true,
+          }));
         }
         setError(
           payload.error?.trim() ||
@@ -2232,43 +2251,6 @@ export function ThreadDetailPage() {
                     <Send className="h-4 w-4" />
                   </Button>
                 </div>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">
-                  {selectedDiscussionAgents.length > 0
-                    ? t(
-                        "threads.selectedDiscussionHint",
-                        "This message will be sent to the selected agents. Sending clears the selection.",
-                      )
-                    : agentRoutingMode === "auto"
-                      ? t(
-                          "threads.mentionHintAuto",
-                          "Auto mode: messages are automatically routed to the best-fit agent based on content analysis.",
-                        )
-                      : agentRoutingMode === "broadcast"
-                        ? t(
-                            "threads.mentionHintBroadcast",
-                            "Broadcast mode: messages go to all active agents. Use @agent-id for targeting.",
-                          )
-                        : t(
-                            "threads.mentionHintMentionOnly",
-                            "Mention-only mode: use @agent-id to direct messages to specific agents.",
-                          )}
-                </p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {meetingMode === "concurrent"
-                    ? t(
-                        "threads.meetingHintConcurrent",
-                        "Concurrent meeting: routed agents reply in parallel, then the thread posts a summary.",
-                      )
-                    : meetingMode === "group_chat"
-                      ? t(
-                          "threads.meetingHintGroupChat",
-                          "Group chat meeting: routed agents speak round by round using the configured selector.",
-                        )
-                      : t(
-                          "threads.meetingHintDirect",
-                          "Direct mode: each routed agent receives the message independently. Use @agent-id for lightweight handoff.",
-                        )}
-                </p>
               </div>
             </div>
           </div>

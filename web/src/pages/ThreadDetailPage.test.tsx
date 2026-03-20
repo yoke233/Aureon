@@ -437,9 +437,18 @@ describe("ThreadDetailPage", () => {
 
     renderPage();
 
-    await screen.findByText(
-      "Mention-only mode: use @agent-id to direct messages to specific agents.",
-    );
+    await waitFor(() => {
+      expect(
+        screen.queryByText(
+          "Mention-only mode: use @agent-id to direct messages to specific agents.",
+        ),
+      ).toBeNull();
+      expect(
+        screen.queryByText(
+          "Direct mode: each routed agent receives the message independently. Use @agent-id for lightweight handoff.",
+        ),
+      ).toBeNull();
+    });
 
     const input = screen.getByPlaceholderText(DEFAULT_MESSAGE_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "普通讨论消息" } });
@@ -487,11 +496,6 @@ describe("ThreadDetailPage", () => {
         metadata: { agent_routing_mode: "broadcast" },
       });
     });
-    expect(
-      await screen.findByText(
-        "Broadcast mode: messages go to all active agents. Use @agent-id for targeting.",
-      ),
-    ).toBeTruthy();
   });
 
   it("支持切换到并行会议模式", async () => {
@@ -524,11 +528,6 @@ describe("ThreadDetailPage", () => {
         metadata: { meeting_mode: "concurrent" },
       });
     });
-    expect(
-      await screen.findByText(
-        "Concurrent meeting: routed agents reply in parallel, then the thread posts a summary.",
-      ),
-    ).toBeTruthy();
   });
 
   it("输入 @ 时展示候选并插入 mention", async () => {

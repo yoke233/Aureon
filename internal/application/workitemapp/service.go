@@ -10,6 +10,10 @@ import (
 	"github.com/yoke233/zhanggui/internal/core"
 )
 
+type initiativeMembershipReader interface {
+	ListInitiativeItemsByWorkItem(ctx context.Context, workItemID int64) ([]*core.InitiativeItem, error)
+}
+
 type Config struct {
 	Store       Store
 	Tx          Tx
@@ -364,10 +368,53 @@ func (s *Service) validateDependencies(ctx context.Context, workItemID int64, pr
 			return err
 		}
 		if projectID != nil && depWorkItem.ProjectID != nil && *depWorkItem.ProjectID != *projectID {
-			return newError(CodeInvalidWorkItemDependency, fmt.Sprintf("dependency work item %d belongs to a different project", depID), nil)
+			allowed, allowErr := s.allowCrossProjectDependency(ctx, workItemID, depID)
+			if allowErr != nil {
+				return allowErr
+			}
+			if !allowed {
+				return newError(CodeInvalidWorkItemDependency, fmt.Sprintf("dependency work item %d belongs to a different project; cross-project dependencies require both work items to belong to the same initiative", depID), nil)
+			}
 		}
 	}
 	return nil
+}
+
+func (s *Service) allowCrossProjectDependency(ctx context.Context, workItemID int64, depID int64) (bool, error) {
+	reader, ok := s.store.(initiativeMembershipReader)
+	if !ok || workItemID == 0 {
+		return false, nil
+	}
+	currentItems, err := reader.ListInitiativeItemsByWorkItem(ctx, workItemID)
+	if err != nil {
+		return false, err
+	}
+	if len(currentItems) == 0 {
+		return false, nil
+	}
+	depItems, err := reader.ListInitiativeItemsByWorkItem(ctx, depID)
+	if err != nil {
+		return false, err
+	}
+	if len(depItems) == 0 {
+		return false, nil
+	}
+	currentInitiatives := make(map[int64]struct{}, len(currentItems))
+	for _, item := range currentItems {
+		if item == nil || item.InitiativeID <= 0 {
+			continue
+		}
+		currentInitiatives[item.InitiativeID] = struct{}{}
+	}
+	for _, item := range depItems {
+		if item == nil {
+			continue
+		}
+		if _, ok := currentInitiatives[item.InitiativeID]; ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func mapRunError(err error) error {

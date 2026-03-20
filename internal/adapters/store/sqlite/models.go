@@ -371,6 +371,132 @@ func (m *ThreadWorkItemLinkModel) toCore() *core.ThreadWorkItemLink {
 	}
 }
 
+type InitiativeModel struct {
+	ID          int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	Title       string                    `gorm:"column:title;not null"`
+	Description string                    `gorm:"column:description;not null"`
+	Status      string                    `gorm:"column:status;not null"`
+	CreatedBy   string                    `gorm:"column:created_by;not null"`
+	ApprovedBy  *string                   `gorm:"column:approved_by"`
+	ApprovedAt  *time.Time                `gorm:"column:approved_at"`
+	ReviewNote  string                    `gorm:"column:review_note;not null;default:''"`
+	Metadata    JSONField[map[string]any] `gorm:"column:metadata;type:text"`
+	CreatedAt   time.Time                 `gorm:"column:created_at"`
+	UpdatedAt   time.Time                 `gorm:"column:updated_at"`
+}
+
+func (InitiativeModel) TableName() string { return "initiatives" }
+
+func initiativeModelFromCore(i *core.Initiative) *InitiativeModel {
+	if i == nil {
+		return nil
+	}
+	return &InitiativeModel{
+		ID:          i.ID,
+		Title:       i.Title,
+		Description: i.Description,
+		Status:      string(i.Status),
+		CreatedBy:   i.CreatedBy,
+		ApprovedBy:  i.ApprovedBy,
+		ApprovedAt:  i.ApprovedAt,
+		ReviewNote:  i.ReviewNote,
+		Metadata:    JSONField[map[string]any]{Data: i.Metadata},
+		CreatedAt:   i.CreatedAt,
+		UpdatedAt:   i.UpdatedAt,
+	}
+}
+
+func (m *InitiativeModel) toCore() *core.Initiative {
+	if m == nil {
+		return nil
+	}
+	return &core.Initiative{
+		ID:          m.ID,
+		Title:       m.Title,
+		Description: m.Description,
+		Status:      core.InitiativeStatus(m.Status),
+		CreatedBy:   m.CreatedBy,
+		ApprovedBy:  m.ApprovedBy,
+		ApprovedAt:  m.ApprovedAt,
+		ReviewNote:  m.ReviewNote,
+		Metadata:    m.Metadata.Data,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+	}
+}
+
+type InitiativeItemModel struct {
+	ID           int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	InitiativeID int64     `gorm:"column:initiative_id;not null;uniqueIndex:idx_initiative_items_unique"`
+	WorkItemID   int64     `gorm:"column:work_item_id;not null;uniqueIndex:idx_initiative_items_unique"`
+	Role         string    `gorm:"column:role;not null;default:''"`
+	CreatedAt    time.Time `gorm:"column:created_at"`
+}
+
+func (InitiativeItemModel) TableName() string { return "initiative_items" }
+
+func (m *InitiativeItemModel) toCore() *core.InitiativeItem {
+	if m == nil {
+		return nil
+	}
+	return &core.InitiativeItem{
+		ID:           m.ID,
+		InitiativeID: m.InitiativeID,
+		WorkItemID:   m.WorkItemID,
+		Role:         m.Role,
+		CreatedAt:    m.CreatedAt,
+	}
+}
+
+func initiativeItemModelFromCore(item *core.InitiativeItem) *InitiativeItemModel {
+	if item == nil {
+		return nil
+	}
+	return &InitiativeItemModel{
+		ID:           item.ID,
+		InitiativeID: item.InitiativeID,
+		WorkItemID:   item.WorkItemID,
+		Role:         item.Role,
+		CreatedAt:    item.CreatedAt,
+	}
+}
+
+type ThreadInitiativeLinkModel struct {
+	ID           int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ThreadID     int64     `gorm:"column:thread_id;not null;uniqueIndex:idx_thread_initiative_links_unique"`
+	InitiativeID int64     `gorm:"column:initiative_id;not null;uniqueIndex:idx_thread_initiative_links_unique"`
+	RelationType string    `gorm:"column:relation_type;not null;default:source"`
+	CreatedAt    time.Time `gorm:"column:created_at"`
+}
+
+func (ThreadInitiativeLinkModel) TableName() string { return "thread_initiative_links" }
+
+func (m *ThreadInitiativeLinkModel) toCore() *core.ThreadInitiativeLink {
+	if m == nil {
+		return nil
+	}
+	return &core.ThreadInitiativeLink{
+		ID:           m.ID,
+		ThreadID:     m.ThreadID,
+		InitiativeID: m.InitiativeID,
+		RelationType: m.RelationType,
+		CreatedAt:    m.CreatedAt,
+	}
+}
+
+func threadInitiativeLinkModelFromCore(link *core.ThreadInitiativeLink) *ThreadInitiativeLinkModel {
+	if link == nil {
+		return nil
+	}
+	return &ThreadInitiativeLinkModel{
+		ID:           link.ID,
+		ThreadID:     link.ThreadID,
+		InitiativeID: link.InitiativeID,
+		RelationType: link.RelationType,
+		CreatedAt:    link.CreatedAt,
+	}
+}
+
 type ThreadContextRefModel struct {
 	ID        int64      `gorm:"column:id;primaryKey;autoIncrement"`
 	ThreadID  int64      `gorm:"column:thread_id;not null;uniqueIndex:idx_thread_context_refs_thread_project"`

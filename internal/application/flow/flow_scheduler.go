@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/yoke233/zhanggui/internal/core"
 )
+
+type dependentWorkItemReader interface {
+	ListDependentWorkItems(ctx context.Context, workItemID int64) ([]*core.WorkItem, error)
+}
 
 // WorkItemScheduler manages a queue of WorkItems and limits concurrent execution.
 // API callers submit WorkItems via Submit(); the scheduler runs them when capacity
@@ -110,15 +115,26 @@ func (s *WorkItemScheduler) Submit(ctx context.Context, workItemID int64) error 
 	}
 	s.mu.Unlock()
 
+	workItem, err := s.store.GetWorkItem(ctx, workItemID)
+	if err != nil {
+		return fmt.Errorf("get work item %d: %w", workItemID, err)
+	}
+	ready, err := s.dependenciesSatisfied(ctx, workItem)
+	if err != nil {
+		return err
+	}
+	if !ready {
+		if err := s.store.UpdateWorkItemStatus(ctx, workItemID, core.WorkItemAccepted); err != nil && !errors.Is(err, core.ErrNotFound) {
+			return fmt.Errorf("hold work item %d until dependencies resolve: %w", workItemID, err)
+		}
+		return nil
+	}
+
 	// Atomically transition open/accepted, unarchived work items to queued.
 	if err := s.store.PrepareWorkItemRun(ctx, workItemID, core.WorkItemQueued); err != nil {
 		return fmt.Errorf("queue work item %d: %w", workItemID, err)
 	}
-	s.bus.Publish(ctx, core.Event{
-		Type:       core.EventWorkItemQueued,
-		WorkItemID: workItemID,
-		Timestamp:  time.Now().UTC(),
-	})
+	s.publishQueued(ctx, workItemID)
 
 	s.mu.Lock()
 	s.queue = append(s.queue, workItemID)
@@ -254,7 +270,9 @@ func (s *WorkItemScheduler) runWorkItem(ctx context.Context, workItemID int64) {
 			})
 		}
 		slog.Error("work item execution failed", "work_item_id", workItemID, "error", err)
+		return
 	}
+	s.autoQueueDependents(workItemID)
 }
 
 // signal pokes the scheduler loop to re-check capacity.
@@ -263,6 +281,66 @@ func (s *WorkItemScheduler) signal() {
 	case s.notify <- struct{}{}:
 	default:
 	}
+}
+
+func (s *WorkItemScheduler) dependenciesSatisfied(ctx context.Context, workItem *core.WorkItem) (bool, error) {
+	if workItem == nil || len(workItem.DependsOn) == 0 {
+		return true, nil
+	}
+	for _, depID := range workItem.DependsOn {
+		dep, err := s.store.GetWorkItem(ctx, depID)
+		if err != nil {
+			return false, fmt.Errorf("get dependency work item %d: %w", depID, err)
+		}
+		if dep.Status != core.WorkItemDone {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *WorkItemScheduler) autoQueueDependents(workItemID int64) {
+	reader, ok := s.store.(dependentWorkItemReader)
+	if !ok {
+		return
+	}
+	dependents, err := reader.ListDependentWorkItems(context.Background(), workItemID)
+	if err != nil {
+		slog.Warn("work item scheduler: list dependents failed", "work_item_id", workItemID, "error", err)
+		return
+	}
+	for _, dependent := range dependents {
+		if dependent == nil {
+			continue
+		}
+		ready, err := s.dependenciesSatisfied(context.Background(), dependent)
+		if err != nil {
+			slog.Warn("work item scheduler: dependency check failed", "work_item_id", dependent.ID, "error", err)
+			continue
+		}
+		if !ready {
+			continue
+		}
+		if err := s.store.PrepareWorkItemRun(context.Background(), dependent.ID, core.WorkItemQueued); err != nil {
+			if !errors.Is(err, core.ErrInvalidTransition) {
+				slog.Warn("work item scheduler: auto queue dependent failed", "work_item_id", dependent.ID, "error", err)
+			}
+			continue
+		}
+		s.publishQueued(context.Background(), dependent.ID)
+		s.mu.Lock()
+		s.queue = append(s.queue, dependent.ID)
+		s.mu.Unlock()
+		s.signal()
+	}
+}
+
+func (s *WorkItemScheduler) publishQueued(ctx context.Context, workItemID int64) {
+	s.bus.Publish(ctx, core.Event{
+		Type:       core.EventWorkItemQueued,
+		WorkItemID: workItemID,
+		Timestamp:  time.Now().UTC(),
+	})
 }
 
 // drainRunning cancels all running work items and waits for them to finish.

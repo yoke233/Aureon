@@ -61,6 +61,18 @@ func (s *failingDeleteStore) DeleteRunsByWorkItem(ctx context.Context, workItemI
 	return s.Store.DeleteRunsByWorkItem(ctx, workItemID)
 }
 
+type workItemInitiativeMembershipStore struct {
+	*sqlite.Store
+	byWorkItem map[int64][]*core.InitiativeItem
+}
+
+func (s *workItemInitiativeMembershipStore) ListInitiativeItemsByWorkItem(_ context.Context, workItemID int64) ([]*core.InitiativeItem, error) {
+	items := s.byWorkItem[workItemID]
+	out := make([]*core.InitiativeItem, len(items))
+	copy(out, items)
+	return out, nil
+}
+
 func newWorkItemAppTestStore(t *testing.T) *sqlite.Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "workitemapp-test.db")
@@ -258,6 +270,104 @@ func TestServiceCreateWorkItemPersistsDependsOnAndRollsBackOnBootstrapFailure(t 
 	}
 	if len(persisted.DependsOn) != 1 || persisted.DependsOn[0] != dependencyID {
 		t.Fatalf("expected persisted depends_on, got %+v", persisted.DependsOn)
+	}
+}
+
+func TestServiceUpdateWorkItemAllowsCrossProjectDependenciesInsideSameInitiative(t *testing.T) {
+	store := newWorkItemAppTestStore(t)
+	ctx := context.Background()
+
+	projectA, err := store.CreateProject(ctx, &core.Project{Name: "project-a"})
+	if err != nil {
+		t.Fatalf("create project a: %v", err)
+	}
+	projectB, err := store.CreateProject(ctx, &core.Project{Name: "project-b"})
+	if err != nil {
+		t.Fatalf("create project b: %v", err)
+	}
+	currentID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		ProjectID: &projectA,
+		Title:     "current",
+		Status:    core.WorkItemOpen,
+		Priority:  core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create current work item: %v", err)
+	}
+	dependencyID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		ProjectID: &projectB,
+		Title:     "dependency",
+		Status:    core.WorkItemOpen,
+		Priority:  core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create dependency work item: %v", err)
+	}
+
+	wrapped := &workItemInitiativeMembershipStore{
+		Store: store,
+		byWorkItem: map[int64][]*core.InitiativeItem{
+			currentID:    {{InitiativeID: 7, WorkItemID: currentID}},
+			dependencyID: {{InitiativeID: 7, WorkItemID: dependencyID}},
+		},
+	}
+	svc := New(Config{Store: wrapped, Tx: newSQLiteTxAdapter(store, nil)})
+
+	updated, err := svc.UpdateWorkItem(ctx, UpdateWorkItemInput{
+		ID:        currentID,
+		DependsOn: &[]int64{dependencyID},
+	})
+	if err != nil {
+		t.Fatalf("UpdateWorkItem: %v", err)
+	}
+	if len(updated.DependsOn) != 1 || updated.DependsOn[0] != dependencyID {
+		t.Fatalf("expected depends_on to be updated, got %+v", updated.DependsOn)
+	}
+}
+
+func TestServiceUpdateWorkItemRejectsCrossProjectDependenciesOutsideInitiative(t *testing.T) {
+	store := newWorkItemAppTestStore(t)
+	ctx := context.Background()
+
+	projectA, err := store.CreateProject(ctx, &core.Project{Name: "project-a"})
+	if err != nil {
+		t.Fatalf("create project a: %v", err)
+	}
+	projectB, err := store.CreateProject(ctx, &core.Project{Name: "project-b"})
+	if err != nil {
+		t.Fatalf("create project b: %v", err)
+	}
+	currentID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		ProjectID: &projectA,
+		Title:     "current",
+		Status:    core.WorkItemOpen,
+		Priority:  core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create current work item: %v", err)
+	}
+	dependencyID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		ProjectID: &projectB,
+		Title:     "dependency",
+		Status:    core.WorkItemOpen,
+		Priority:  core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create dependency work item: %v", err)
+	}
+
+	wrapped := &workItemInitiativeMembershipStore{
+		Store:      store,
+		byWorkItem: map[int64][]*core.InitiativeItem{},
+	}
+	svc := New(Config{Store: wrapped, Tx: newSQLiteTxAdapter(store, nil)})
+
+	_, err = svc.UpdateWorkItem(ctx, UpdateWorkItemInput{
+		ID:        currentID,
+		DependsOn: &[]int64{dependencyID},
+	})
+	if CodeOf(err) != CodeInvalidWorkItemDependency {
+		t.Fatalf("expected %s, got %v", CodeInvalidWorkItemDependency, err)
 	}
 }
 

@@ -300,6 +300,59 @@ func TestWorkItemScheduler_QueuedTransition(t *testing.T) {
 	}
 }
 
+func TestWorkItemScheduler_HoldsDependentWorkItemUntilDependencyDone(t *testing.T) {
+	store := newTestStore(t)
+	bus := NewMemBus()
+
+	blocker := make(chan struct{})
+	executor := func(ctx context.Context, action *core.Action, run *core.Run) error {
+		if action.Name == "dep-action" {
+			<-blocker
+		}
+		return nil
+	}
+	eng := New(store, bus, executor)
+
+	dependencyID := createTestWorkItem(t, store, "dependency")
+	createTestAction(t, store, dependencyID, "dep-action", core.ActionExec, 0)
+
+	workItemID := createTestWorkItem(t, store, "dependent")
+	workItem, err := store.GetWorkItem(context.Background(), workItemID)
+	if err != nil {
+		t.Fatalf("GetWorkItem: %v", err)
+	}
+	workItem.DependsOn = []int64{dependencyID}
+	if err := store.UpdateWorkItem(context.Background(), workItem); err != nil {
+		t.Fatalf("UpdateWorkItem: %v", err)
+	}
+	createTestAction(t, store, workItemID, "dependent-action", core.ActionExec, 0)
+
+	sched := NewWorkItemScheduler(eng, store, bus, WorkItemSchedulerConfig{MaxConcurrentWorkItems: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go sched.Start(ctx)
+
+	if err := sched.Submit(ctx, dependencyID); err != nil {
+		t.Fatalf("Submit dependency: %v", err)
+	}
+	if err := sched.Submit(ctx, workItemID); err != nil {
+		t.Fatalf("Submit dependent: %v", err)
+	}
+
+	waitFor(t, func() bool {
+		wi, _ := store.GetWorkItem(ctx, workItemID)
+		return wi.Status == core.WorkItemAccepted
+	}, 2*time.Second)
+
+	close(blocker)
+
+	waitFor(t, func() bool {
+		wi, _ := store.GetWorkItem(ctx, workItemID)
+		return wi.Status == core.WorkItemDone
+	}, 5*time.Second)
+}
+
 // --- helpers ---
 
 func createTestWorkItem(t *testing.T, store *sqlite.Store, title string) int64 {

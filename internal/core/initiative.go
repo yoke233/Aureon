@@ -111,7 +111,7 @@ func CanTransitionInitiativeStatus(from, to InitiativeStatus) bool {
 	case InitiativeExecuting:
 		return to == InitiativeBlocked || to == InitiativeDone || to == InitiativeFailed || to == InitiativeCancelled
 	case InitiativeBlocked:
-		return to == InitiativeExecuting || to == InitiativeFailed || to == InitiativeCancelled
+		return to == InitiativeExecuting || to == InitiativeDone || to == InitiativeFailed || to == InitiativeCancelled
 	case InitiativeDone, InitiativeFailed, InitiativeCancelled:
 		return false
 	default:

@@ -375,7 +375,14 @@ func TestAPI_WebSocket_ThreadSend_TargetAgentIDs(t *testing.T) {
 	if len(threadPool.sendCalls) != 2 {
 		t.Fatalf("send calls = %d, want 2", len(threadPool.sendCalls))
 	}
-	if threadPool.sendCalls[0].profileID != "worker-a" || threadPool.sendCalls[1].profileID != "worker-b" {
+	gotProfiles := map[string]struct{}{}
+	for _, call := range threadPool.sendCalls {
+		gotProfiles[call.profileID] = struct{}{}
+	}
+	if _, ok := gotProfiles["worker-a"]; !ok {
+		t.Fatalf("profile_ids = %+v, want worker-a + worker-b", threadPool.sendCalls)
+	}
+	if _, ok := gotProfiles["worker-b"]; !ok {
 		t.Fatalf("profile_ids = %+v, want worker-a + worker-b", threadPool.sendCalls)
 	}
 

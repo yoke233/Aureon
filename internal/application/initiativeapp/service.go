@@ -291,6 +291,7 @@ func (s *Service) Approve(ctx context.Context, initiativeID int64, approvedBy st
 	initiative.ApprovedBy = ptr(strings.TrimSpace(approvedBy))
 	initiative.ApprovedAt = &now
 	initiative.Status = core.InitiativeExecuting
+	queueAfterCommit := make([]int64, 0, len(items))
 	run := func(ctx context.Context, store Store) error {
 		if err := store.UpdateInitiative(ctx, initiative); err != nil {
 			return err
@@ -303,16 +304,26 @@ func (s *Service) Approve(ctx context.Context, initiativeID int64, approvedBy st
 			if err != nil {
 				return err
 			}
-			if len(workItem.DependsOn) == 0 {
-				if s.scheduler != nil {
-					if err := s.scheduler.Submit(ctx, item.WorkItemID); err != nil {
+			queueRoot := len(workItem.DependsOn) == 0 && (workItem.Status == core.WorkItemOpen || workItem.Status == core.WorkItemAccepted)
+			holdDependent := len(workItem.DependsOn) > 0 && workItem.Status == core.WorkItemOpen
+			if s.scheduler != nil {
+				if holdDependent {
+					if err := store.UpdateWorkItemStatus(ctx, item.WorkItemID, core.WorkItemAccepted); err != nil {
 						return err
 					}
-					continue
 				}
+				if queueRoot {
+					queueAfterCommit = append(queueAfterCommit, item.WorkItemID)
+				}
+				continue
+			}
+			if queueRoot {
 				if err := store.PrepareWorkItemRun(ctx, item.WorkItemID, core.WorkItemQueued); err != nil {
 					return err
 				}
+				continue
+			}
+			if !holdDependent {
 				continue
 			}
 			if err := store.UpdateWorkItemStatus(ctx, item.WorkItemID, core.WorkItemAccepted); err != nil {
@@ -325,10 +336,15 @@ func (s *Service) Approve(ctx context.Context, initiativeID int64, approvedBy st
 		if err := s.tx.InTx(ctx, run); err != nil {
 			return nil, err
 		}
-		return initiative, nil
+	} else {
+		if err := run(ctx, s.store); err != nil {
+			return nil, err
+		}
 	}
-	if err := run(ctx, s.store); err != nil {
-		return nil, err
+	for _, workItemID := range queueAfterCommit {
+		if err := s.scheduler.Submit(ctx, workItemID); err != nil {
+			return nil, err
+		}
 	}
 	return initiative, nil
 }
@@ -416,6 +432,8 @@ func (s *Service) refreshDerivedStatus(ctx context.Context, initiativeID int64) 
 		nextStatus = core.InitiativeFailed
 	case initiative.Status == core.InitiativeExecuting && progress.Blocked > 0 && progress.Running == 0:
 		nextStatus = core.InitiativeBlocked
+	case initiative.Status == core.InitiativeBlocked && progress.Total > 0 && progress.Done == progress.Total:
+		nextStatus = core.InitiativeDone
 	case initiative.Status == core.InitiativeBlocked && progress.Running > 0:
 		nextStatus = core.InitiativeExecuting
 	}

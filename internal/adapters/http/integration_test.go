@@ -181,6 +181,23 @@ func pollWorkItemStatus(t *testing.T, ts *httptest.Server, issueID int64, target
 	return core.WorkItem{}
 }
 
+func pollWorkItemEvents(t *testing.T, ts *httptest.Server, issueID int64, timeout time.Duration, predicate func([]*core.Event) bool) []*core.Event {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, _ := getJSON(ts, fmt.Sprintf("/work-items/%d/events", issueID))
+		requireStatus(t, resp, http.StatusOK)
+		events := decode[[]*core.Event](t, resp)
+		if predicate(events) {
+			return events
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	resp, _ := getJSON(ts, fmt.Sprintf("/work-items/%d/events", issueID))
+	requireStatus(t, resp, http.StatusOK)
+	return decode[[]*core.Event](t, resp)
+}
+
 // ---------------------------------------------------------------------------
 // Test 1: Full lifecycle — Project + Issue + Steps → run → done
 // ---------------------------------------------------------------------------
@@ -282,16 +299,19 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		t.Fatalf("expected 3 runs, got %d", c)
 	}
 
-	// 10. Verify persisted events exist.
-	time.Sleep(100 * time.Millisecond) // allow persister to flush
-	resp, _ = getJSON(ts, fmt.Sprintf("/work-items/%d/events", issue.ID))
-	requireStatus(t, resp, http.StatusOK)
-	events := decode[[]*core.Event](t, resp)
-	if len(events) == 0 {
-		t.Fatal("expected persisted events for issue")
-	}
-
-	// Verify event types include issue lifecycle.
+	// 10. Verify persisted events include issue lifecycle.
+	events := pollWorkItemEvents(t, ts, issue.ID, 2*time.Second, func(events []*core.Event) bool {
+		if len(events) == 0 {
+			return false
+		}
+		eventTypes := make(map[core.EventType]bool)
+		for _, ev := range events {
+			eventTypes[ev.Type] = true
+		}
+		return eventTypes[core.EventWorkItemQueued] &&
+			eventTypes[core.EventWorkItemStarted] &&
+			eventTypes[core.EventWorkItemCompleted]
+	})
 	eventTypes := make(map[core.EventType]bool)
 	for _, ev := range events {
 		eventTypes[ev.Type] = true
@@ -413,9 +433,14 @@ func TestIntegration_GatePass(t *testing.T) {
 	pollWorkItemStatus(t, ts, issue.ID, core.WorkItemDone, 5*time.Second)
 
 	// Gate passed — verify event.
-	time.Sleep(100 * time.Millisecond)
-	resp, _ = getJSON(ts, fmt.Sprintf("/work-items/%d/events", issue.ID))
-	events := decode[[]*core.Event](t, resp)
+	events := pollWorkItemEvents(t, ts, issue.ID, 2*time.Second, func(events []*core.Event) bool {
+		for _, ev := range events {
+			if ev.Type == core.EventGatePassed {
+				return true
+			}
+		}
+		return false
+	})
 	hasGatePass := false
 	for _, ev := range events {
 		if ev.Type == core.EventGatePassed {
@@ -1091,9 +1116,19 @@ func TestIntegration_GateRejectReworkApprove(t *testing.T) {
 	}
 
 	// 8. Verify gate events (rejected + passed).
-	time.Sleep(100 * time.Millisecond) // allow persister to flush
-	resp, _ = getJSON(ts, fmt.Sprintf("/work-items/%d/events", issue.ID))
-	events := decode[[]*core.Event](t, resp)
+	events := pollWorkItemEvents(t, ts, issue.ID, 2*time.Second, func(events []*core.Event) bool {
+		hasReject := false
+		hasPass := false
+		for _, ev := range events {
+			if ev.Type == core.EventGateRejected {
+				hasReject = true
+			}
+			if ev.Type == core.EventGatePassed {
+				hasPass = true
+			}
+		}
+		return hasReject && hasPass
+	})
 	hasReject := false
 	hasPass := false
 	for _, ev := range events {

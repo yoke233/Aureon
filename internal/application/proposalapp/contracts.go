@@ -12,6 +12,7 @@ type Store interface {
 	core.ThreadStore
 	core.WorkItemStore
 	core.InitiativeStore
+	GetThreadMessage(ctx context.Context, id int64) (*core.ThreadMessage, error)
 }
 
 type Tx interface {

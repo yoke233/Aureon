@@ -64,6 +64,12 @@ func (s *Service) CreateProposal(ctx context.Context, input CreateProposalInput)
 	if err != nil {
 		return nil, err
 	}
+	if err := validateDraftProjects(ctx, s.store, drafts); err != nil {
+		return nil, err
+	}
+	if err := validateSourceMessage(ctx, s.store, input.ThreadID, input.SourceMessageID); err != nil {
+		return nil, err
+	}
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
 		return nil, fmt.Errorf("title is required")
@@ -151,6 +157,9 @@ func (s *Service) UpdateProposal(ctx context.Context, input UpdateProposalInput)
 		proposal.Metadata = cloneAnyMap(*input.Metadata)
 	}
 	if input.SourceMessageID != nil {
+		if err := validateSourceMessage(ctx, s.store, proposal.ThreadID, input.SourceMessageID); err != nil {
+			return nil, err
+		}
 		proposal.SourceMessageID = input.SourceMessageID
 	}
 	if err := s.store.UpdateThreadProposal(ctx, proposal); err != nil {
@@ -169,6 +178,9 @@ func (s *Service) ReplaceDrafts(ctx context.Context, proposalID int64, drafts []
 	}
 	normalized, err := normalizeDrafts(drafts, false)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateDraftProjects(ctx, s.store, normalized); err != nil {
 		return nil, err
 	}
 	proposal.WorkItemDrafts = normalized
@@ -202,6 +214,9 @@ func (s *Service) Submit(ctx context.Context, proposalID int64) (*core.ThreadPro
 		return nil, err
 	}
 	if err := validateDraftProjects(ctx, s.store, drafts); err != nil {
+		return nil, err
+	}
+	if err := validateSourceMessage(ctx, s.store, proposal.ThreadID, proposal.SourceMessageID); err != nil {
 		return nil, err
 	}
 	proposal.Status = core.ProposalOpen
@@ -240,6 +255,9 @@ func (s *Service) Approve(ctx context.Context, proposalID int64, input ReviewInp
 		return nil, err
 	}
 	if err := validateDraftProjects(ctx, s.store, drafts); err != nil {
+		return nil, err
+	}
+	if err := validateSourceMessage(ctx, s.store, proposal.ThreadID, proposal.SourceMessageID); err != nil {
 		return nil, err
 	}
 
@@ -582,6 +600,23 @@ func validateDraftProjects(ctx context.Context, store Store, drafts []core.Propo
 		if _, err := store.GetProject(ctx, *draft.ProjectID); err != nil {
 			return fmt.Errorf("draft %s project_id %d: %w", draft.TempID, *draft.ProjectID, err)
 		}
+	}
+	return nil
+}
+
+func validateSourceMessage(ctx context.Context, store Store, threadID int64, sourceMessageID *int64) error {
+	if sourceMessageID == nil {
+		return nil
+	}
+	if *sourceMessageID <= 0 {
+		return fmt.Errorf("source_message_id must be positive")
+	}
+	msg, err := store.GetThreadMessage(ctx, *sourceMessageID)
+	if err != nil {
+		return fmt.Errorf("source_message_id %d: %w", *sourceMessageID, err)
+	}
+	if msg.ThreadID != threadID {
+		return fmt.Errorf("source_message_id %d does not belong to thread %d", *sourceMessageID, threadID)
 	}
 	return nil
 }

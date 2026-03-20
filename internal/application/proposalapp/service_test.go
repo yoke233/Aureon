@@ -254,7 +254,7 @@ func TestServiceSubmitRejectsDependencyCycle(t *testing.T) {
 	}
 }
 
-func TestServiceSubmitRejectsUnknownProject(t *testing.T) {
+func TestServiceCreateProposalRejectsUnknownProject(t *testing.T) {
 	store := newProposalServiceTestStore(t)
 	svc := New(Config{Store: store, Tx: proposalTx{base: store}})
 	ctx := context.Background()
@@ -264,17 +264,71 @@ func TestServiceSubmitRejectsUnknownProject(t *testing.T) {
 		t.Fatalf("CreateThread: %v", err)
 	}
 	missingProjectID := int64(999)
-	proposal, err := svc.CreateProposal(ctx, CreateProposalInput{
+	if _, err := svc.CreateProposal(ctx, CreateProposalInput{
 		ThreadID: threadID,
 		Title:    "无效项目",
 		WorkItemDrafts: []core.ProposalWorkItemDraft{
 			{TempID: "draft-a", Title: "任务 A", ProjectID: &missingProjectID},
 		},
+	}); err == nil {
+		t.Fatal("expected CreateProposal to fail for unknown project_id")
+	}
+}
+
+func TestServiceCreateProposalRejectsForeignSourceMessage(t *testing.T) {
+	store := newProposalServiceTestStore(t)
+	svc := New(Config{Store: store, Tx: proposalTx{base: store}})
+	ctx := context.Background()
+
+	threadA, err := store.CreateThread(ctx, &core.Thread{Title: "thread-a", Status: core.ThreadActive, OwnerID: "user-1"})
+	if err != nil {
+		t.Fatalf("CreateThread(thread-a): %v", err)
+	}
+	threadB, err := store.CreateThread(ctx, &core.Thread{Title: "thread-b", Status: core.ThreadActive, OwnerID: "user-1"})
+	if err != nil {
+		t.Fatalf("CreateThread(thread-b): %v", err)
+	}
+	msgID, err := store.CreateThreadMessage(ctx, &core.ThreadMessage{ThreadID: threadB, SenderID: "user-1", Role: "human", Content: "foreign"})
+	if err != nil {
+		t.Fatalf("CreateThreadMessage: %v", err)
+	}
+	if _, err := svc.CreateProposal(ctx, CreateProposalInput{
+		ThreadID:        threadA,
+		Title:           "跨线程来源",
+		SourceMessageID: &msgID,
+	}); err == nil {
+		t.Fatal("expected CreateProposal to reject foreign source_message_id")
+	}
+}
+
+func TestServiceApproveRevalidatesSourceMessageThreadOwnership(t *testing.T) {
+	store := newProposalServiceTestStore(t)
+	svc := New(Config{Store: store, Tx: proposalTx{base: store}})
+	ctx := context.Background()
+
+	threadA, err := store.CreateThread(ctx, &core.Thread{Title: "thread-a", Status: core.ThreadActive, OwnerID: "user-1"})
+	if err != nil {
+		t.Fatalf("CreateThread(thread-a): %v", err)
+	}
+	threadB, err := store.CreateThread(ctx, &core.Thread{Title: "thread-b", Status: core.ThreadActive, OwnerID: "user-1"})
+	if err != nil {
+		t.Fatalf("CreateThread(thread-b): %v", err)
+	}
+	msgID, err := store.CreateThreadMessage(ctx, &core.ThreadMessage{ThreadID: threadB, SenderID: "user-1", Role: "human", Content: "foreign"})
+	if err != nil {
+		t.Fatalf("CreateThreadMessage: %v", err)
+	}
+	proposalID, err := store.CreateThreadProposal(ctx, &core.ThreadProposal{
+		ThreadID:        threadA,
+		Title:           "脏提案",
+		Status:          core.ProposalOpen,
+		SourceMessageID: &msgID,
+		WorkItemDrafts:  []core.ProposalWorkItemDraft{{TempID: "draft-a", Title: "任务 A"}},
 	})
 	if err != nil {
-		t.Fatalf("CreateProposal: %v", err)
+		t.Fatalf("CreateThreadProposal: %v", err)
 	}
-	if _, err := svc.Submit(ctx, proposal.ID); err == nil {
-		t.Fatal("expected Submit to fail for unknown project_id")
+	if _, err := svc.Approve(ctx, proposalID, ReviewInput{ReviewedBy: "reviewer-1"}); err == nil {
+		t.Fatal("expected Approve to reject foreign source_message_id")
 	}
 }

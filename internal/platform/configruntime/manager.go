@@ -24,6 +24,8 @@ var ErrInvalidConfig = errors.New("invalid config")
 var ErrDriverNotFound = errors.New("driver not found")
 var ErrDuplicateDriver = errors.New("duplicate driver")
 var ErrDriverInUse = errors.New("driver is still referenced by profiles")
+var ErrProfileNotFound = errors.New("profile config not found")
+var ErrDuplicateProfile = errors.New("duplicate profile config")
 
 type Snapshot struct {
 	Version              int64
@@ -295,6 +297,68 @@ func (m *Manager) DeleteDriverConfig(ctx context.Context, driverID string) (*Sna
 		return nil, fmt.Errorf("%w: %q", ErrDriverNotFound, driverID)
 	}
 	current.Agents.Drivers = next
+	return m.UpdateRuntime(ctx, current)
+}
+
+// ---------- Profile Config CRUD (config.toml persistence) ----------
+
+func (m *Manager) CreateProfileConfig(ctx context.Context, profile config.RuntimeProfileConfig) (*Snapshot, error) {
+	profile.ID = strings.TrimSpace(profile.ID)
+	if profile.ID == "" {
+		return nil, fmt.Errorf("profile id is required")
+	}
+	current := m.GetRuntime()
+	for _, item := range current.Agents.Profiles {
+		if strings.TrimSpace(item.ID) == profile.ID {
+			return nil, fmt.Errorf("%w: %q", ErrDuplicateProfile, profile.ID)
+		}
+	}
+	current.Agents.Profiles = append(current.Agents.Profiles, profile)
+	return m.UpdateRuntime(ctx, current)
+}
+
+func (m *Manager) UpdateProfileConfig(ctx context.Context, profileID string, profile config.RuntimeProfileConfig) (*Snapshot, error) {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return nil, fmt.Errorf("profile id is required")
+	}
+	current := m.GetRuntime()
+	found := false
+	for idx := range current.Agents.Profiles {
+		if strings.TrimSpace(current.Agents.Profiles[idx].ID) != profileID {
+			continue
+		}
+		profile.ID = profileID
+		current.Agents.Profiles[idx] = profile
+		found = true
+		break
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: %q", ErrProfileNotFound, profileID)
+	}
+	return m.UpdateRuntime(ctx, current)
+}
+
+func (m *Manager) DeleteProfileConfig(ctx context.Context, profileID string) (*Snapshot, error) {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return nil, fmt.Errorf("profile id is required")
+	}
+	current := m.GetRuntime()
+	profiles := current.Agents.Profiles
+	next := make([]config.RuntimeProfileConfig, 0, len(profiles))
+	found := false
+	for _, item := range profiles {
+		if strings.TrimSpace(item.ID) == profileID {
+			found = true
+			continue
+		}
+		next = append(next, item)
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: %q", ErrProfileNotFound, profileID)
+	}
+	current.Agents.Profiles = next
 	return m.UpdateRuntime(ctx, current)
 }
 

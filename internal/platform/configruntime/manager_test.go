@@ -357,3 +357,82 @@ func newManagerForTest(t *testing.T) (*Manager, string) {
 	})
 	return manager, string(raw)
 }
+
+func TestManager_ProfileCRUD(t *testing.T) {
+	manager, _ := newManagerForTest(t)
+
+	// Create a driver first (profiles reference a driver).
+	if _, err := manager.CreateDriverConfig(context.Background(), config.RuntimeDriverConfig{
+		ID:            "test-driver",
+		LaunchCommand: "echo",
+		CapabilitiesMax: config.CapabilitiesConfig{
+			FSRead: true, FSWrite: true, Terminal: true,
+		},
+	}); err != nil {
+		t.Fatalf("CreateDriverConfig() error = %v", err)
+	}
+
+	// --- Create ---
+	profile := config.RuntimeProfileConfig{
+		ID:     "test-profile-crud",
+		Name:   "Test Profile",
+		Driver: "test-driver",
+		Role:   "worker",
+		Skills: []string{"strict-review"},
+	}
+	if _, err := manager.CreateProfileConfig(context.Background(), profile); err != nil {
+		t.Fatalf("CreateProfileConfig() error = %v", err)
+	}
+	// Duplicate should fail.
+	if _, err := manager.CreateProfileConfig(context.Background(), profile); err == nil || !errors.Is(err, ErrDuplicateProfile) {
+		t.Fatalf("expected ErrDuplicateProfile, got %v", err)
+	}
+	// Verify in runtime.
+	rt := manager.GetRuntime()
+	found := false
+	for _, p := range rt.Agents.Profiles {
+		if p.ID == "test-profile-crud" && len(p.Skills) == 1 && p.Skills[0] == "strict-review" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("created profile not found in runtime: %+v", rt.Agents.Profiles)
+	}
+
+	// --- Update ---
+	profile.Skills = []string{"strict-review", "deep-analysis"}
+	if _, err := manager.UpdateProfileConfig(context.Background(), "test-profile-crud", profile); err != nil {
+		t.Fatalf("UpdateProfileConfig() error = %v", err)
+	}
+	rt = manager.GetRuntime()
+	found = false
+	for _, p := range rt.Agents.Profiles {
+		if p.ID == "test-profile-crud" && len(p.Skills) == 2 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("updated profile not found in runtime: %+v", rt.Agents.Profiles)
+	}
+	// Update missing profile should fail.
+	if _, err := manager.UpdateProfileConfig(context.Background(), "nonexistent", profile); err == nil || !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("expected ErrProfileNotFound, got %v", err)
+	}
+
+	// --- Delete ---
+	if _, err := manager.DeleteProfileConfig(context.Background(), "test-profile-crud"); err != nil {
+		t.Fatalf("DeleteProfileConfig() error = %v", err)
+	}
+	rt = manager.GetRuntime()
+	for _, p := range rt.Agents.Profiles {
+		if p.ID == "test-profile-crud" {
+			t.Fatalf("deleted profile still present in runtime: %+v", rt.Agents.Profiles)
+		}
+	}
+	// Delete missing should fail.
+	if _, err := manager.DeleteProfileConfig(context.Background(), "test-profile-crud"); err == nil || !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("expected ErrProfileNotFound, got %v", err)
+	}
+}

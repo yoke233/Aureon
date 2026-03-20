@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -23,6 +24,9 @@ type DriverConfigService interface {
 	CreateDriverConfig(ctx context.Context, driver config.RuntimeDriverConfig) (*configruntime.Snapshot, error)
 	UpdateDriverConfig(ctx context.Context, driverID string, driver config.RuntimeDriverConfig) (*configruntime.Snapshot, error)
 	DeleteDriverConfig(ctx context.Context, driverID string) (*configruntime.Snapshot, error)
+	CreateProfileConfig(ctx context.Context, profile config.RuntimeProfileConfig) (*configruntime.Snapshot, error)
+	UpdateProfileConfig(ctx context.Context, profileID string, profile config.RuntimeProfileConfig) (*configruntime.Snapshot, error)
+	DeleteProfileConfig(ctx context.Context, profileID string) (*configruntime.Snapshot, error)
 }
 
 func registerAgentRoutes(r chi.Router, registry core.AgentRegistry, drivers DriverConfigService) {
@@ -72,6 +76,7 @@ func (a *agentsHandler) createProfile(w http.ResponseWriter, r *http.Request) {
 		writeRegistryError(w, err)
 		return
 	}
+	a.syncProfileToConfig(r.Context(), &p)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(p)
@@ -114,6 +119,7 @@ func (a *agentsHandler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeRegistryError(w, err)
 		return
 	}
+	a.syncProfileToConfig(r.Context(), &p)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(p)
 }
@@ -123,6 +129,11 @@ func (a *agentsHandler) deleteProfile(w http.ResponseWriter, r *http.Request) {
 	if err := a.registry.DeleteProfile(r.Context(), id); err != nil {
 		writeRegistryError(w, err)
 		return
+	}
+	if a.drivers != nil {
+		if _, err := a.drivers.DeleteProfileConfig(r.Context(), id); err != nil {
+			slog.Warn("profile deleted from store but failed to sync config.toml", "id", id, "error", err)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -230,6 +241,20 @@ func unwrapError(err error) error {
 		return u.Unwrap()
 	}
 	return nil
+}
+
+// syncProfileToConfig persists the profile into config.toml so it survives restarts.
+func (a *agentsHandler) syncProfileToConfig(ctx context.Context, p *core.AgentProfile) {
+	if a.drivers == nil {
+		return
+	}
+	rc := configruntime.CoreProfileToRuntimeConfig(p)
+	if _, err := a.drivers.UpdateProfileConfig(ctx, p.ID, rc); err != nil {
+		// Profile may not exist in config.toml yet (created via API only); try create.
+		if _, err2 := a.drivers.CreateProfileConfig(ctx, rc); err2 != nil {
+			slog.Warn("failed to sync profile to config.toml", "id", p.ID, "update_err", err, "create_err", err2)
+		}
+	}
 }
 
 func (a *agentsHandler) normalizeProfileConfig(p *core.AgentProfile) error {

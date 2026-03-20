@@ -6,6 +6,38 @@ import (
 	"github.com/yoke233/zhanggui/internal/platform/profilellm"
 )
 
+// CoreProfileToRuntimeConfig converts a core.AgentProfile back to
+// config.RuntimeProfileConfig for persistence into config.toml.
+func CoreProfileToRuntimeConfig(p *core.AgentProfile) config.RuntimeProfileConfig {
+	actions := make([]string, len(p.ActionsAllowed))
+	for i, a := range p.ActionsAllowed {
+		actions[i] = string(a)
+	}
+	return config.RuntimeProfileConfig{
+		ID:             p.ID,
+		Name:           p.Name,
+		Driver:         p.DriverID,
+		LLMConfigID:    p.LLMConfigID,
+		Role:           string(p.Role),
+		Capabilities:   append([]string(nil), p.Capabilities...),
+		ActionsAllowed: actions,
+		PromptTemplate: p.PromptTemplate,
+		Skills:         append([]string(nil), p.Skills...),
+		Session: config.RuntimeSessionConfig{
+			Reuse:              p.Session.Reuse,
+			MaxTurns:           p.Session.MaxTurns,
+			IdleTTL:            config.Duration{Duration: p.Session.IdleTTL},
+			ThreadBootTemplate: p.Session.ThreadBootTemplate,
+			MaxContextTokens:   p.Session.MaxContextTokens,
+			ContextWarnRatio:   p.Session.ContextWarnRatio,
+		},
+		MCP: config.MCPConfig{
+			Enabled: p.MCP.Enabled,
+			Tools:   append([]string(nil), p.MCP.Tools...),
+		},
+	}
+}
+
 func BuildAgents(cfg *config.Config) []*core.AgentProfile {
 	if cfg == nil {
 		return nil

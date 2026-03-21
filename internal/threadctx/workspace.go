@@ -202,7 +202,7 @@ func buildWorkspaceContextData(ctx context.Context, store Store, threadID int64)
 			if att == nil {
 				continue
 			}
-			payload.Attachments = append(payload.Attachments, core.ThreadWorkspaceAttachmentRef{
+			payload.Attachments = append(payload.Attachments, core.AttachmentRef{
 				FileName:    att.FileName,
 				FilePath:    filepath.ToSlash(filepath.Join("attachments", filepath.Base(att.FilePath))),
 				IsDirectory: att.IsDirectory,

@@ -196,8 +196,8 @@ type ThreadAttachment struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// ThreadWorkspaceAttachmentRef is the .context.json representation of an attachment.
-type ThreadWorkspaceAttachmentRef struct {
+// AttachmentRef is the .context.json representation of an attachment.
+type AttachmentRef struct {
 	FileName    string `json:"file_name"`
 	FilePath    string `json:"file_path"`
 	IsDirectory bool   `json:"is_directory,omitempty"`
@@ -209,7 +209,7 @@ type ThreadWorkspaceContext struct {
 	ThreadID    int64                           `json:"thread_id"`
 	Workspace   string                          `json:"workspace"`
 	Mounts      map[string]ThreadWorkspaceMount `json:"mounts,omitempty"`
-	Attachments []ThreadWorkspaceAttachmentRef  `json:"attachments,omitempty"`
+	Attachments []AttachmentRef                 `json:"attachments,omitempty"`
 	Members     []string                        `json:"members,omitempty"`
 	UpdatedAt   time.Time                       `json:"updated_at"`
 }

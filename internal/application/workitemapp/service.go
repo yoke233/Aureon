@@ -64,15 +64,15 @@ func (s *Service) CreateWorkItem(ctx context.Context, input CreateWorkItemInput)
 	}
 
 	workItem := &core.WorkItem{
-		ProjectID:         input.ProjectID,
+		ProjectID:       input.ProjectID,
 		ResourceSpaceID: input.ResourceSpaceID,
-		Title:             title,
-		Body:              strings.TrimSpace(input.Body),
-		Status:            core.WorkItemOpen,
-		Priority:          priority,
-		Labels:            cloneStrings(input.Labels),
-		DependsOn:         cloneInt64s(input.DependsOn),
-		Metadata:          cloneMetadata(input.Metadata),
+		Title:           title,
+		Body:            strings.TrimSpace(input.Body),
+		Status:          core.WorkItemOpen,
+		Priority:        priority,
+		Labels:          cloneStrings(input.Labels),
+		DependsOn:       cloneInt64s(input.DependsOn),
+		Metadata:        cloneMetadata(input.Metadata),
 	}
 
 	id, err := s.store.CreateWorkItem(ctx, workItem)

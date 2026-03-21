@@ -1,14 +1,19 @@
 package core
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // ActionType classifies how an Action is executed.
 type ActionType string
 
 const (
-	ActionExec ActionType = "exec"
-	ActionGate ActionType = "gate"
-	ActionPlan ActionType = "plan"
+	ActionExec      ActionType = "exec"
+	ActionGate      ActionType = "gate"
+	ActionPlan      ActionType = "plan"
+	ActionComposite ActionType = "composite"
 )
 
 // ActionStatus represents the lifecycle state of an Action.
@@ -24,6 +29,40 @@ const (
 	ActionDone        ActionStatus = "done"
 	ActionCancelled   ActionStatus = "cancelled"
 )
+
+func (t ActionType) Valid() bool {
+	switch t {
+	case ActionExec, ActionGate, ActionPlan, ActionComposite:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseActionType(raw string) (ActionType, error) {
+	t := ActionType(strings.TrimSpace(raw))
+	if !t.Valid() {
+		return "", fmt.Errorf("invalid action type %q", raw)
+	}
+	return t, nil
+}
+
+func (s ActionStatus) Valid() bool {
+	switch s {
+	case ActionPending, ActionReady, ActionRunning, ActionWaitingGate, ActionBlocked, ActionFailed, ActionDone, ActionCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseActionStatus(raw string) (ActionStatus, error) {
+	s := ActionStatus(strings.TrimSpace(raw))
+	if !s.Valid() {
+		return "", fmt.Errorf("invalid action status %q", raw)
+	}
+	return s, nil
+}
 
 // Action is a single unit of work within a WorkItem's execution pipeline.
 // Actions form a DAG via DependsOn and can be executed in parallel when independent.

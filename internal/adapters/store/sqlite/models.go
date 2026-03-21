@@ -57,19 +57,19 @@ type ProjectModel struct {
 func (ProjectModel) TableName() string { return "projects" }
 
 type WorkItemModel struct {
-	ID                int64                     `gorm:"column:id;primaryKey;autoIncrement"`
-	ProjectID         *int64                    `gorm:"column:project_id"`
+	ID              int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	ProjectID       *int64                    `gorm:"column:project_id"`
 	ResourceSpaceID *int64                    `gorm:"column:resource_space_id"`
-	Title             string                    `gorm:"column:title;not null"`
-	Body              string                    `gorm:"column:body;not null"`
-	Status            string                    `gorm:"column:status;not null"`
-	Priority          string                    `gorm:"column:priority;not null"`
-	Labels            JSONField[[]string]       `gorm:"column:labels;type:text"`
-	DependsOn         JSONField[[]int64]        `gorm:"column:depends_on;type:text"`
-	Metadata          JSONField[map[string]any] `gorm:"column:metadata;type:text"`
-	ArchivedAt        *time.Time                `gorm:"column:archived_at"`
-	CreatedAt         time.Time                 `gorm:"column:created_at"`
-	UpdatedAt         time.Time                 `gorm:"column:updated_at"`
+	Title           string                    `gorm:"column:title;not null"`
+	Body            string                    `gorm:"column:body;not null"`
+	Status          string                    `gorm:"column:status;not null"`
+	Priority        string                    `gorm:"column:priority;not null"`
+	Labels          JSONField[[]string]       `gorm:"column:labels;type:text"`
+	DependsOn       JSONField[[]int64]        `gorm:"column:depends_on;type:text"`
+	Metadata        JSONField[map[string]any] `gorm:"column:metadata;type:text"`
+	ArchivedAt      *time.Time                `gorm:"column:archived_at"`
+	CreatedAt       time.Time                 `gorm:"column:created_at"`
+	UpdatedAt       time.Time                 `gorm:"column:updated_at"`
 }
 
 func (WorkItemModel) TableName() string { return "work_items" }
@@ -209,13 +209,14 @@ func (UsageRecordModel) TableName() string { return "usage_records" }
 // ── Thread ──
 
 type ThreadModel struct {
-	ID        int64                     `gorm:"column:id;primaryKey;autoIncrement"`
-	Title     string                    `gorm:"column:title;not null"`
-	Status    string                    `gorm:"column:status;not null"`
-	OwnerID   string                    `gorm:"column:owner_id;not null"`
-	Metadata  JSONField[map[string]any] `gorm:"column:metadata;type:text"`
-	CreatedAt time.Time                 `gorm:"column:created_at"`
-	UpdatedAt time.Time                 `gorm:"column:updated_at"`
+	ID             int64                     `gorm:"column:id;primaryKey;autoIncrement"`
+	Title          string                    `gorm:"column:title;not null"`
+	Status         string                    `gorm:"column:status;not null"`
+	OwnerID        string                    `gorm:"column:owner_id;not null"`
+	FocusProjectID int64                     `gorm:"column:focus_project_id"`
+	Metadata       JSONField[map[string]any] `gorm:"column:metadata;type:text"`
+	CreatedAt      time.Time                 `gorm:"column:created_at"`
+	UpdatedAt      time.Time                 `gorm:"column:updated_at"`
 }
 
 func (ThreadModel) TableName() string { return "threads" }
@@ -225,13 +226,14 @@ func threadModelFromCore(t *core.Thread) *ThreadModel {
 		return nil
 	}
 	return &ThreadModel{
-		ID:        t.ID,
-		Title:     t.Title,
-		Status:    string(t.Status),
-		OwnerID:   t.OwnerID,
-		Metadata:  JSONField[map[string]any]{Data: t.Metadata},
-		CreatedAt: t.CreatedAt,
-		UpdatedAt: t.UpdatedAt,
+		ID:             t.ID,
+		Title:          t.Title,
+		Status:         string(t.Status),
+		OwnerID:        t.OwnerID,
+		FocusProjectID: t.FocusProjectID,
+		Metadata:       JSONField[map[string]any]{Data: t.Metadata},
+		CreatedAt:      t.CreatedAt,
+		UpdatedAt:      t.UpdatedAt,
 	}
 }
 
@@ -240,13 +242,14 @@ func (m *ThreadModel) toCore() *core.Thread {
 		return nil
 	}
 	return &core.Thread{
-		ID:        m.ID,
-		Title:     m.Title,
-		Status:    core.ThreadStatus(m.Status),
-		OwnerID:   m.OwnerID,
-		Metadata:  m.Metadata.Data,
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		ID:             m.ID,
+		Title:          m.Title,
+		Status:         core.ThreadStatus(m.Status),
+		OwnerID:        m.OwnerID,
+		FocusProjectID: m.FocusProjectID,
+		Metadata:       m.Metadata.Data,
+		CreatedAt:      m.CreatedAt,
+		UpdatedAt:      m.UpdatedAt,
 	}
 }
 
@@ -878,19 +881,19 @@ func workItemModelFromCore(w *core.WorkItem) *WorkItemModel {
 		return nil
 	}
 	return &WorkItemModel{
-		ID:                w.ID,
-		ProjectID:         w.ProjectID,
+		ID:              w.ID,
+		ProjectID:       w.ProjectID,
 		ResourceSpaceID: w.ResourceSpaceID,
-		Title:             w.Title,
-		Body:              w.Body,
-		Status:            string(w.Status),
-		Priority:          string(w.Priority),
-		Labels:            JSONField[[]string]{Data: w.Labels},
-		DependsOn:         JSONField[[]int64]{Data: w.DependsOn},
-		Metadata:          JSONField[map[string]any]{Data: w.Metadata},
-		ArchivedAt:        w.ArchivedAt,
-		CreatedAt:         w.CreatedAt,
-		UpdatedAt:         w.UpdatedAt,
+		Title:           w.Title,
+		Body:            w.Body,
+		Status:          string(w.Status),
+		Priority:        string(w.Priority),
+		Labels:          JSONField[[]string]{Data: w.Labels},
+		DependsOn:       JSONField[[]int64]{Data: w.DependsOn},
+		Metadata:        JSONField[map[string]any]{Data: w.Metadata},
+		ArchivedAt:      w.ArchivedAt,
+		CreatedAt:       w.CreatedAt,
+		UpdatedAt:       w.UpdatedAt,
 	}
 }
 
@@ -899,19 +902,19 @@ func (m *WorkItemModel) toCore() *core.WorkItem {
 		return nil
 	}
 	return &core.WorkItem{
-		ID:                m.ID,
-		ProjectID:         m.ProjectID,
+		ID:              m.ID,
+		ProjectID:       m.ProjectID,
 		ResourceSpaceID: m.ResourceSpaceID,
-		Title:             m.Title,
-		Body:              m.Body,
-		Status:            core.WorkItemStatus(m.Status),
-		Priority:          core.WorkItemPriority(m.Priority),
-		Labels:            m.Labels.Data,
-		DependsOn:         m.DependsOn.Data,
-		Metadata:          m.Metadata.Data,
-		ArchivedAt:        m.ArchivedAt,
-		CreatedAt:         m.CreatedAt,
-		UpdatedAt:         m.UpdatedAt,
+		Title:           m.Title,
+		Body:            m.Body,
+		Status:          core.WorkItemStatus(m.Status),
+		Priority:        core.WorkItemPriority(m.Priority),
+		Labels:          m.Labels.Data,
+		DependsOn:       m.DependsOn.Data,
+		Metadata:        m.Metadata.Data,
+		ArchivedAt:      m.ArchivedAt,
+		CreatedAt:       m.CreatedAt,
+		UpdatedAt:       m.UpdatedAt,
 	}
 }
 
@@ -1234,4 +1237,3 @@ func (m *UsageRecordModel) toCore() *core.UsageRecord {
 		CreatedAt:        m.CreatedAt,
 	}
 }
-

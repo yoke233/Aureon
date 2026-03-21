@@ -121,16 +121,16 @@ func (s *Store) UpdateWorkItem(ctx context.Context, workItem *core.WorkItem) err
 	result := s.orm.WithContext(ctx).Model(&WorkItemModel{}).
 		Where("id = ?", workItem.ID).
 		Updates(map[string]any{
-			"project_id":          model.ProjectID,
+			"project_id":        model.ProjectID,
 			"resource_space_id": model.ResourceSpaceID,
-			"title":               model.Title,
-			"body":                model.Body,
-			"status":              model.Status,
-			"priority":            model.Priority,
-			"labels":              model.Labels,
-			"depends_on":          model.DependsOn,
-			"metadata":            model.Metadata,
-			"updated_at":          model.UpdatedAt,
+			"title":             model.Title,
+			"body":              model.Body,
+			"status":            model.Status,
+			"priority":          model.Priority,
+			"labels":            model.Labels,
+			"depends_on":        model.DependsOn,
+			"metadata":          model.Metadata,
+			"updated_at":        model.UpdatedAt,
 		})
 	if result.Error != nil {
 		return result.Error

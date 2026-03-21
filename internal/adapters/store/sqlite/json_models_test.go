@@ -223,19 +223,19 @@ func TestModelConversions(t *testing.T) {
 	}
 
 	workItem := &core.WorkItem{
-		ID:                issueID,
-		ProjectID:         &projectID,
+		ID:              issueID,
+		ProjectID:       &projectID,
 		ResourceSpaceID: &projectID,
-		Title:             "work",
-		Body:              "body",
-		Status:            core.WorkItemRunning,
-		Priority:          core.PriorityHigh,
-		Labels:            []string{"api"},
-		DependsOn:         []int64{1, 2},
-		Metadata:          map[string]any{"p": "v"},
-		ArchivedAt:        &readAt,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		Title:           "work",
+		Body:            "body",
+		Status:          core.WorkItemRunning,
+		Priority:        core.PriorityHigh,
+		Labels:          []string{"api"},
+		DependsOn:       []int64{1, 2},
+		Metadata:        map[string]any{"p": "v"},
+		ArchivedAt:      &readAt,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if got := workItemModelFromCore(workItem).toCore(); got.Priority != core.PriorityHigh || len(got.DependsOn) != 2 {
 		t.Fatalf("work item round-trip mismatch: %+v", got)

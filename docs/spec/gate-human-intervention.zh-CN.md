@@ -1,30 +1,30 @@
-# Step MCP 工具注入 + 人类介入设计方案
+# Action MCP 工具注入 + 人类介入设计方案
 
 > 状态：部分实现
 >
 > 最后按代码核对：2026-03-14
 >
-> 对应实现：`internal/platform/appcmd/mcp_serve.go`、`internal/adapters/http/step_signal.go`、`internal/application/flow/signal_e2e_test.go`
+> 对应实现：`internal/platform/appcmd/mcp_serve.go`、`internal/adapters/http/step_signal.go`（文件名历史残留，语义已是 action signal）、`internal/application/flow/signal_e2e_test.go`
 
 ## 当前实现状态
 
 本文包含两类内容：
 
-- 已落地的后端能力：核心模型现已命名为 `ActionSignal`，并通过 `mcp-serve`、`/steps/{id}/decision`、`/steps/{id}/unblock`、`/pending-decisions` 暴露
+- 已落地的后端能力：核心模型现已命名为 `ActionSignal`，并通过 `mcp-serve`、`/actions/{id}/decision`、`/actions/{id}/unblock`、`/pending-decisions` 暴露
 - 尚未完全落地的产品/UI 规划：WorkItem 详情阻塞面板、统一信号时间线、Dashboard 待处理汇总
 
 阅读时请不要把全文都当成“已上线现状”。
 
 补充说明：
 
-- 本文保留了 `StepSignal` / `step` 的产品与 HTTP 语义，因为对外接口当前仍是 `/steps/{id}/*`
+- 本文以下统一使用当前主命名：`ActionSignal` / `action`
 - 但应用层执行器真实类型已经是 `WorkItemEngine`，核心对象也已切到 `Action` / `Run`
 
 ## 问题：引擎猜 Agent 意图
 
-当前所有 step 类型都存在同一个根本问题：**Agent 没有主动表达意图的手段，引擎在替 Agent 做判断**。
+当前所有 action 类型都存在同一个根本问题：**Agent 没有主动表达意图的手段，引擎在替 Agent 做判断**。
 
-### Exec Step
+### Exec Action
 
 | Agent 实际状态 | 引擎如何判断 | 问题 |
 |---------------|-------------|------|
@@ -34,7 +34,7 @@
 | 遇到暂时性问题 | 只能 crash → 引擎侧分类 ErrorKind | Agent 没有主动分类错误的能力 |
 | 做了一半，有进展 | 无法上报 | 前端看不到中间进度 |
 
-### Gate Step
+### Gate Action
 
 | Agent 实际状态 | 引擎如何判断 | 问题 |
 |---------------|-------------|------|
@@ -45,21 +45,21 @@
 
 > **Agent 主动声明，引擎不猜。**
 >
-> 给每种 step 类型注入对应的 MCP 工具，让 agent 通过工具调用显式表达：完成、失败、需要帮助、审核通过/驳回。引擎只负责读取和执行。
+> 给每种 action 类型注入对应的 MCP 工具，让 agent 通过工具调用显式表达：完成、失败、需要帮助、审核通过/驳回。引擎只负责读取和执行。
 
-## 一、统一信号模型：StepSignal
+## 一、统一信号模型：ActionSignal
 
 ### 实体定义
 
 ```go
-// internal/core/step_signal.go
+// internal/core/action_signal.go
 
-// StepSignal captures an explicit declaration from an agent or human
-// about a step's outcome or status change.
-type StepSignal struct {
+// ActionSignal captures an explicit declaration from an agent or human
+// about an action's outcome or status change.
+type ActionSignal struct {
     ID        int64          `json:"id"`
-    StepID    int64          `json:"step_id"`
-    IssueID   int64          `json:"issue_id"`
+    ActionID  int64          `json:"action_id"`
+    WorkItemID int64         `json:"work_item_id"`
     ExecID    int64          `json:"exec_id,omitempty"`
     Type      SignalType     `json:"type"`
     Source    SignalSource   `json:"source"`
@@ -70,13 +70,13 @@ type StepSignal struct {
 
 type SignalType string
 const (
-    // Exec step signals
+    // Exec action signals
     SignalComplete  SignalType = "complete"    // Agent 完成任务
     SignalNeedHelp  SignalType = "need_help"   // Agent 需要人类/lead 协助
     SignalBlocked   SignalType = "blocked"     // Agent 被外部依赖阻塞
     SignalProgress  SignalType = "progress"    // Agent 上报中间进度（非终态）
 
-    // Gate step signals
+    // Gate action signals
     SignalApprove   SignalType = "approve"     // Gate 通过
     SignalReject    SignalType = "reject"      // Gate 驳回
 
@@ -93,41 +93,41 @@ const (
 )
 ```
 
-Gate 的 verdict 和 exec 的 completion 都是 StepSignal 的特化。一张表，统一查询、统一时间线。
+Gate 的 verdict 和 exec 的 completion 都是 ActionSignal 的特化。一张表，统一查询、统一时间线。
 
 ### Store 接口
 
 ```go
-CreateStepSignal(ctx context.Context, s *StepSignal) (int64, error)
-GetLatestStepSignal(ctx context.Context, stepID int64, types ...SignalType) (*StepSignal, error)
-ListStepSignals(ctx context.Context, stepID int64) ([]*StepSignal, error)
-ListPendingHumanSteps(ctx context.Context, issueID int64) ([]*Step, error)
+CreateActionSignal(ctx context.Context, s *ActionSignal) (int64, error)
+GetLatestActionSignal(ctx context.Context, actionID int64, types ...SignalType) (*ActionSignal, error)
+ListActionSignals(ctx context.Context, actionID int64) ([]*ActionSignal, error)
+ListPendingHumanActions(ctx context.Context, workItemID int64) ([]*Action, error)
 ```
 
 ### 新增事件类型
 
 ```go
-EventStepNeedHelp  EventType = "step.need_help"       // Agent 请求人类协助
-EventStepUnblocked EventType = "step.unblocked"        // 人类解除阻塞
+EventActionNeedHelp  EventType = "action.need_help"       // Agent 请求人类协助
+EventActionUnblocked EventType = "action.unblocked"       // 人类解除阻塞
 EventGateAwaitingHuman EventType = "gate.awaiting_human"
 ```
 
 说明：
 
-- `step.need_help`、`step.unblocked` 相关事件链路已有实现
+- `action.need_help`、`action.unblocked` 相关事件链路已有实现
 - `gate.awaiting_human` 目前仍更接近预留设计，不应视为已完成的统一产品语义
 
-## 二、Exec Step MCP 工具
+## 二、Exec Action MCP 工具
 
 ### 工具列表
 
-Gate step 执行时注入 gate 系列工具；exec step 执行时注入 exec 系列工具。
+Gate action 执行时注入 gate 系列工具；exec action 执行时注入 exec 系列工具。
 
-#### `step_complete` — 标记任务完成
+#### `action_complete` — 标记任务完成
 
 ```json
 {
-  "name": "step_complete",
+  "name": "action_complete",
   "description": "Declare that you have completed the task. Provide a structured summary of what you did. Call this BEFORE ending your response.",
   "inputSchema": {
     "type": "object",
@@ -155,18 +155,18 @@ Gate step 执行时注入 gate 系列工具；exec step 执行时注入 exec 系
 }
 ```
 
-**副作用**：写入 `StepSignal{type: "complete", payload: {summary, files_changed, tests_passed}}`
+**副作用**：写入 `ActionSignal{type: "complete", payload: {summary, files_changed, tests_passed}}`
 
 **引擎行为**：
 - `handleSuccess` 看到 `SignalComplete` → 将 payload 直接作为 artifact metadata
 - **跳过 LLM Collector**（agent 已提供结构化数据）
-- 转 `StepDone`
+- 转 `ActionDone`
 
-#### `step_need_help` — 请求人类协助
+#### `action_need_help` — 请求人类协助
 
 ```json
 {
-  "name": "step_need_help",
+  "name": "action_need_help",
   "description": "Signal that you cannot complete the task and need human assistance. Explain what you tried, what went wrong, and what kind of help you need.",
   "inputSchema": {
     "type": "object",
@@ -190,22 +190,22 @@ Gate step 执行时注入 gate 系列工具；exec step 执行时注入 exec 系
 }
 ```
 
-**副作用**：写入 `StepSignal{type: "need_help", payload: {reason, attempted, help_type}}`
+**副作用**：写入 `ActionSignal{type: "need_help", payload: {reason, attempted, help_type}}`
 
 **引擎行为**：
 - `handleSuccess` 看到 `SignalNeedHelp` → **不标记 Done**
-- 转 `StepBlocked`（复用现有状态，等同于 `ErrKindNeedHelp` 的效果）
-- 发布 `EventStepNeedHelp` → WebSocket → 前端弹通知
-- 人类通过 `POST /steps/{id}/unblock` 处理
+- 转 `ActionBlocked`（复用现有状态，等同于 `ErrKindNeedHelp` 的效果）
+- 发布 `EventActionNeedHelp` → WebSocket → 前端弹通知
+- 人类通过 `POST /actions/{id}/unblock` 处理
 
 **关键**：这解决了"agent 正常结束但其实没完成"的问题。以前 session 正常退出 = 成功，现在 agent 可以显式说"我没完成"。
 
-#### `step_context` — 获取执行上下文
+#### `action_context` — 获取执行上下文
 
 ```json
 {
-  "name": "step_context",
-  "description": "Get the execution context: issue details, upstream step results, and your own rework history.",
+  "name": "action_context",
+  "description": "Get the execution context: work item details, upstream action results, and your own rework history.",
   "inputSchema": {
     "type": "object",
     "properties": {},
@@ -217,8 +217,8 @@ Gate step 执行时注入 gate 系列工具；exec step 执行时注入 exec 系
 **返回值**：
 ```json
 {
-  "step": { "id": 3, "name": "implement", "position": 1, "retry_count": 0 },
-  "issue": { "id": 1, "title": "fix login bug", "body": "..." },
+  "action": { "id": 3, "name": "implement", "position": 1, "retry_count": 0 },
+  "work_item": { "id": 1, "title": "fix login bug", "body": "..." },
   "upstream_artifacts": [],
   "rework_history": [
     { "attempt": 1, "reason": "test coverage < 80%", "at": "..." }
@@ -229,14 +229,14 @@ Gate step 执行时注入 gate 系列工具；exec step 执行时注入 exec 系
 ### 工具注入条件
 
 ```go
-func buildStepMCPFactory(step *core.Step, profileID string, resolver ...) ... {
-    switch step.Type {
-    case core.StepGate:
-        // 注入 gate env → mcp-serve 暴露 gate_approve/reject + step_context
-        return withGateEnv(resolver, step)
-    case core.StepExec:
-        // 注入 exec env → mcp-serve 暴露 step_complete/need_help + step_context
-        return withExecEnv(resolver, step)
+func buildActionMCPFactory(action *core.Action, profileID string, resolver ...) ... {
+    switch action.Type {
+    case core.ActionGate:
+        // 注入 gate env → mcp-serve 暴露 gate_approve/reject + action_context
+        return withGateEnv(resolver, action)
+    case core.ActionExec:
+        // 注入 exec env → mcp-serve 暴露 action_complete/need_help + action_context
+        return withExecEnv(resolver, action)
     default:
         return nil
     }
@@ -247,24 +247,24 @@ func buildStepMCPFactory(step *core.Step, profileID string, resolver ...) ... {
 
 | 变量 | 含义 |
 |------|------|
-| `AI_WORKFLOW_STEP_ID` | 当前 step ID（所有类型共用） |
-| `AI_WORKFLOW_ISSUE_ID` | 当前 issue ID |
-| `AI_WORKFLOW_STEP_TYPE` | `exec` / `gate` — mcp-serve 据此决定暴露哪些工具 |
+| `AI_WORKFLOW_ACTION_ID` | 当前 action ID（所有类型共用） |
+| `AI_WORKFLOW_WORK_ITEM_ID` | 当前 work item ID |
+| `AI_WORKFLOW_ACTION_TYPE` | `exec` / `gate` — mcp-serve 据此决定暴露哪些工具 |
 
-`mcp-serve` 根据 `STEP_TYPE` 动态注册工具：
+`mcp-serve` 根据 `ACTION_TYPE` 动态注册工具：
 
 ```go
-switch os.Getenv("AI_WORKFLOW_STEP_TYPE") {
+switch os.Getenv("AI_WORKFLOW_ACTION_TYPE") {
 case "gate":
-    register(gateApprove, gateReject, stepContext)
+    register(gateApprove, gateReject, actionContext)
 case "exec":
-    register(stepComplete, stepNeedHelp, stepContext)
+    register(actionComplete, actionNeedHelp, actionContext)
 }
 ```
 
-## 三、Gate Step MCP 工具
+## 三、Gate Action MCP 工具
 
-（保持前版设计，归纳到统一 StepSignal 模型）
+（保持前版设计，归纳到统一 ActionSignal 模型）
 
 #### `gate_approve` — 通过 Gate
 
@@ -285,14 +285,14 @@ case "exec":
 }
 ```
 
-**副作用**：写入 `StepSignal{type: "approve", payload: {reason}}`
+**副作用**：写入 `ActionSignal{type: "approve", payload: {reason}}`
 
 #### `gate_reject` — 驳回 Gate
 
 ```json
 {
   "name": "gate_reject",
-  "description": "Reject the gate. Call this when the review finds issues that must be fixed.",
+  "description": "Reject the gate. Call this when the review finds problems that must be fixed.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -303,7 +303,7 @@ case "exec":
       "reject_targets": {
         "type": "array",
         "items": { "type": "integer" },
-        "description": "Step IDs to reset for rework. Omit to reset immediate predecessors."
+        "description": "Action IDs to reset for rework. Omit to reset immediate predecessors."
       }
     },
     "required": ["reason"]
@@ -311,11 +311,11 @@ case "exec":
 }
 ```
 
-**副作用**：写入 `StepSignal{type: "reject", payload: {reason, reject_targets}}`
+**副作用**：写入 `ActionSignal{type: "reject", payload: {reason, reject_targets}}`
 
 ## 四、引擎改造
 
-### `handleSuccess` 改造（exec step）
+### `handleSuccess` 改造（exec action）
 
 ```go
 func (e *WorkItemEngine) handleSuccess(ctx context.Context, action *core.Action, run *core.Run) error {
@@ -334,7 +334,7 @@ func (e *WorkItemEngine) handleSuccess(ctx context.Context, action *core.Action,
             RunID:      run.ID,
             Data:       helpSignal.Payload,
         })
-        return nil  // 非引擎错误，其他 step 继续
+        return nil  // 非引擎错误，其他 action 继续
     }
 
     // 2. 检查 agent 是否通过 MCP 工具提交了结构化完成信号
@@ -366,9 +366,9 @@ type GateVerdict struct {
     Decided  bool              // 是否已作出决定
     Passed   bool              // 通过/拒绝
     Reason   string
-    ResetTo  []int64           // reject 时重置的上游 step IDs
+    ResetTo  []int64           // reject 时重置的上游 action IDs
     Metadata map[string]any    // 来源上下文 (art.Metadata / signal.Payload)
-    Signal   *core.StepSignal  // 信号驱动的 verdict 携带原始信号
+    Signal   *core.ActionSignal // 信号驱动的 verdict 携带原始信号
 }
 
 // GateEvaluator 评估函数签名
@@ -378,7 +378,7 @@ func (e *WorkItemEngine) finalizeGate(ctx context.Context, action *core.Action) 
     evaluators := e.gateEvaluators // 可通过 WithGateEvaluators() 注入自定义链
     if len(evaluators) == 0 {
         evaluators = []GateEvaluator{
-            e.evalSignalVerdict,    // 1. StepSignal (MCP / HTTP)
+            e.evalSignalVerdict,    // 1. ActionSignal (MCP / HTTP)
             e.evalManifestCheck,    // 2. Feature manifest
             e.evalDeliverableMetadata, // 3. Deliverable metadata (verdict field)
         }
@@ -400,7 +400,7 @@ func (e *WorkItemEngine) finalizeGate(ctx context.Context, action *core.Action) 
 ### 评估链优先级
 
 ```
-evalSignalVerdict — StepSignal (MCP tool / HTTP API)
+evalSignalVerdict — ActionSignal (MCP tool / HTTP API)
   │ Decided → applyGateVerdict (pass: merge+done, reject: rework)
   │ 未决 ↓
 evalManifestCheck — Feature manifest entries
@@ -416,14 +416,14 @@ evalDeliverableMetadata — Deliverable metadata verdict field
 
 ## 五、人类介入
 
-Agent 和人类使用同一张 StepSignal 表，区别只在 `source` 字段。
+Agent 和人类使用同一张 `ActionSignal` 表，区别只在 `source` 字段。
 
 ### HTTP API
 
 #### 提交人工 Gate 决策
 
 ```
-POST /steps/{stepID}/decision
+POST /actions/{actionID}/decision
 ```
 
 当前实现的请求体使用统一 `decision` 字段，而不是 `verdict`：
@@ -435,36 +435,36 @@ POST /steps/{stepID}/decision
 }
 ```
 
-→ 写入 `StepSignal{type: "approve", source: "human"}`
+→ 写入 `ActionSignal{type: "approve", source: "human"}`
 → 触发后续 gate 评估链
 
 #### 解除阻塞（exec 或 gate）
 
 ```
-POST /steps/{stepID}/unblock
+POST /actions/{actionID}/unblock
 ```
 
 当前实现的请求体更接近：
 
 ```json
 {
-  "reason": "manually fixed the issue",
+  "reason": "manually fixed the blocker",
   "instructions": "retry with the new access"
 }
 ```
 
-→ 写入 `StepSignal{type: "unblock", source: "human"}`
+→ 写入 `ActionSignal{type: "unblock", source: "human"}`
 → 如带 `instructions`，还会额外写入 `SignalInstruction`
-→ step 置回 `StepPending`
+→ action 置回 `ActionPending`
 
 #### 查询待处理列表
 
 ```
 GET /pending-decisions                     — 全局待处理列表
-GET /pending-decisions?issue_id={issueID}  — 某 issue 下所有等待人类的 step
+GET /pending-decisions?work_item_id={workItemID}  — 某 work item 下所有等待人类的 action
 ```
 
-返回 `StepBlocked` + `StepWaitingGate` 的 step，附带最新上下文信号。
+返回 `ActionBlocked` + `ActionWaitingGate` 的 action，附带最新上下文信号。
 
 ### GateMode 三模式
 
@@ -489,21 +489,21 @@ case "mcp-serve":
 ```go
 func RunMCPServe(args []string) error {
     dbPath   := os.Getenv("AI_WORKFLOW_DB_PATH")
-    stepID   := envInt64("AI_WORKFLOW_STEP_ID")
-    issueID  := envInt64("AI_WORKFLOW_ISSUE_ID")
-    stepType := os.Getenv("AI_WORKFLOW_STEP_TYPE")
+    actionID   := envInt64("AI_WORKFLOW_ACTION_ID")
+    workItemID := envInt64("AI_WORKFLOW_WORK_ITEM_ID")
+    actionType := os.Getenv("AI_WORKFLOW_ACTION_TYPE")
 
     store := sqlite.Open(dbPath)
-    server := mcpserver.New(store, stepID, issueID)
+    server := mcpserver.New(store, actionID, workItemID)
 
-    // 基础工具（所有 step 类型）
-    server.Register("step_context", server.HandleStepContext)
+    // 基础工具（所有 action 类型）
+    server.Register("action_context", server.HandleActionContext)
 
-    // 按 step 类型注册
-    switch stepType {
+    // 按 action 类型注册
+    switch actionType {
     case "exec":
-        server.Register("step_complete",  server.HandleStepComplete)
-        server.Register("step_need_help", server.HandleStepNeedHelp)
+        server.Register("action_complete",  server.HandleActionComplete)
+        server.Register("action_need_help", server.HandleActionNeedHelp)
     case "gate":
         server.Register("gate_approve", server.HandleGateApprove)
         server.Register("gate_reject",  server.HandleGateReject)
@@ -511,7 +511,7 @@ func RunMCPServe(args []string) error {
 
     // 通用查询工具（原有）
     server.Register("query_projects", ...)
-    server.Register("query_issues", ...)
+    server.Register("query_work_items", ...)
 
     return server.ServeStdio()
 }
@@ -537,10 +537,10 @@ func RunMCPServe(args []string) error {
 
 ### 2. 阻塞详情面板
 
-当 step 被 `step_need_help` 阻塞时，显示 agent 的求助信息：
+当 action 被 `action_need_help` 阻塞时，显示 agent 的求助信息：
 
 ```
-🆘 Step "implement" 请求人工协助
+🆘 Action "implement" 请求人工协助
     原因: "需要访问生产数据库的权限来验证 migration"
     已尝试: "在测试数据库上验证通过，但无法连接 prod"
     帮助类型: access
@@ -550,16 +550,16 @@ func RunMCPServe(args []string) error {
 
 ### 3. 信号时间线
 
-统一展示所有 StepSignal，exec 和 gate 共用同一个 UI 组件：
+统一展示所有 `ActionSignal`，exec 和 gate 共用同一个 UI 组件：
 
 ```
-Step "implement" 信号历史:
+Action "implement" 信号历史:
 #1  Agent (worker)    complete   "实现了登录功能，修改了 3 个文件"    3min ago   [MCP]
 --- 被 gate reject，进入 rework ---
 #2  Agent (worker)    need_help  "需要 prod DB 访问权限"             1min ago   [MCP]
 #3  alice@example.com unblock    "已开通权限，请重试"                 just now   [HTTP]
 
-Step "code review" 信号历史:
+Action "code review" 信号历史:
 #1  Agent (reviewer)  reject     "test coverage < 80%"               5min ago   [MCP]
 #2  Agent (reviewer)  approve    "all checks pass"                   just now   [MCP]
 ```
@@ -568,84 +568,84 @@ Step "code review" 信号历史:
 
 ```
 待处理 (3)
-├─ 🆘 Issue #12 / Step "implement" — Agent 请求帮助: "需要 prod DB 权限"
-├─ ⏳ Issue #15 / Step "code review" — 等待人工审批 (AI 2次 reject 后升级)
-└─ 🚫 Issue #8  / Step "deploy" — 重试耗尽 (3/3)
+├─ 🆘 WorkItem #12 / Action "implement" — Agent 请求帮助: "需要 prod DB 权限"
+├─ ⏳ WorkItem #15 / Action "code review" — 等待人工审批 (AI 2次 reject 后升级)
+└─ 🚫 WorkItem #8  / Action "deploy" — 重试耗尽 (3/3)
 ```
 
 ## 八、完整流程示例
 
 ```
-Issue "fix login bug" → Run
+WorkItem "fix login bug" → Run
   │
-  Step 1: "implement" (exec)
-  │   Agent 连接 MCP，看到: step_complete, step_need_help, step_context
-  │   Agent 调用 step_context() → 获取 issue body
+  Action 1: "implement" (exec)
+  │   Agent 连接 MCP，看到: action_complete, action_need_help, action_context
+  │   Agent 调用 action_context() → 获取 work item body
   │   Agent 修改代码、跑测试
-  │   Agent 调用 step_complete({
+  │   Agent 调用 action_complete({
   │     summary: "Added login validation + unit tests",
   │     files_changed: ["src/auth.go", "src/auth_test.go"],
   │     tests_passed: true
   │   })
-  │   → StepSignal 写入 DB
-  │   → handleSuccess: 读到 SignalComplete → 跳过 Collector → StepDone ✓
+  │   → ActionSignal 写入 DB
+  │   → handleSuccess: 读到 SignalComplete → 跳过 Collector → ActionDone ✓
   │
-  Step 2: "code review" (gate, mode=hybrid, escalate_after=2)
-  │   Agent 连接 MCP，看到: gate_approve, gate_reject, step_context
-  │   Agent 调用 step_context() → 获取 Step 1 的 artifact
+  Action 2: "code review" (gate, mode=hybrid, escalate_after=2)
+  │   Agent 连接 MCP，看到: gate_approve, gate_reject, action_context
+  │   Agent 调用 action_context() → 获取 Action 1 的 artifact
   │   Agent 调用 gate_reject({reason: "test coverage < 80%"})
-  │   → ProcessGate(rejected) → Step 1 reset
+  │   → ProcessGate(rejected) → Action 1 reset
   │
-  Step 1: rework (retry_count=1)
-  │   Agent 调用 step_context() → 看到 rework_history
+  Action 1: rework (retry_count=1)
+  │   Agent 调用 action_context() → 看到 rework_history
   │   Agent 补充测试，但发现需要 prod DB 权限验证
-  │   Agent 调用 step_need_help({
+  │   Agent 调用 action_need_help({
   │     reason: "need prod DB access to verify migration",
   │     attempted: "verified on test DB, but prod has different schema",
   │     help_type: "access"
   │   })
-  │   → handleSuccess: 读到 SignalNeedHelp → StepBlocked
-  │   → EventStepNeedHelp → WebSocket → 前端通知
+  │   → handleSuccess: 读到 SignalNeedHelp → ActionBlocked
+  │   → EventActionNeedHelp → WebSocket → 前端通知
   │
   人类介入:
   │   前端显示阻塞详情
-  │   POST /steps/1/unblock {"action":"retry","reason":"已开通权限"}
-  │   → StepSignal{type: "unblock"} → step → StepPending
+  │   POST /actions/1/unblock {"reason":"已开通权限","instructions":"retry now"}
+  │   → ActionSignal{type: "unblock"} → action → ActionPending
   │
-  Step 1: rework (retry_count=1, 重新调度)
+  Action 1: rework (retry_count=1, 重新调度)
   │   Agent 完成任务
-  │   Agent 调用 step_complete({summary: "migration verified on prod"})
-  │   → StepDone ✓
+  │   Agent 调用 action_complete({summary: "migration verified on prod"})
+  │   → ActionDone ✓
   │
-  Step 2: re-evaluate
+  Action 2: re-evaluate
   │   Agent 调用 gate_approve({reason: "all tests pass, coverage 92%"})
-  │   → ProcessGate(passed) → merge PR → StepDone ✓
+  │   → ProcessGate(passed) → merge PR → ActionDone ✓
   │
-  Issue → Done ✓
+  WorkItem → Done ✓
 ```
 
 ## 九、向后兼容
 
 | 场景 | 行为 |
 |------|------|
-| Agent 调用了 MCP 工具 | 优先使用 StepSignal |
+| Agent 调用了 MCP 工具 | 优先使用 `ActionSignal` |
 | Agent 未调用工具，输出含 `AI_WORKFLOW_GATE_JSON` | 降级正则提取（gate only） |
 | Agent 未调用工具，无标记行 | 降级 LLM Collector |
 | 所有路径都没结果 | 默认行为（exec: Done, gate: pass） |
 
-优先级：**StepSignal > 正则提取 > LLM Collector > 默认**
+优先级：**ActionSignal > 正则提取 > LLM Collector > 默认**
 
 ## 十、实现优先级（按原方案保留，需结合当前状态理解）
 
 | 阶段 | 内容 | 工作量 |
 |------|------|--------|
-| **P0** | `StepSignal` 模型 + Store + SQLite 表 | 已实现 |
-| **P0** | `mcp-serve` 子命令：exec 工具 (step_complete, step_need_help) + gate 工具 (gate_approve, gate_reject) + step_context | 已实现 |
+| **P0** | `ActionSignal` 模型 + Store + SQLite 表 | 已实现 |
+| **P0** | `mcp-serve` 子命令：exec 工具 (`action_complete`, `action_need_help`) + gate 工具 (`gate_approve`, `gate_reject`) + `action_context` | 已实现 |
 | **P0** | `handleSuccess` 改造：检查 SignalNeedHelp / SignalComplete | 已实现 |
 | **P0** | `finalizeGate` 改造：检查 SignalApprove / SignalReject | 已实现主体 |
-| **P0** | `buildStepMCPFactory` 改造：按 step type 注入 env | 已实现 |
-| **P1** | `POST /steps/{id}/decision` + `POST /steps/{id}/unblock` API | 已实现 |
-| **P1** | `EventStepNeedHelp` 事件 + WebSocket 广播 | 已实现主体 |
+| **P0** | `buildActionMCPFactory` 改造：按 action type 注入 env | 已实现 |
+| **P1** | `POST /actions/{id}/decision` + `POST /actions/{id}/unblock` API | 已实现 |
+| **P1** | `EventActionNeedHelp` 事件 + WebSocket 广播 | 已实现主体 |
 | **P1** | 前端审批/阻塞面板 | 未确认已实现 |
 | **P2** | `hybrid` gate mode（AI + 升级阈值） | 中 |
 | **P2** | Dashboard 待处理汇总面板 | 未确认已实现 |
@@ -654,8 +654,8 @@ Issue "fix login bug" → Run
 
 ## 十一、设计原则
 
-- **Agent 主动声明，引擎不猜**：所有 step 类型的 agent 都通过 MCP 工具显式表达意图
-- **统一信号模型**：exec 和 gate 共用 StepSignal 表 + 时间线 UI，AI 和人类共用同一管道
-- **向后兼容**：StepSignal 优先，无则降级到现有行为（Collector / 正则 / 默认）
+- **Agent 主动声明，引擎不猜**：所有 action 类型的 agent 都通过 MCP 工具显式表达意图
+- **统一信号模型**：exec 和 gate 共用 `ActionSignal` 表 + 时间线 UI，AI 和人类共用同一管道
+- **向后兼容**：`ActionSignal` 优先，无则降级到现有行为（Collector / 正则 / 默认）
 - **幂等安全**：终态信号同一次执行只接受第一个
 - **最小侵入**：`ProcessGate()` 完全不变，`handleFailure()` 完全不变；`finalizeGate()` 重构为 evaluator chain 模式，支持 `WithGateEvaluators()` 自定义扩展

@@ -1,8 +1,8 @@
 # AI Workflow
 
-**An intelligent orchestration platform for AI agent pipelines — plan, execute, and monitor multi-agent work from a single dashboard.**
+**An intelligent orchestration platform for AI agent pipelines — plan, run, and monitor multi-agent work from a single dashboard.**
 
-AI Workflow turns your requirements into structured execution pipelines. You describe what needs to be done as Work Items; the system breaks them into Actions (a DAG of steps), dispatches each Action to the right AI agent, and tracks every Run to completion — with built-in gates, retries, and human intervention points.
+AI Workflow turns your requirements into structured run pipelines. You describe what needs to be done as Work Items; the system breaks them into Actions (a DAG of actions), dispatches each Action to the right AI agent, and tracks every Run to completion, with built-in gates, retries, and human intervention points.
 
 ## Key Features
 
@@ -112,14 +112,14 @@ Agent drivers are configured under `[runtime.agents.drivers]`. Each driver point
 
 ### Agent Profiles
 
-Profiles under `[runtime.agents.profiles]` define execution personas — role, allowed capabilities, and session strategy. The scheduler uses profiles to match actions to the best agent.
+Profiles under `[runtime.agents.profiles]` define run personas — role, allowed capabilities, and session strategy. The scheduler uses profiles to match actions to the best agent.
 
 ## Core Concepts
 
 | Concept | Description |
 |---------|-------------|
 | **Work Item** | A unit of work with title, priority, labels, and dependencies. Lifecycle: `open` → `accepted` → `queued` → `running` → `done`. |
-| **Action** | A step within a Work Item's execution pipeline. Types: `exec` (do work), `gate` (quality check), `plan` (generate sub-actions). Actions form a DAG. |
+| **Action** | A unit within a Work Item's run pipeline. Types: `exec` (do work), `gate` (quality check), `plan` (generate sub-actions). Actions form a DAG. |
 | **Run** | A single attempt to execute an Action. Supports retries with error classification (transient / permanent / need_help). |
 | **Project** | Organizational container for grouping Work Items. |
 | **Thread** | A conversation between human and AI agents, optionally linked to a Work Item. |

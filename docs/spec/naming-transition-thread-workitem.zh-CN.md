@@ -1,4 +1,4 @@
-# 命名迁移规范：Thread / WorkItem
+# 命名迁移规范：Thread / WorkItem / Action
 
 > 本文档定义系统对外术语升级的映射矩阵、兼容策略与淘汰周期。
 >
@@ -6,7 +6,7 @@
 >
 > 最后按代码核对：2026-03-17
 >
-> 当前实现状态：本文中的命名治理规则已基本生效。前端主入口与后端 Public REST 都已经切到 `/work-items`；`/flows` 仅保留前端 redirect；剩余兼容层主要存在于持久化表名（`issues` / `steps` / `executions`）和少量 `issue` 命名的 handler / request struct。
+> 当前实现状态：本文中的命名治理规则已基本生效。前端主入口与后端 Public REST 已经切到 `workitem/action/run` 主命名；`/flows` 仅保留前端 redirect；剩余兼容层主要存在于持久化表名（`issues` / `steps` / `executions`）和少量历史 helper / request struct。
 >
 > 重要说明：本文现在更适合作为“现行收口规则 + 剩余兼容层说明”阅读，而不是“未来迁移计划”。
 
@@ -14,17 +14,17 @@
 
 本文建议并约束后续演进方向如下：
 
-1. 对外产品语义统一使用 `Work Item`。
-2. 对外 Public REST API 目标统一为 `/api/work-items/*`。
-3. 内部核心实现短期继续保留 `Issue` 作为当前 Work Item 的实现名。
+1. 对外产品语义统一使用 `Work Item` / `Action` / `Run`。
+2. 对外 Public REST API 统一为 `/api/work-items/*` 与 `/api/actions/*`。
+3. 内部公共领域实现统一以 `WorkItem` / `Action` / `Run` 表达；持久化层短期保留 `issues` / `steps` / `executions` 历史命名。
 4. `Flow` 降级为历史兼容/技术执行术语，不再作为主业务对象名称继续扩散。
 5. `ChatSession` 与 `Thread` 明确分离，不做合并命名。
 
 换句话说：
 
-- 用户看到的是 `Work Item`
-- 新 API 目标是 `work-items`
-- 内部稳定实现暂时还是 `Issue`
+- 用户看到的是 `Work Item` / `Action` / `Run`
+- 新 API 目标是 `work-items` / `actions`
+- 内部领域主名已经是 `WorkItem` / `Action` / `Run`
 - `Flow` 只能留在兼容层，不能再进入新设计、新接口、新文档主叙述
 
 ## 当前现状与目标状态
@@ -33,15 +33,15 @@
 
 - 前端主页面路由：`/work-items`
 - 前端兼容路由：`/issues/*`、`/flows/*` 重定向到 `/work-items`
-- 后端主 REST 路由：`/work-items/*`
+- 后端主 REST 路由：`/work-items/*`、`/actions/*`
 - 内部核心领域对象：`WorkItem` / `Action` / `Run`
 - Thread 已独立建模并拥有自己的 REST / WebSocket 协议
 
 ### 目标状态（本规范要求）
 
-- 产品/UI：统一称 `Work Item`
-- Public REST：统一以 `/api/work-items/*` 为主
-- 内部领域实现：短期保留 `Issue`，中长期再决定是否重命名
+- 产品/UI：统一称 `Work Item` / `Action` / `Run`
+- Public REST：统一以 `/api/work-items/*`、`/api/actions/*` 为主
+- 内部领域实现：继续以 `WorkItem` / `Action` / `Run` 作为公共主名；仅持久化/历史 helper 保留旧命名
 - `Flow`：只允许作为历史兼容名或纯技术执行流程语义存在
 
 ## 分层命名规则
@@ -58,9 +58,9 @@
 
 | 内部 Go struct / 表名 | API 外部名 | UI 显示名 | 说明 |
 |----------------------|-----------|----------|------|
-| `Issue` | `WorkItem` | Work Item | 核心决策：对外统一用 WorkItem；内部 Issue 暂不重命名 |
-| `Step` | `Step` | Step | 当前不建议再引入 `Action` 作为第二套公开主名，避免继续扩散术语 |
-| `Execution` | `Execution` | Execution / Run | 可在 UI 文案中按场景显示 “Run”，但 API/模型短期不强制改名 |
+| `Issue` | `WorkItem` | Work Item | 对外统一用 WorkItem；`Issue` 只剩持久化/历史残留 |
+| `Step` | `Action` | Action | 对外统一用 Action；`Step` 只剩持久化/历史残留 |
+| `Execution` | `Run` | Run | 对外统一用 Run；`Execution` 只剩持久化/历史残留 |
 | `Artifact` | `Artifact` | Deliverable / Artifact | UI 文案可逐步转 Deliverable；API/模型短期不强制改名 |
 | `ChatSession` | `ChatSession` | Chat | **不映射为 Thread**；保持 1:1 direct chat 概念 |
 | `Thread`（新增） | `Thread` | Thread | 独立领域实体，多 AI + 多 human 共享讨论 |
@@ -232,28 +232,21 @@
 
 补充决策：
 
-- `Issue == 当前 Work Item 的内部实现` 是显式接受的过渡状态
+- `Issue` / `Step` / `Execution` 只在持久化层与历史 helper 中继续保留
 - 不建议为了对齐术语而立刻重命名数据库表、store 接口和核心执行引擎
 - 内部重命名应在 `/api/work-items` 主契约稳定后再评估
 
 ## 前端类型 alias 策略
 
-在 `web/src/types/apiV2.ts` 中新增类型 alias：
+当前策略已经收口为：
 
-```typescript
-// 新领域类型
-export interface Thread { ... }
-export interface ThreadMessage { ... }
-export interface ThreadParticipant { ... }
-
-// 术语 alias（推荐）
-export type WorkItem = Issue;
-```
+- 前端路由已切到 `/work-items`，对应实现见 `web/src/App.tsx`
+- 前端主 API client 已使用 `/work-items`、`/actions`
+- `Issue = WorkItem`、`Step = Action` 一类兼容 alias 已不再建议保留
 
 补充说明：
 
-- 前端路由当前已切到 `/work-items`，对应实现见 `web/src/App.tsx`
-- 前端主 API client 现在已经主用 `/work-items`；旧 `issue` 语义主要残留在兼容类型、持久化命名和少量 request / handler 字段中
+- 旧 `issue` 语义主要残留在持久化命名和少量 request / handler 字段中
 - 不建议继续引入 `Action = Step`、`Run = Execution`、`Deliverable = Artifact` 这类第二层 alias，除非确有明确产品收益
 
 ## spec 文档状态规范
@@ -280,14 +273,14 @@ export type WorkItem = Issue;
 
 ### Phase A：先定规则，不大改代码
 
-- 统一对外术语为 `Work Item`
+- 统一对外术语为 `Work Item` / `Action` / `Run`
 - 新文档和新页面禁止继续扩散 `Flow`
 - spec 全部补状态头
 
 ### Phase B：Public REST 已切主
 
-- 后端对外主路由已经是 `/api/work-items/*`
-- 前端 API client 已经以 `/work-items` 为默认路径
+- 后端对外主路由已经是 `/api/work-items/*`、`/api/actions/*`
+- 前端 API client 已经以 `/work-items`、`/actions` 为默认路径
 - 现阶段重点不再是补 alias，而是说明兼容残留
 
 ### Phase C：前端与文案收口

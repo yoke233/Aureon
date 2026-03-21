@@ -114,7 +114,7 @@ SignalFeedback {
 }
 ```
 
-Agent 在重做时通过 `step_context` MCP 工具读取 rework_history，获得完整的失败原因和修复建议。
+Agent 在重做时通过 `action_context` MCP 工具读取 `rework_history`，获得完整的失败原因和修复建议。
 
 ## 冲突阻塞记录
 

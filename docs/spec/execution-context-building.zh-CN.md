@@ -32,24 +32,24 @@ Action 执行时，上下文通过 `WorkItemEngine` 的三阶段管道（Prepare
 ║              Phase 1: PREPARE                               ║
 ║                                                             ║
 ║  ┌─────────────────────────────────────────────────────┐   ║
-║  │ AgentResolver.Resolve(step)                          │   ║
-║  │   step.AgentRole + RequiredCapabilities → AgentID    │   ║
+║  │ AgentResolver.Resolve(action)                        │   ║
+║  │   action.AgentRole + RequiredCapabilities → AgentID  │   ║
 ║  └──────────────────────┬──────────────────────────────┘   ║
 ║                         │                                   ║
 ║  ┌──────────────────────▼──────────────────────────────┐   ║
-║  │ BriefingBuilder.Build(step)                          │   ║
+║  │ BriefingBuilder.Build(action)                        │   ║
 ║  │                                                      │   ║
-║  │  ① Objective ← step.Config["objective"] | step.Name  │   ║
+║  │  ① Objective ← action.Config["objective"] | action.Name │ ║
 ║  │                                                      │   ║
-║  │  ② Constraints ← step.AcceptanceCriteria             │   ║
+║  │  ② Constraints ← action.AcceptanceCriteria           │   ║
 ║  │                                                      │   ║
 ║  │  ③ ContextRefs (按优先级排列):                        │   ║
 ║  │     ┌──────────────────────────────────────────┐     │   ║
-║  │     │ CtxIssueSummary                          │     │   ║
-║  │     │  ← Issue Title + Body (≤500 字符)        │     │   ║
+║  │     │ CtxIssueSummary（历史类型名）             │     │   ║
+║  │     │  ← WorkItem Title + Body (≤500 字符)     │     │   ║
 ║  │     ├──────────────────────────────────────────┤     │   ║
 ║  │     │ CtxUpstreamArtifact (L2 直接前置)        │     │   ║
-║  │     │  ← 直接前置 Step 的完整 ResultMarkdown   │     │   ║
+║  │     │  ← 直接前置 Action 的完整 ResultMarkdown │     │   ║
 ║  │     ├──────────────────────────────────────────┤     │   ║
 ║  │     │ CtxUpstreamArtifact (L0 远处前置)        │     │   ║
 ║  │     │  ← Metadata["summary"] 或前 300 字符     │     │   ║
@@ -72,10 +72,10 @@ Action 执行时，上下文通过 `WorkItemEngine` 的三阶段管道（Prepare
 ║  │  │                                            │      │   ║
 ║  │  │ # Context                                  │      │   ║
 ║  │  │ ## work item                               │      │   ║
-║  │  │ **{Issue.Title}** + {Issue.Body}           │      │   ║
-║  │  │ ## upstream step N output (L2)             │      │   ║
+║  │  │ **{WorkItem.Title}** + {WorkItem.Body}     │      │   ║
+║  │  │ ## upstream action N output (L2)           │      │   ║
 ║  │  │ {Artifact.ResultMarkdown}                  │      │   ║
-║  │  │ ## upstream step M summary (L0)            │      │   ║
+║  │  │ ## upstream action M summary (L0)          │      │   ║
 ║  │  │ {Metadata["summary"] 或前300字符}          │      │   ║
 ║  │  │ ## feature manifest                        │      │   ║
 ║  │  │ {compact JSON}                             │      │   ║
@@ -85,12 +85,12 @@ Action 执行时，上下文通过 `WorkItemEngine` 的三阶段管道（Prepare
 ║  │  │ - criterion 2                              │      │   ║
 ║  │  └────────────────────────────────────────────┘      │   ║
 ║  │  限制: 整体 ≤12000 字符, 按类型分配预算:              │   ║
-║  │    IssueSummary ≤800, Manifest ≤2000,                │   ║
+║  │    WorkItemSummary ≤800, Manifest ≤2000,             │   ║
 ║  │    UpstreamArtifact ≤4000                            │   ║
 ║  └──────────────────────┬──────────────────────────────┘   ║
 ║                         │                                   ║
 ║                         ▼  BriefingSnapshot (Markdown)      ║
-║              存入 Execution.BriefingSnapshot                ║
+║                 存入 Run.BriefingSnapshot                   ║
 ╚═══════════════════════════╤═════════════════════════════════╝
                             │
 ╔═══════════════════════════▼═════════════════════════════════╗
@@ -107,7 +107,7 @@ Action 执行时，上下文通过 `WorkItemEngine` 的三阶段管道（Prepare
 ║  │                                                      │   ║
 ║  │  ③ BuildRunInputForAction()                          │   ║
 ║  │     ┌───────────────────────────────────────────┐    │   ║
-║  │     │ Gate 步骤?  → 总是完整 prompt              │    │   ║
+║  │     │ Gate Action? → 总是完整 prompt             │    │   ║
 ║  │     │                                           │    │   ║
 ║  │     │ 复用会话 + 有前置回合?                      │    │   ║
 ║  │     │   有 Gate 反馈? → Rework 跟进消息          │    │   ║
@@ -141,9 +141,9 @@ Action 执行时，上下文通过 `WorkItemEngine` 的三阶段管道（Prepare
 ║  └──────────────────────┬──────────────────────────────┘   ║
 ║                         │                                   ║
 ║  ┌──────────────────────▼──────────────────────────────┐   ║
-║  │ Gate 处理 (仅 gate 步骤)                              │   ║
+║  │ Gate 处理 (仅 gate action)                            │   ║
 ║  │                                                      │   ║
-║  │   pass → 步骤完成, 推进下一步                         │   ║
+║  │   pass → Action 完成, 推进下一步                      │   ║
 ║  │                                                      │   ║
 ║  │   reject → recordGateRework():                       │   ║
 ║  │     Create ActionSignal(type=feedback)               │   ║
@@ -166,7 +166,7 @@ Briefing 是结构化对象（Objective + ContextRefs + Constraints），经 `re
 | 来源 | 状态 | 说明 |
 |------|------|------|
 | Action 自身配置 | ✅ 已接入 | `Config["objective"]`, `AcceptanceCriteria` |
-| WorkItem 摘要 | ✅ 已接入 | `CtxIssueSummary` — Title + Body (≤500 字符)，当前承载的是 WorkItem 摘要 |
+| WorkItem 摘要 | ✅ 已接入 | `CtxIssueSummary`（历史类型名）— Title + Body (≤500 字符)，当前承载的是 WorkItem 摘要 |
 | 上游 Deliverable (L2) | ✅ 已接入 | 直接前置 Action 的完整 `ResultMarkdown` |
 | 上游 Deliverable (L0) | ✅ 已接入 | 远处前置 Action 的 `Metadata["summary"]` 或前 300 字符 |
 | 项目功能清单 | ✅ 已接入 | `FeatureManifest` (fail/pending 详细, pass/skipped 精简) |
@@ -180,7 +180,7 @@ Briefing 是结构化对象（Objective + ContextRefs + Constraints），经 `re
 - **复用会话 + 无反馈**: Continue 跟进消息（避免重复注入）
 - **复用会话 + Gate 拒绝**: Rework 跟进消息（仅包含反馈）
 - **新会话 + Gate 拒绝**: 完整 prompt + `# Gate Feedback (Rework)` 章节
-- **Gate 步骤**: 总是完整 prompt（确保输出确定性）
+- **Gate Action**: 总是完整 prompt（确保输出确定性）
 
 ### 4. Gate 反馈闭环
 
@@ -197,7 +197,7 @@ Gate reject
 **Briefing 字符预算** (renderBriefingSnapshot):
 - 整个 BriefingSnapshot: ≤ 12000 字符
 - 按 ContextRef 类型分配预算:
-  - `CtxIssueSummary` / `CtxProjectBrief`: ≤ 800 字符
+  - `CtxIssueSummary`（历史类型名）/ `CtxProjectBrief`: ≤ 800 字符
   - `CtxAgentMemory`: ≤ 1500 字符
   - `CtxFeatureManifest`: ≤ 2000 字符
   - `CtxUpstreamArtifact`: ≤ 4000 字符
@@ -209,7 +209,7 @@ Gate reject
 - 执行前检查三级状态:
   - OK: 正常执行
   - Warning (≥80%): slog 告警, 继续执行
-  - Exceeded (≥100%): 返回 `ErrTokenBudgetExceeded`, 步骤进入 blocked/retry
+  - Exceeded (≥100%): 返回 `ErrTokenBudgetExceeded`, action 进入 blocked/retry
 
 ## 相关代码文件
 
@@ -225,7 +225,7 @@ Gate reject
 | `internal/application/flow/engine.go` | WorkItemEngine — 三阶段管道 (prepare/execute/finalize) |
 | `internal/application/flow/execution_input.go` | BuildRunInputForAction — prompt 变体选择 |
 | `internal/application/flow/gate.go` | Gate 处理 + recordGateRework 反馈回流 |
-| `internal/application/flow/dag.go` | 前置步骤查询 (predecessorStepIDs / immediatePredecessorStepIDs) |
+| `internal/application/flow/dag.go` | 前置 Action 查询 (`predecessorStepIDs` / `immediatePredecessorStepIDs` 为历史 helper 名) |
 | `internal/application/flow/workspace.go` | Workspace context 注入 |
 | `internal/adapters/executor/acp.go` | ACPExecutor — 实际发送给 Agent |
 | `internal/runtime/agent/acp_session_pool.go` | ACPSessionPool — 会话复用 + Token 预算检查 (CheckTokenBudget / NoteTokens) |

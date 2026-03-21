@@ -50,24 +50,24 @@ pwsh -NoProfile -File ./scripts/test/frontend-build.ps1   # Frontend build verif
 ## Architecture
 
 ### Domain Model (`internal/core/`)
-Current execution model centers on runtime drivers and profiles:
-- **Flow / Step / Execution** — primary orchestration entities.
+Current run model centers on runtime drivers and profiles:
+- **WorkItem / Action / Run** — primary orchestration entities.
 - **Project / ResourceBinding / Artifact / Briefing** — project-scoped runtime resources.
-- **Runtime Profile** — execution persona, configured under `runtime.agents.profiles`.
+- **Runtime Profile** — run persona, configured under `runtime.agents.profiles`.
 
 ### Package Dependency Flow
 ```
 cmd/ai-flow (CLI + server bootstrap)
   → internal/backend     (HTTP server/bootstrap)
-  → internal/engine      (runtime execution)
+  → internal/engine      (runtime runs)
   → internal/core        (domain types)
   → internal/support/... (config, ACP client, shared support packages)
   → internal/store       (persistence)
   → internal/skills      (runtime skills)
 ```
 
-### Execution Path
-Pipeline execution uses ACP over stdio:
+### Run Path
+Pipeline runs use ACP over stdio:
 - runtime agent launch comes from `runtime.agents.drivers`
 - runtime role/persona selection comes from `runtime.agents.profiles`
 - backend bootstraps runtime services from `internal/backend/*`

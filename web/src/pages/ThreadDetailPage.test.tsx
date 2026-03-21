@@ -156,7 +156,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
@@ -218,7 +217,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValueOnce([])
@@ -269,7 +267,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([
@@ -307,7 +304,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([buildAgentSession(11, "worker-a")]),
@@ -363,7 +359,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([buildAgentSession(11, "worker-a")]),
@@ -421,7 +416,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([
@@ -472,7 +466,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([buildAgentSession(11, "worker-a")]),
@@ -519,7 +512,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([buildAgentSession(11, "worker-a")]),
@@ -551,7 +543,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([buildAgentSession(11, "worker-a")]),
@@ -583,7 +574,6 @@ describe("ThreadDetailPage", () => {
       listThreadMessages: vi.fn().mockResolvedValue([]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([
@@ -636,7 +626,6 @@ describe("ThreadDetailPage", () => {
       ]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([buildAgentSession(11, "worker-a")]),
@@ -656,36 +645,6 @@ describe("ThreadDetailPage", () => {
     });
   });
 
-  it("展示消息归属的 Task Group 标记", async () => {
-    const wsClient = createWsClientMock();
-    const apiClient = {
-      getThread: vi.fn().mockResolvedValue(buildThread("已有摘要")),
-      listThreadMessages: vi.fn().mockResolvedValue([
-        {
-          id: 103,
-          thread_id: 1,
-          sender_id: "system",
-          role: "system",
-          content: "任务轨道已进入送审。",
-          metadata: { task_group_id: 42 },
-          created_at: "2026-03-13T00:00:00Z",
-        },
-      ]),
-      listThreadParticipants: vi.fn().mockResolvedValue([]),
-      listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
-      listThreadAgents: vi.fn().mockResolvedValue([]),
-      listThreadAttachments: vi.fn().mockResolvedValue([]),
-      listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
-    };
-    mockUseWorkbench.mockReturnValue({ apiClient, wsClient });
-
-    renderPage();
-
-    expect(await screen.findByText("Group #42")).toBeTruthy();
-    expect(await screen.findByText("任务轨道已进入送审。")).toBeTruthy();
-  });
-
   it("hover 消息 mention 时展示 agent 信息卡", async () => {
     const wsClient = createWsClientMock();
     const apiClient = {
@@ -703,7 +662,6 @@ describe("ThreadDetailPage", () => {
       ]),
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi
         .fn()
         .mockResolvedValue([buildAgentSession(11, "worker-a")]),
@@ -756,7 +714,6 @@ describe("ThreadDetailPage", () => {
         .mockResolvedValueOnce([createdProposal]),
       createThreadProposal: vi.fn().mockResolvedValue(createdProposal),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
@@ -821,7 +778,6 @@ describe("ThreadDetailPage", () => {
       listThreadProposals: vi.fn().mockResolvedValue([]),
       createThreadProposal: vi.fn(),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
@@ -897,7 +853,6 @@ describe("ThreadDetailPage", () => {
       updateProposal: vi.fn().mockResolvedValue(updatedProposal),
       replaceProposalDrafts: vi.fn().mockResolvedValue(updatedProposal),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
@@ -975,7 +930,6 @@ describe("ThreadDetailPage", () => {
       submitProposal: vi.fn().mockResolvedValue({ ...draftProposal, status: "open" }),
       approveProposal: vi.fn().mockResolvedValue({ ...openProposal, status: "approved" }),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
@@ -1033,7 +987,6 @@ describe("ThreadDetailPage", () => {
         },
       ]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
@@ -1072,7 +1025,6 @@ describe("ThreadDetailPage", () => {
       listThreadParticipants: vi.fn().mockResolvedValue([]),
       listThreadProposals: vi.fn().mockResolvedValue([]),
       listWorkItemsByThread: vi.fn().mockResolvedValue([]),
-      listThreadTaskGroups: vi.fn().mockResolvedValue([]),
       listThreadAgents: vi.fn().mockResolvedValue([]),
       listThreadAttachments: vi.fn().mockResolvedValue([]),
       listProfiles: vi.fn().mockResolvedValue([buildProfile("worker-a")]),
@@ -1091,3 +1043,4 @@ describe("ThreadDetailPage", () => {
     expect(screen.queryByText("旧消息")).toBeNull();
   });
 });
+

@@ -13,15 +13,15 @@
 - 通用 skills 目录、`SKILL.md` 解析与校验
 - skills CRUD / GitHub import HTTP API
 - sandbox 内 skill linking
-- builtin skill 目前只有 `step-signal`
-- `step-context` 当前是运行期临时注入的 ephemeral skill，由 `ActionContextBuilder` 生成并挂载
+- builtin skills 已包含 `action-signal`、`plan-actions`、`sys-action-manage` 以及若干 `gstack-*` skills
+- `action-context` 当前是运行期临时注入的 ephemeral skill，由 `ActionContextBuilder` 生成并挂载
 
 当前尚未落地的能力：
 
 - 默认 Lead profile 预装 `sys-*` 系统 skills
 - `AI_WORKFLOW_API_BASE` / `AI_WORKFLOW_PROJECT_ID` 这组专门为本文脚本体系准备的环境变量注入
 - `load_mode: on_demand` 的完整动态加载协议
-- 文中列出的 `sys-issue-manage` / `sys-step-manage` 等系统 skill 实体
+- 文中列出的 `sys-workitem-manage` / `sys-action-manage` 等系统 skill 实体
 
 ## 1. 背景与目标
 
@@ -55,18 +55,18 @@ SQLite / 系统状态
 
 ```
 skills/
-├── sys-issue-manage/
+├── sys-workitem-manage/
 │   ├── SKILL.md              # 技能描述 + 使用指南
 │   └── scripts/
-│       ├── create-issue.sh    # 创建 Issue
-│       ├── list-issues.sh     # 列出 Issues
-│       ├── update-issue.sh    # 更新 Issue
-│       └── run-issue.sh       # 触发执行
+│       ├── create-work-item.sh    # 创建 WorkItem
+│       ├── list-work-items.sh     # 列出 WorkItems
+│       ├── update-work-item.sh    # 更新 WorkItem
+│       └── run-work-item.sh       # 触发执行
 ├── sys-progress-monitor/
 │   ├── SKILL.md
 │   └── scripts/
-│       ├── issue-status.sh    # 查看 Issue 执行状态
-│       ├── step-status.sh     # 查看 Step 状态
+│       ├── work-item-status.sh    # 查看 WorkItem 执行状态
+│       ├── action-status.sh       # 查看 Action 状态
 │       └── recent-events.sh   # 近期事件流
 ├── sys-cron-scheduler/
 │   ├── SKILL.md
@@ -86,53 +86,53 @@ skills/
 
 按功能域分组，标注优先级（P0 = 核心能力，P1 = 重要，P2 = 增强）。
 
-### 3.1 Issue 管理 — `sys-issue-manage` (P0)
+### 3.1 WorkItem 管理 — `sys-workitem-manage` (P0)
 
 | 脚本 | 功能 | 对应 API |
 |------|------|---------|
-| `create-issue.sh` | 创建 Work Item（标题/描述/优先级/标签） | `POST /api/work-items` |
-| `list-issues.sh` | 列出/搜索 Work Items（按状态/项目/优先级过滤） | `GET /api/work-items` |
-| `get-issue.sh` | 查看 Work Item 详情 | `GET /api/work-items/{id}` |
-| `update-issue.sh` | 更新 Work Item（状态/优先级/描述） | `PUT /api/work-items/{id}` |
-| `archive-issue.sh` | 归档 Work Item | `POST /api/work-items/{id}/archive` |
-| `run-issue.sh` | 触发 Work Item 执行 | `POST /api/work-items/{id}/run` |
-| `cancel-issue.sh` | 取消执行中的 Work Item | `POST /api/work-items/{id}/cancel` |
+| `create-work-item.sh` | 创建 Work Item（标题/描述/优先级/标签） | `POST /api/work-items` |
+| `list-work-items.sh` | 列出/搜索 Work Items（按状态/项目/优先级过滤） | `GET /api/work-items` |
+| `get-work-item.sh` | 查看 Work Item 详情 | `GET /api/work-items/{id}` |
+| `update-work-item.sh` | 更新 Work Item（状态/优先级/描述） | `PUT /api/work-items/{id}` |
+| `archive-work-item.sh` | 归档 Work Item | `POST /api/work-items/{id}/archive` |
+| `run-work-item.sh` | 触发 Work Item 执行 | `POST /api/work-items/{id}/run` |
+| `cancel-work-item.sh` | 取消执行中的 Work Item | `POST /api/work-items/{id}/cancel` |
 | `generate-title.sh` | AI 生成 Work Item 标题 | `POST /api/work-items/generate-title` |
 
 **典型对话场景**：
-> "帮我创建一个 Issue，实现用户登录功能，优先级 high"
-> "当前项目有哪些还在 running 的 Issue？"
-> "把 Issue #12 的优先级改成 urgent"
+> "帮我创建一个 WorkItem，实现用户登录功能，优先级 high"
+> "当前项目有哪些还在 running 的 WorkItem？"
+> "把 WorkItem #12 的优先级改成 urgent"
 
-### 3.2 Step 管理与 AI 分解 — `sys-step-manage` (P0)
+### 3.2 Action 管理与 AI 分解 — `sys-action-manage` (P0)
 
 | 脚本 | 功能 | 对应 API |
 |------|------|---------|
-| `create-step.sh` | 为 Work Item 创建 Step | `POST /api/work-items/{id}/steps` |
-| `list-steps.sh` | 查看 Work Item 下的所有 Steps | `GET /api/work-items/{id}/steps` |
-| `get-step.sh` | 查看 Step 详情 | `GET /api/steps/{id}` |
-| `update-step.sh` | 更新 Step | `PUT /api/steps/{id}` |
-| `generate-steps.sh` | AI 自动分解 Work Item 为 Steps | `POST /api/work-items/{id}/generate-steps` |
+| `create-action.sh` | 为 WorkItem 创建 Action | `POST /api/work-items/{id}/actions` |
+| `list-actions.sh` | 查看 WorkItem 下的所有 Actions | `GET /api/work-items/{id}/actions` |
+| `get-action.sh` | 查看 Action 详情 | `GET /api/actions/{id}` |
+| `update-action.sh` | 更新 Action | `PUT /api/actions/{id}` |
+| `generate-actions.sh` | AI 自动分解 WorkItem 为 Actions | `POST /api/work-items/{id}/generate-actions` |
 
 **典型对话场景**：
-> "帮我把 Issue #5 拆解成具体的执行步骤"
-> "Issue #5 下面的步骤执行到哪了？"
+> "帮我把 WorkItem #5 拆解成具体的执行 actions"
+> "WorkItem #5 下面的 actions 执行到哪了？"
 
 ### 3.3 进度监控 — `sys-progress-monitor` (P1)
 
 | 脚本 | 功能 | 对应 API |
 |------|------|---------|
-| `issue-status.sh` | 查看 Work Item 执行状态概览 | `GET /api/work-items/{id}` + `GET /api/work-items/{id}/steps` |
+| `work-item-status.sh` | 查看 Work Item 执行状态概览 | `GET /api/work-items/{id}` + `GET /api/work-items/{id}/actions` |
 | `execution-detail.sh` | 查看具体执行详情 | `GET /api/executions/{id}` |
 | `recent-events.sh` | 获取近期系统事件 | `GET /api/events` |
-| `issue-events.sh` | 获取特定 Work Item 的事件流 | `GET /api/work-items/{id}/events` |
+| `work-item-events.sh` | 获取特定 Work Item 的事件流 | `GET /api/work-items/{id}/events` |
 | `artifact-view.sh` | 查看执行产物 | `GET /api/artifacts/{id}` |
 | `probe-execution.sh` | 对运行中的 Execution 发送健康探测 | `POST /api/executions/{id}/probe` |
 
 **典型对话场景**：
-> "Issue #3 现在进展如何？"
+> "WorkItem #3 现在进展如何？"
 > "最近 10 分钟有什么执行失败了吗？"
-> "看看 Step #7 的输出结果"
+> "看看 Action #7 的输出结果"
 
 ### 3.4 定时任务 — `sys-cron-scheduler` (P1)
 
@@ -144,9 +144,9 @@ skills/
 | `disable-cron.sh` | 禁用定时任务 | `DELETE /api/work-items/{id}/cron` |
 
 **典型对话场景**：
-> "帮我设置 Issue #8 每天凌晨 2 点自动运行"
+> "帮我设置 WorkItem #8 每天凌晨 2 点自动运行"
 > "现在有哪些定时任务在跑？"
-> "停掉 Issue #8 的定时执行"
+> "停掉 WorkItem #8 的定时执行"
 
 ### 3.5 项目管理 — `sys-project-manage` (P1)
 
@@ -169,27 +169,27 @@ skills/
 | `list-templates.sh` | 列出 DAG 模板 | `GET /api/templates` |
 | `get-template.sh` | 查看模板详情 | `GET /api/templates/{id}` |
 | `save-as-template.sh` | 将 Work Item 保存为模板 | `POST /api/work-items/{id}/save-as-template` |
-| `create-from-template.sh` | 从模板创建 Issue | `POST /api/templates/{id}/create-issue` |
+| `create-from-template.sh` | 从模板创建 WorkItem | `POST /api/templates/{id}/create-work-item` |
 
 **典型对话场景**：
-> "把 Issue #5 保存成模板，以后可以复用"
-> "用 full-stack-feature 模板创建一个新 Issue"
+> "把 WorkItem #5 保存成模板，以后可以复用"
+> "用 full-stack-feature 模板创建一个新 WorkItem"
 
 ### 3.7 分析报表 — `sys-analytics` (P1)
 
 | 脚本 | 功能 | 对应 API |
 |------|------|---------|
 | `summary.sh` | 系统总览统计 | `GET /api/analytics/summary` |
-| `bottlenecks.sh` | 瓶颈分析（最慢/失败率最高的 Step） | `GET /api/analytics/bottlenecks` |
+| `bottlenecks.sh` | 瓶颈分析（最慢/失败率最高的 Action） | `GET /api/analytics/bottlenecks` |
 | `recent-failures.sh` | 近期失败记录 | `GET /api/analytics/recent-failures` |
 | `error-breakdown.sh` | 错误类型分布 | `GET /api/analytics/error-breakdown` |
 | `usage-summary.sh` | Token 用量汇总 | `GET /api/analytics/usage` |
 | `usage-by-project.sh` | 按项目查看用量 | `GET /api/analytics/usage/by-project` |
-| `status-distribution.sh` | Issue 状态分布 | `GET /api/analytics/status-distribution` |
+| `status-distribution.sh` | WorkItem 状态分布 | `GET /api/analytics/status-distribution` |
 
 **典型对话场景**：
 > "目前系统整体运行情况怎么样？"
-> "哪些步骤执行最慢，是瓶颈？"
+> "哪些 actions 执行最慢，是瓶颈？"
 > "这个月 token 用了多少？哪个项目用得最多？"
 
 ### 3.8 协作讨论 — `sys-thread-manage` (P2)
@@ -200,11 +200,11 @@ skills/
 | `list-threads.sh` | 列出 Threads | `GET /api/threads` |
 | `post-message.sh` | 发送消息到 Thread | `POST /api/threads/{id}/messages` |
 | `list-messages.sh` | 查看 Thread 消息 | `GET /api/threads/{id}/messages` |
-| `link-work-item.sh` | 关联 Thread 与 Issue | `POST /api/threads/{id}/links/work-items` |
+| `link-work-item.sh` | 关联 Thread 与 WorkItem | `POST /api/threads/{id}/links/work-items` |
 | `invite-agent.sh` | 邀请 Agent 加入 Thread | `POST /api/threads/{id}/agents` |
 
 **典型对话场景**：
-> "创建一个讨论，关于 Issue #5 的架构方案"
+> "创建一个讨论，关于 WorkItem #5 的架构方案"
 > "把 worker agent 邀请进 Thread #2 一起讨论"
 
 ### 3.9 Feature 追踪 — `sys-feature-tracking` (P2)
@@ -237,8 +237,8 @@ skills/
 
 | 优先级 | Skill | 核心价值 |
 |--------|-------|---------|
-| **P0** | `sys-issue-manage` | 最核心的工作单元管理 |
-| **P0** | `sys-step-manage` | Issue 分解与执行控制 |
+| **P0** | `sys-workitem-manage` | 最核心的工作单元管理 |
+| **P0** | `sys-action-manage` | WorkItem 分解与执行控制 |
 | **P1** | `sys-progress-monitor` | 实时掌握执行进度 |
 | **P1** | `sys-cron-scheduler` | 自动化定时执行 |
 | **P1** | `sys-project-manage` | 项目上下文切换 |
@@ -257,7 +257,7 @@ Profile.Skills = ["...existing skills..."]
     ↓
 Sandbox.Prepare() → EnsureSkillsLinked()
     ↓
-Symlink: <skills-root>/sys-issue-manage → <agent-home>/skills/sys-issue-manage
+Symlink: <skills-root>/sys-workitem-manage → <agent-home>/skills/sys-workitem-manage
     ↓
 ACP Agent 读取 skills/ 目录中的 SKILL.md
 ```
@@ -288,8 +288,8 @@ ACP Agent 读取 skills/ 目录中的 SKILL.md
 [[runtime.agents.profiles]]
 id = "lead"
 skills = [
-  "sys-issue-manage",
-  "sys-step-manage",
+  "sys-workitem-manage",
+  "sys-action-manage",
   "sys-progress-monitor",
   "sys-cron-scheduler",
   "sys-project-manage",
@@ -310,8 +310,8 @@ skills = [
 
 ```yaml
 ---
-name: sys-issue-manage
-description: "管理系统 Issues（工作单元）"
+name: sys-workitem-manage
+description: "管理系统 WorkItems（工作单元）"
 category: system           # 新增：skill 分类
 load_mode: on_demand       # 新增：lazy | eager | on_demand
 ---
@@ -335,7 +335,7 @@ load_mode: on_demand       # 新增：lazy | eager | on_demand
 
 ```toml
 [runtime.skill_groups]
-core = ["sys-issue-manage", "sys-step-manage"]
+core = ["sys-workitem-manage", "sys-action-manage"]
 ops = ["sys-progress-monitor", "sys-cron-scheduler", "sys-analytics"]
 collab = ["sys-thread-manage", "sys-feature-tracking"]
 admin = ["sys-agent-config"]
@@ -384,42 +384,42 @@ api_call() {
 
 ```markdown
 ---
-name: sys-issue-manage
-description: "管理系统中的 Issues（创建/查看/更新/执行/归档工作单元）"
+name: sys-workitem-manage
+description: "管理系统中的 WorkItems（创建/查看/更新/执行/归档工作单元）"
 ---
 
-# Issue 管理
+# WorkItem 管理
 
-你可以通过以下脚本来管理系统中的 Issue（工作单元）：
+你可以通过以下脚本来管理系统中的 WorkItem（工作单元）：
 
 ## 可用操作
 
-### 创建 Issue
-`./scripts/create-issue.sh <json-payload>`
+### 创建 WorkItem
+`./scripts/create-work-item.sh <json-payload>`
 参数 (JSON stdin):
-- title (必需): Issue 标题
+- title (必需): WorkItem 标题
 - project_id (可选): 关联项目 ID
 - body (可选): 详细描述
 - priority (可选): low/medium/high/urgent，默认 medium
 - labels (可选): 标签数组
 
-### 列出 Issues
-`./scripts/list-issues.sh [--project-id=N] [--status=STATUS] [--priority=PRIORITY]`
+### 列出 WorkItems
+`./scripts/list-work-items.sh [--project-id=N] [--status=STATUS] [--priority=PRIORITY]`
 
-### 查看 Issue 详情
-`./scripts/get-issue.sh <issue-id>`
+### 查看 WorkItem 详情
+`./scripts/get-work-item.sh <work-item-id>`
 
-### 更新 Issue
-`./scripts/update-issue.sh <issue-id> <json-payload>`
+### 更新 WorkItem
+`./scripts/update-work-item.sh <work-item-id> <json-payload>`
 
 ### 触发执行
-`./scripts/run-issue.sh <issue-id>`
+`./scripts/run-work-item.sh <work-item-id>`
 
 ### 取消执行
-`./scripts/cancel-issue.sh <issue-id>`
+`./scripts/cancel-work-item.sh <work-item-id>`
 
 ## 注意事项
-- 创建 Issue 前先确认用户的需求，确保标题和描述清晰
+- 创建 WorkItem 前先确认用户的需求，确保标题和描述清晰
 - 优先级默认 medium，除非用户明确指定
 - 执行前确认用户意图，避免误触发
 ```
@@ -457,21 +457,22 @@ name = "Lead Agent"
 driver = "claude-acp"
 role = "lead"
 capabilities = ["planning", "review", "fullstack"]
-skills = ["sys-issue-manage", "sys-step-manage", "sys-progress-monitor", "sys-cron-scheduler", "sys-project-manage", "sys-template-manage", "sys-analytics"]
+skills = ["sys-workitem-manage", "sys-action-manage", "sys-progress-monitor", "sys-cron-scheduler", "sys-project-manage", "sys-template-manage", "sys-analytics"]
 ```
 
 ## 8. 建议与当前实现的衔接方式
 
 - 不要把本文当成“现有 skill 系统说明”，它描述的是未来扩展层
 - 如果要说明现有系统，请补一篇独立文档描述 skills CRUD、builtin skills、ephemeral skills
-- 如果未来继续推进本文方案，建议先从 `sys-issue-manage`、`sys-step-manage` 两个最小 skill 开始
+- 如果未来继续推进本文方案，建议先从 `sys-workitem-manage`、`sys-action-manage` 两个最小 skill 开始
 
 ## 9. 待讨论项
 
 1. **脚本语言选择** — 全用 Bash 还是部分用 Python/Node？Bash 更轻量但处理 JSON 不方便
 2. **权限控制** — 是否需要按 skill 做权限细分？比如普通用户不能用 `sys-agent-config`
-3. **Phase 1 范围** — 先实现哪几个 skills？建议 P0（issue + step）+ `sys-progress-monitor`
+3. **Phase 1 范围** — 先实现哪几个 skills？建议 P0（workitem + action）+ `sys-progress-monitor`
 4. **脚本输出格式** — JSON 还是人类可读文本？建议 JSON，由 Agent 转为自然语言
 5. **错误反馈** — 脚本失败时如何让 Agent 理解原因并提供有用的回复
 6. **Skill 版本管理** — 系统 skills 随代码发布还是独立管理？
 7. **方案 B 的 `load_skill` 动作** — 是否需要扩展 ACP 协议？还是通过现有 terminal action 调用
+

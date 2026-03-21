@@ -211,11 +211,7 @@ export type ThreadEventType =
   | "thread.agent_output"
   | "thread.agent_booted"
   | "thread.agent_failed"
-  | "thread.agent_thinking"
-  | "thread.task_group.created"
-  | "thread.task_group.completed"
-  | "thread.task.started"
-  | "thread.task.completed";
+  | "thread.agent_thinking";
 
 export interface ThreadEventPayload {
   thread_id?: number;
@@ -230,14 +226,6 @@ export interface ThreadEventPayload {
   target_agent_ids?: string[];
   reply_to_msg_id?: number;
   metadata?: Record<string, unknown>;
-  task_group_id?: number;
-  task_id?: number;
-  task_count?: number;
-  assignee?: string;
-  output_file?: string;
-  final_status?: string;
-  output_files?: string[];
-  feedback?: string;
   work_item_id?: number;
   status?: string;
   title?: string;

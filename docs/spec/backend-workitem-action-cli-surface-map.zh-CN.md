@@ -27,13 +27,8 @@
 
 不再把 `step` 作为新设计、新命令、新文档的主命名。
 
-现状里仍然存在 `step` 的原因，仅仅是历史遗留：
-
-- 部分 HTTP 路由仍使用 `/steps/...`
-- 部分环境变量仍使用 `AI_WORKFLOW_STEP_*`
-- 部分 skill 仍使用 `step-signal`、`sys-step-manage`
-
-这些都应被视为待迁移对象，而不是未来 CLI 设计的命名依据。
+当前现状里，`step` 主要只剩持久化表名、旧脚本、旧文档中的历史残留。
+HTTP 主路径、运行时环境变量、builtin skills 的对外主命名已经统一到 `action`。
 
 ## 3. 主要代码分层
 
@@ -76,7 +71,7 @@
   - `llmconfig.ControlService`
   - `sandbox.ControlService`
 - 但另一些关键控制点仍然在 handler 中直接操作 store/bus，例如：
-  - `step_signal.go`
+  - `step_signal.go`（文件名仍待后续整理，语义已是 action signal）
 
 这会导致 CLI、HTTP、MCP 很容易各写一套。
 
@@ -84,8 +79,10 @@
 
 - `internal/application/flow`
   DAG、执行、gate、signal 关联逻辑核心。
-- `internal/application/threadtaskapp`
-  thread task 的业务编排。
+- `internal/application/proposalapp`
+  proposal 审批与物化入口。
+- `internal/application/initiativeapp`
+  initiative 执行前批准与物化协调。
 - `internal/application/probe`
   运行期探针与 side-channel。
 
@@ -110,7 +107,7 @@
 
 当前来源：
 
-- agent skill: `internal/skills/builtin/step-signal`
+- agent skill: `internal/skills/builtin/action-signal`
 - HTTP handler: `internal/adapters/http/step_signal.go`
 - MCP 内部实现: `internal/platform/appcmd/mcp_serve.go`
 
@@ -137,14 +134,14 @@
 
 当前来源：
 
-- skill: `internal/skills/builtin/sys-step-manage`
+- skill: `internal/skills/builtin/sys-action-manage`
 - HTTP routes:
-  - `POST /work-items/{issueID}/steps`
-  - `GET /work-items/{issueID}/steps`
-  - `GET /steps/{stepID}`
-  - `PUT /steps/{stepID}`
-  - `DELETE /steps/{stepID}`
-  - `POST /work-items/{issueID}/generate-steps`
+  - `POST /work-items/{workItemID}/actions`
+  - `GET /work-items/{workItemID}/actions`
+  - `GET /actions/{actionID}`
+  - `PUT /actions/{actionID}`
+  - `DELETE /actions/{actionID}`
+  - `POST /work-items/{workItemID}/generate-actions`
 
 目标：
 
@@ -161,22 +158,10 @@
 
 ### 4.3 thread task signal
 
-当前来源：
+该能力对应的 `task-signal` skill、HTTP handler 与 `threadtaskapp` 已从当前代码中移除。
 
-- skill: `internal/skills/builtin/task-signal`
-- HTTP handler: `internal/adapters/http/thread_task.go`
-- application service: `internal/application/threadtaskapp`
-
-现状相对更健康，因为 HTTP handler 已经在调用 service。
-
-目标：
-
-- 在 CLI 侧直接复用 `threadtaskapp.Service`
-
-建议 CLI 形态：
-
-- `ai-flow task signal complete`
-- `ai-flow task signal reject`
+因此这里不再作为现行 CLI 抽象目标；线程讨论后的计划与执行统一走
+`proposal / initiative / work item` 主链。
 
 ### 4.4 runtime config
 
@@ -195,7 +180,7 @@
 
 ## 5. 当前最值得优先抽象的共享服务
 
-建议优先形成四类 command service：
+建议优先形成三类 command service：
 
 1. `ActionSignalService`
    - decision
@@ -204,11 +189,9 @@
 2. `ActionManageService`
    - CRUD
    - generate
-3. `ThreadTaskSignalService`
-   - task result signal
-4. `RuntimeConfigCommandService`
-   - llm config inspect/update
-   - sandbox inspect/update
+3. `RuntimeConfigCommandService`
+    - llm config inspect/update
+    - sandbox inspect/update
 
 原则：
 
@@ -234,7 +217,7 @@
 完成项：
 
 - 抽 `ActionSignalService`
-- 让 `step_signal.go` 与 `mcp_serve.go` 共用
+- 让 `step_signal.go`（语义为 action signal）与 `mcp_serve.go` 共用
 - 新增：
   - `ai-flow action signal complete`
   - `ai-flow action signal need-help`
@@ -247,16 +230,9 @@
 完成项：
 
 - 抽 `ActionManageService`
-- 改造 `sys-step-manage` skill 脚本为 CLI wrapper
+- 改造 `sys-action-manage` skill 脚本为 CLI wrapper
 
 ### 阶段 4
-
-完成项：
-
-- `task-signal` 改成 CLI wrapper
-- thread task signal 统一走 CLI + service
-
-### 阶段 5
 
 完成项：
 
@@ -283,7 +259,7 @@
 1. `ActionSignalService`
 2. `ai-flow action signal ...`
 3. `ai-flow action unblock`
-4. `step-signal` skill 脚本改为调用 CLI
+4. `action-signal` skill 脚本改为调用 CLI
 
 这是最小、最关键、收益最高的一刀，因为它同时连接了：
 

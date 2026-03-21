@@ -116,7 +116,7 @@
 - context refs 管理
 - 附件上传/下载
 - workspace / project / attachment 文件搜索
-- task groups / thread tasks 展示与操作
+- proposal / initiative 展示与审批操作
 
 ### WorkItem
 

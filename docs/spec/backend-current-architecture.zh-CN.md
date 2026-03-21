@@ -10,7 +10,7 @@
 
 当前后端主线已经稳定为：
 
-`WorkItem 执行引擎 + Thread 协作域 + ThreadTask DAG + 统一资源模型 + ACP 运行时`
+`WorkItem 执行引擎 + Thread 协作域 + Proposal / Initiative 审批链 + 统一资源模型 + ACP 运行时`
 
 如果要理解“现在代码怎么工作”，应以 `internal/core`、
 `internal/application`、`internal/adapters`、`internal/platform`、
@@ -44,7 +44,6 @@
 
 - `WorkItem`、`Action`、`Run`
 - `Thread`、`ThreadMessage`、`ThreadMember`
-- `ThreadTaskGroup`、`ThreadTask`
 - `ResourceSpace`、`Resource`、`ActionIODecl`
 - `Event`、`Notification`、`Inspection`
 
@@ -57,7 +56,6 @@
 - `flow`：WorkItem 执行引擎、调度器、gate、恢复、workspace 编排
 - `workitemapp`：WorkItem CRUD 与运行入口
 - `threadapp`：Thread、context ref、work item linking、crystallize
-- `threadtaskapp`：Thread task group / task 的 DAG 服务
 - `planning`：LLM 规划并 materialize 为 Action
 - `probe`：运行探针
 - `inspection`：巡检与自演进检查
@@ -126,17 +124,16 @@
 
 `WorkItem -> Action -> Run`
 
-### Action 是领域名，Step 是兼容 API 名
+### Action 是领域名，旧 Step 只剩历史残留
 
-当前内部核心模型使用 `Action`，但 HTTP 兼容层仍暴露大量
-`/steps/*` 路径。
+当前内部核心模型、HTTP 主路径与前端契约都已经统一使用 `Action`。
+`Step` 主要只剩持久化层、旧测试说明和历史文档中的残留描述。
 
 因此当前约束应理解为：
 
 - 领域模型主名：`Action`
-- Public/API 兼容名：`Step`
-
-不要把 `Step` 误判成新的主领域对象。
+- Public/API 主名：`Action`
+- `Step` 不是新的主领域对象，只是历史残留词
 
 ### Thread 是一等协作模型
 
@@ -154,19 +151,19 @@ Thread 相关核心对象包括：
 
 Thread 当前已拥有独立 REST、WebSocket、存储与运行时链路。
 
-### ThreadTask DAG 已落地
+### Proposal / Initiative 是当前计划审批主链
 
-`internal/core/thread_task.go` 与
-`internal/application/threadtaskapp/service.go` 表明：
+当前 thread 讨论后的结构化计划，不再落到独立的 `ThreadTask DAG`。
 
-- 线程内已经支持 `task group`
-- task 支持 DAG 依赖
-- 当前存在 `work` / `review` 两类任务
-- review reject 可触发上游 work task 回退与重试
-- 任务组可选物化为 `WorkItem`
+现行主链是：
 
-因此 `thread-task-dag` 应视为当前“部分实现但已落地的行为规范”，
-而不是纯规划稿。
+- `Thread` 负责讨论与收敛
+- `Proposal` 负责计划提交、驳回、返修、审批
+- `Initiative` 负责执行前批准与物化 work item 关系组
+- `WorkItem` 负责实际调度与执行
+
+因此任何仍把 `task group / thread task` 当作现行线程协作主链的描述，
+都已经落后于当前代码。
 
 ### 统一资源模型已进入现状实现
 
@@ -216,7 +213,7 @@ HTTP 总注册位于 `internal/adapters/http/handler.go`。
 - runs / events
 - analytics / usage
 - templates
-- step signals / pending decisions
+- action signals / pending decisions
 - threads / messages / participants / agents
 - thread work item linking
 - thread context refs
@@ -227,7 +224,7 @@ HTTP 总注册位于 `internal/adapters/http/handler.go`。
 - inspections
 - admin controls
 
-因此任何把当前系统描述成“只有 issue/step/run 单线工作流”的文档
+因此任何把当前系统描述成“只有 workitem/action/run 单线工作流”的文档
 都已经落后于代码。
 
 ## ACP 与 builtin executor
@@ -274,7 +271,7 @@ builtin executor 当前覆盖的典型动作包括：
 当前仍保留以下兼容残留：
 
 - SQLite 主表仍多为 `issues` / `steps` / `executions`
-- 部分 handler / request struct 继续使用 `issueID` 命名
+- 这些属于持久化兼容残留，不再代表对外主命名
 - `internal/legacy/*` 仍保留历史模型
 
 这些残留不代表主设计方向，只表示当前为了兼容而保留的实现细节。
@@ -287,5 +284,4 @@ builtin executor 当前覆盖的典型动作包括：
 2. `thread-agent-runtime.zh-CN.md`
 3. `thread-workspace-context.zh-CN.md`
 4. `thread-workitem-linking.zh-CN.md`
-5. `thread-task-dag.zh-CN.md`
-6. `naming-transition-thread-workitem.zh-CN.md`
+5. `naming-transition-thread-workitem.zh-CN.md`

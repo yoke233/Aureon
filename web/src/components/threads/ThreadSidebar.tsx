@@ -33,7 +33,6 @@ import type {
   ThreadParticipant,
   ThreadProposal,
   ThreadWorkItemLink,
-  ThreadTaskGroup,
   WorkItem,
   WorkItemPriority,
 } from "@/types/apiV2";
@@ -175,15 +174,6 @@ export interface ThreadSidebarProps {
   onRejectProposal: (proposalId: number) => void;
   onReviseProposal: (proposalId: number) => void;
 
-  // Tasks: task groups
-  threadTaskGroupsEnabled: boolean;
-  onToggleThreadTaskGroups: () => void;
-  taskGroups: ThreadTaskGroup[];
-  taskGroupsLoading: boolean;
-  taskGroupStatusTone: (status: string) => string;
-  onDeleteTaskGroup: (groupId: number) => void;
-  onRetryTaskGroup: (groupId: number) => void;
-
   // Tasks: work items
   workItemLinks: ThreadWorkItemLink[];
   orderedWorkItemLinks: ThreadWorkItemLink[];
@@ -240,9 +230,7 @@ export function ThreadSidebar(props: ThreadSidebarProps) {
 
   const memberCount =
     props.agentSessionsWithProfileID.length + props.participants.length;
-  const taskCount =
-    (props.threadTaskGroupsEnabled ? props.taskGroups.length : 0) +
-    props.workItemLinks.length;
+  const taskCount = props.workItemLinks.length;
 
   return (
     <div className="flex h-full flex-col">
@@ -1004,13 +992,6 @@ function readWorkItemSourceType(workItem: WorkItem | undefined): string | null {
 }
 
 function TasksSection({
-  threadTaskGroupsEnabled,
-  onToggleThreadTaskGroups,
-  taskGroups,
-  taskGroupsLoading,
-  taskGroupStatusTone,
-  onDeleteTaskGroup,
-  onRetryTaskGroup,
   workItemLinks,
   orderedWorkItemLinks,
   linkedWorkItems,
@@ -1033,90 +1014,6 @@ function TasksSection({
 
   return (
     <div className="space-y-3">
-      {/* Task Groups sub-section */}
-      <div>
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            Task Groups
-            {threadTaskGroupsEnabled && taskGroupsLoading && (
-              <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />
-            )}
-          </span>
-          <Button
-            type="button"
-            variant={threadTaskGroupsEnabled ? "default" : "outline"}
-            size="sm"
-            className="h-6 px-2 text-[10px]"
-            onClick={onToggleThreadTaskGroups}
-          >
-            {threadTaskGroupsEnabled
-              ? t("threads.taskGroupsDisable", { defaultValue: "关闭" })
-              : t("threads.taskGroupsEnable", { defaultValue: "开启" })}
-          </Button>
-        </div>
-        {!threadTaskGroupsEnabled ? (
-          <p className="mt-1 text-[11px] text-slate-400">
-            {t("threads.taskGroupsDisabledHint", {
-              defaultValue: "前端已关闭 Task Group 流程；开启后才会加载和展示。",
-            })}
-          </p>
-        ) : taskGroups.length === 0 ? (
-          <p className="mt-1 text-[11px] text-slate-400">
-            {t("threads.noTaskGroups", "No task groups yet")}
-          </p>
-        ) : (
-          <div className="mt-1.5 space-y-1.5">
-            {taskGroups.map((group) => (
-              <div
-                key={group.id}
-                className="rounded-lg border border-border/50 p-2"
-              >
-                <div className="flex items-center justify-between gap-1.5">
-                  <span className="truncate text-[11px] font-medium">
-                    Group #{group.id}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "shrink-0 text-[8px] normal-case",
-                        taskGroupStatusTone(group.status),
-                      )}
-                    >
-                      {group.status}
-                    </Badge>
-                    {group.status === "failed" && (
-                      <button
-                        type="button"
-                        className="text-[10px] text-blue-500 hover:text-blue-700"
-                        onClick={() => onRetryTaskGroup(group.id)}
-                        title="Retry"
-                      >
-                        ↻
-                      </button>
-                    )}
-                    {(group.status === "pending" || group.status === "failed") && (
-                      <button
-                        type="button"
-                        className="text-[10px] text-rose-500 hover:text-rose-700"
-                        onClick={() => onDeleteTaskGroup(group.id)}
-                        title="Delete"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <p className="mt-0.5 text-[10px] text-slate-400">
-                  {group.completed_at ? `Completed ${group.completed_at}` : `Created ${group.created_at}`}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Work Items sub-section */}
       <div>
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">

@@ -123,17 +123,17 @@
 - 但审核不在 thread meeting 内自动完成。
 - 审核主要落在 `proposal` 和 `initiative` 两层。
 
-## 7. 旧 ThreadTask DAG 链路
+## 7. 已移除的旧 ThreadTask DAG 链路
 
-仓库里还保留一条旧的 `thread task group / thread task DAG` 链路。
+仓库曾经保留过一条 `thread task group / thread task DAG` 链路。
 
-那条链路里也有 `review` 任务类型，支持：
+那条链路现在已经从后端、前端与公共文档中移除，不再是当前代码的一部分。
 
-- `work -> review`
-- `review reject -> retry`
-- `review complete -> group done`
+因此在解释当前系统时，不应再把它视为备用审批入口；现行计划审批与执行收口仍然只有：
 
-这说明旧链路也有审核概念，但它属于 thread 内部任务编排模型，不是当前 Requirement -> Proposal -> Initiative -> WorkItem 这条主链的计划审批入口。
+- `Proposal`
+- `Initiative`
+- `WorkItem`
 
 ## 8. 当前应如何理解
 

@@ -131,7 +131,7 @@ go test ./internal/adapters/http -run TestIntegration_RequirementToWorkItemExecu
 6. reject proposal
 7. revise proposal，并把草案改成 3 个 work item 的依赖链
 8. resubmit + approve proposal，物化 initiative 与 work item 关系组
-9. 为 3 个 work item 补内部 steps
+9. 为 3 个 work item 补内部 actions
 10. propose + approve initiative
 11. 自动执行 root work item，随后自动解锁 dependent work item
 12. 在前端 work item 内模拟 gate reject -> rework -> approve
@@ -202,7 +202,7 @@ go test ./internal/adapters/http -count=1
 
 ## 如果后面要切到真实 ACP，怎么跑
 
-本项目已经有三类真实 ACP 入口，建议按下面顺序使用。
+本项目当前保留两类真实 ACP 入口，建议按下面顺序使用。
 
 ### 1. 先验证 ACP 基础连通与 JSON trace
 
@@ -265,28 +265,6 @@ go test -tags real -run TestReal_ThreadPoolFileIO -v -timeout 300s ./internal/ru
 - `thread_session_pool_real_test.go` 当前默认用的是 codex ACP 真实进程。
 - 冷启动可能要 30-60 秒，热启动通常 2-3 秒。
 
-### 3. 验证 HTTP 层 Thread Task + 真实 ACP
-
-用途：
-
-- 从 HTTP 层触发真实 agent 任务，验证服务端 handler 到 ACP runtime 的整链联调
-
-前置：
-
-- `.ai-workflow/config.toml` 中有可用 agent profile
-- 设置环境变量 `AI_WORKFLOW_REAL_THREAD_TASK=1`
-
-命令：
-
-```powershell
-$env:AI_WORKFLOW_REAL_THREAD_TASK="1"
-go test -tags real -run TestReal_ThreadTask_WithACP -timeout 120s ./internal/adapters/http/...
-```
-
-参考：
-
-- `internal/adapters/http/thread_task_real_test.go`
-
 ## 如果要手动跑服务，再接真实 ACP
 
 ### 启动后端
@@ -321,8 +299,7 @@ npx -y @zed-industries/claude-agent-acp
 
 1. 先跑 `acp-probe` 采样 trace，确认 ACP 本身可用
 2. 再跑 `TestReal_ThreadPoolFullLifecycle`
-3. 再跑 `TestReal_ThreadTask_WithACP`
-4. 最后再从 Web 或 API 手动点 requirement -> create thread -> proposal -> initiative 主链
+3. 最后再从 Web 或 API 手动点 requirement -> create thread -> proposal -> initiative 主链
 
 ## 建议的真实 requirement 全流程演练方式
 
@@ -393,8 +370,8 @@ npx -y @zed-industries/claude-agent-acp
 
 真实执行证据：
 
-- `23-backend-runs.json`：backend step `status = succeeded`
-- `24-frontend-runs.json`：frontend step `status = succeeded`
+- `23-backend-runs.json`：backend action `status = succeeded`
+- `24-frontend-runs.json`：frontend action `status = succeeded`
 - backend 目录新增：`otp-plan.md`
 - frontend 目录新增：`otp-ui-plan.md`
 

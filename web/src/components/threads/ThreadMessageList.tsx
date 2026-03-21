@@ -6,14 +6,12 @@ import remarkGfm from "remark-gfm";
 import {
   Bot,
   Brain,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Loader2,
   MessageSquareText,
   User,
   Wrench,
-  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compactText } from "@/components/chat/chatUtils";
@@ -47,7 +45,6 @@ interface ThreadMessageListProps {
   readTargetAgentID: (metadata: Record<string, unknown> | undefined) => string | null;
   readTargetAgentIDs: (metadata: Record<string, unknown> | undefined) => string[];
   readAutoRoutedTo: (metadata: Record<string, unknown> | undefined) => string[];
-  readTaskGroupID: (metadata: Record<string, unknown> | undefined) => number | null;
   readMetadataType: (metadata: Record<string, unknown> | undefined) => string | null;
   formatRelativeTime: (value: string) => string;
 }
@@ -354,7 +351,6 @@ export function ThreadMessageList({
   readTargetAgentID,
   readTargetAgentIDs,
   readAutoRoutedTo,
-  readTaskGroupID,
   readMetadataType,
   formatRelativeTime,
 }: ThreadMessageListProps) {
@@ -380,40 +376,9 @@ export function ThreadMessageList({
         const targetAgent = readTargetAgentID(msg.metadata);
         const targetAgentIDs = readTargetAgentIDs(msg.metadata);
         const autoRoutedTo = readAutoRoutedTo(msg.metadata);
-        const taskGroupID = readTaskGroupID(msg.metadata);
         const metaType = readMetadataType(msg.metadata);
         const profile = isAgent ? profileByID.get(msg.sender_id) : undefined;
 
-        if (isSystem && metaType === "task_group_progress") {
-          return <TaskGroupProgressCard key={msg.id} msg={msg} />;
-        }
-
-        if (isSystem && metaType === "task_group_completed") {
-          const finalStatus = (msg.metadata?.final_status as string) ?? "done";
-          const isFailed = finalStatus === "failed";
-          return (
-            <div key={msg.id} className="flex justify-center">
-              <div
-                className={cn(
-                  "flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs",
-                  isFailed
-                    ? "border-rose-200 bg-rose-50 text-rose-700"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                )}
-              >
-                {isFailed ? (
-                  <XCircle className="h-3 w-3" />
-                ) : (
-                  <CheckCircle2 className="h-3 w-3" />
-                )}
-                <span>
-                  {msg.content ||
-                    `Task Group #${taskGroupID} ${isFailed ? "failed" : "completed"}`}
-                </span>
-              </div>
-            </div>
-          );
-        }
 
         if (
           isAgent &&
@@ -434,11 +399,7 @@ export function ThreadMessageList({
                   <span className="font-medium text-foreground/70">
                     {profile?.name ?? msg.sender_id}
                   </span>
-                  {taskGroupID ? (
-                    <span className="rounded bg-purple-50 px-1 py-px text-[10px] text-purple-700">
-                      Group #{taskGroupID}
-                    </span>
-                  ) : null}
+
                   <span>{formatRelativeTime(msg.created_at)}</span>
                 </div>
                 <div
@@ -467,11 +428,6 @@ export function ThreadMessageList({
           return (
             <div key={msg.id} className="flex justify-center">
               <div className="flex items-center gap-2 rounded-full border border-border/40 bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">
-                {taskGroupID ? (
-                  <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-foreground/70">
-                    Group #{taskGroupID}
-                  </span>
-                ) : null}
                 <Bot className="h-3 w-3" />
                 <span>{msg.content}</span>
               </div>
@@ -520,11 +476,6 @@ export function ThreadMessageList({
                         @{targetAgent}
                       </span>
                     ) : null}
-                {taskGroupID ? (
-                  <span className="rounded bg-purple-50 px-1 py-px text-[10px] text-purple-700">
-                    Group #{taskGroupID}
-                  </span>
-                ) : null}
                 <span>{formatRelativeTime(msg.created_at)}</span>
               </div>
               <div
@@ -589,66 +540,5 @@ export function ThreadMessageList({
   );
 }
 
-function TaskGroupProgressCard({ msg }: { msg: ThreadMessage }) {
-  const tasks = (msg.metadata?.tasks as Array<Record<string, unknown>>) ?? [];
-  const groupStatus = (msg.metadata?.group_status as string) ?? "pending";
-  const groupId = msg.metadata?.task_group_id as number;
 
-  const statusIcon = (status: string) => {
-    switch (status) {
-      case "done":
-        return "OK";
-      case "running":
-        return "RUN";
-      case "ready":
-        return "WAIT";
-      case "failed":
-        return "ERR";
-      case "rejected":
-        return "BACK";
-      default:
-        return "IDLE";
-    }
-  };
 
-  const doneCount = tasks.filter((task) => task.status === "done").length;
-
-  return (
-    <div className="flex justify-center">
-      <div className="w-full max-w-md rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-semibold text-foreground/80">
-            Task Group #{groupId}
-          </span>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-medium",
-              groupStatus === "done"
-                ? "bg-emerald-100 text-emerald-700"
-                : groupStatus === "running"
-                  ? "bg-blue-100 text-blue-700"
-                  : groupStatus === "failed"
-                    ? "bg-rose-100 text-rose-700"
-                    : "bg-muted text-muted-foreground",
-            )}
-          >
-            {groupStatus} · {doneCount}/{tasks.length}
-          </span>
-        </div>
-        <div className="space-y-1">
-          {tasks.map((task) => (
-            <div key={task.id as number} className="flex items-center gap-2 text-xs">
-              <span>{statusIcon(task.status as string)}</span>
-              <span className="font-medium text-foreground/70">
-                {task.assignee as string}
-              </span>
-              <span className="truncate text-muted-foreground">
-                {task.instruction as string}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}

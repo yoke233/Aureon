@@ -34,7 +34,6 @@ import type {
   MessageFileRef,
   ProposalWorkItemDraft,
   WorkItemPriority,
-  ThreadTaskGroup,
   WorkItem,
 } from "@/types/apiV2";
 import type { ThreadAckPayload, ThreadEventPayload } from "@/types/ws";
@@ -77,13 +76,6 @@ function readAutoRoutedTo(
   return value
     .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     .map((v) => v.trim());
-}
-
-function readTaskGroupID(
-  metadata: Record<string, unknown> | undefined,
-): number | null {
-  const value = metadata?.task_group_id;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function readMetadataType(
@@ -315,25 +307,9 @@ function detectInviteIntent(
   return null;
 }
 
-function taskGroupStatusTone(status: string): string {
-  switch (status) {
-    case "done":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "running":
-      return "border-blue-200 bg-blue-50 text-blue-700";
-    case "failed":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    case "pending":
-    default:
-      return "border-border bg-muted/40 text-muted-foreground";
-  }
-}
-
 type ThreadAgentSessionWithProfileID = ThreadAgentSession & {
   agent_profile_id: string;
 };
-
-const THREAD_TASK_GROUPS_STORAGE_KEY = "thread-task-groups-enabled";
 
 type ThreadAgentLiveOutput = {
   thought?: string;
@@ -489,14 +465,6 @@ function createProposalReviewState(
   };
 }
 
-function readThreadTaskGroupsEnabled(): boolean {
-  try {
-    return localStorage.getItem(THREAD_TASK_GROUPS_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
 export function ThreadDetailPage() {
   const { t } = useTranslation();
   const { threadId } = useParams<{ threadId: string }>();
@@ -508,10 +476,6 @@ export function ThreadDetailPage() {
   const [participants, setParticipants] = useState<ThreadParticipant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [threadTaskGroupsEnabled, setThreadTaskGroupsEnabled] =
-    useState<boolean>(() => readThreadTaskGroupsEnabled());
-  const [taskGroups, setTaskGroups] = useState<ThreadTaskGroup[]>([]);
-  const [taskGroupsLoading, setTaskGroupsLoading] = useState(false);
   const [proposals, setProposals] = useState<ThreadProposal[]>([]);
   const [proposalsLoading, setProposalsLoading] = useState(false);
   const [workItemLinks, setWorkItemLinks] = useState<ThreadWorkItemLink[]>([]);
@@ -679,7 +643,6 @@ export function ThreadDetailPage() {
     return a.is_primary ? -1 : 1;
   });
   const orderedProposals = [...proposals].sort((a, b) => b.id - a.id);
-  const orderedTaskGroups = [...taskGroups].sort((a, b) => b.id - a.id);
   const visibleAgentActivityIDs = [
     ...new Set([
       ...Object.keys(liveAgentOutputsByID),
@@ -719,7 +682,6 @@ export function ThreadDetailPage() {
     setProposalReviewInputs({});
     setWorkItemLinks([]);
     setLinkedWorkItems({});
-    setTaskGroups([]);
     setAgentSessions([]);
     setAttachments([]);
     setAvailableProfiles([]);
@@ -750,27 +712,15 @@ export function ThreadDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        THREAD_TASK_GROUPS_STORAGE_KEY,
-        String(threadTaskGroupsEnabled),
-      );
-    } catch {
-      // Ignore storage failures and fall back to in-memory state.
-    }
-  }, [threadTaskGroupsEnabled]);
-
-  useEffect(() => {
     if (!id || isNaN(id)) return;
     let cancelled = false;
 
     const load = async () => {
       setLoading(true);
-      setTaskGroupsLoading(threadTaskGroupsEnabled);
       setProposalsLoading(true);
       setError(null);
       try {
-        const [th, msgs, parts, proposalItems, links, tgItems, agents, profiles, atts] =
+        const [th, msgs, parts, proposalItems, links, agents, profiles, atts] =
           await Promise.all([
             apiClient.getThread(id),
             apiClient.listThreadMessages(id, { limit: 100 }),
@@ -779,9 +729,6 @@ export function ThreadDetailPage() {
               ? apiClient.listThreadProposals(id)
               : Promise.resolve([]),
             apiClient.listWorkItemsByThread(id),
-            threadTaskGroupsEnabled
-              ? apiClient.listThreadTaskGroups(id)
-              : Promise.resolve([]),
             apiClient.listThreadAgents(id),
             apiClient.listProfiles(),
             apiClient.listThreadAttachments(id),
@@ -806,7 +753,6 @@ export function ThreadDetailPage() {
             return next;
           });
           setWorkItemLinks(links);
-          setTaskGroups(tgItems);
           setAgentSessions(agents);
           setAvailableProfiles(profiles);
           setAttachments(atts);
@@ -823,7 +769,6 @@ export function ThreadDetailPage() {
       } catch (e) {
         if (!cancelled) setError(getErrorMessage(e));
       } finally {
-        if (!cancelled) setTaskGroupsLoading(false);
         if (!cancelled) setProposalsLoading(false);
         if (!cancelled) setLoading(false);
       }
@@ -832,7 +777,7 @@ export function ThreadDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [apiClient, id, threadTaskGroupsEnabled]);
+  }, [apiClient, id]);
 
   const refreshProposals = useCallback(async () => {
     if (!id || Number.isNaN(id)) return;
@@ -1068,22 +1013,6 @@ export function ThreadDetailPage() {
       }
     };
 
-    const syncTaskGroupFromPayload = async (payload: ThreadEventPayload) => {
-      if (!threadTaskGroupsEnabled) return;
-      if (payload.thread_id !== id) return;
-      const groupId = payload.task_group_id;
-      if (typeof groupId !== "number") return;
-      try {
-        const detail = await apiClient.getThreadTaskGroup(groupId);
-        setTaskGroups((prev) => {
-          const filtered = prev.filter((g) => g.id !== groupId);
-          return [detail, ...filtered];
-        });
-      } catch {
-        // Ignore background refresh failures
-      }
-    };
-
     const sendThreadSubscription = (
       type: "subscribe_thread" | "unsubscribe_thread",
     ) => {
@@ -1282,38 +1211,6 @@ export function ThreadDetailPage() {
           }
         },
       );
-    const unsubscribeTaskGroupCreated = threadTaskGroupsEnabled
-      ? wsClient.subscribe<ThreadEventPayload>(
-          "thread.task_group.created",
-          (payload) => {
-            void syncTaskGroupFromPayload(payload);
-          },
-        )
-      : () => {};
-    const unsubscribeTaskGroupCompleted = threadTaskGroupsEnabled
-      ? wsClient.subscribe<ThreadEventPayload>(
-          "thread.task_group.completed",
-          (payload) => {
-            void syncTaskGroupFromPayload(payload);
-          },
-        )
-      : () => {};
-    const unsubscribeTaskStarted = threadTaskGroupsEnabled
-      ? wsClient.subscribe<ThreadEventPayload>(
-          "thread.task.started",
-          (payload) => {
-            void syncTaskGroupFromPayload(payload);
-          },
-        )
-      : () => {};
-    const unsubscribeTaskCompleted = threadTaskGroupsEnabled
-      ? wsClient.subscribe<ThreadEventPayload>(
-          "thread.task.completed",
-          (payload) => {
-            void syncTaskGroupFromPayload(payload);
-          },
-        )
-      : () => {};
     const unsubscribeStatus = wsClient.onStatusChange((status) => {
       if (status === "open") sendThreadSubscription("subscribe_thread");
     });
@@ -1332,10 +1229,6 @@ export function ThreadDetailPage() {
       unsubscribeThreadAgentBooted();
       unsubscribeThreadAgentFailed();
       unsubscribeThreadAgentThinking();
-      unsubscribeTaskGroupCreated();
-      unsubscribeTaskGroupCompleted();
-      unsubscribeTaskStarted();
-      unsubscribeTaskCompleted();
       unsubscribeStatus();
       pendingThreadRequestIdRef.current = null;
       flushAgentChunkBuffers();
@@ -1349,7 +1242,7 @@ export function ThreadDetailPage() {
         sendThreadSubscription("unsubscribe_thread");
       }
     };
-  }, [apiClient, id, refreshProposals, t, threadTaskGroupsEnabled, wsClient]);
+  }, [apiClient, id, refreshProposals, t, wsClient]);
 
   const toggleAgentActivityPanel = (profileID: string) => {
     setCollapsedAgentActivityPanels((prev) => ({
@@ -1832,49 +1725,6 @@ export function ThreadDetailPage() {
     }
   };
 
-  const handleDeleteTaskGroup = async (groupId: number) => {
-    if (!threadTaskGroupsEnabled) return;
-    setError(null);
-    try {
-      await apiClient.deleteThreadTaskGroup(groupId);
-      setTaskGroups((prev) => prev.filter((g) => g.id !== groupId));
-    } catch (e) {
-      setError(getErrorMessage(e));
-    }
-  };
-
-  const handleRetryTaskGroup = async (groupId: number) => {
-    if (!id || !threadTaskGroupsEnabled) return;
-    setError(null);
-    try {
-      const detail = await apiClient.getThreadTaskGroup(groupId);
-      if (!detail.tasks || detail.tasks.length === 0) return;
-
-      // Build ID → index mapping for dependency resolution
-      const idToIndex = new Map<number, number>();
-      detail.tasks.forEach((t, i) => {
-        idToIndex.set(t.id, i);
-      });
-
-      const newDetail = await apiClient.createThreadTaskGroup(id, {
-        tasks: detail.tasks.map((t) => ({
-          assignee: t.assignee,
-          type: t.type as "work" | "review",
-          instruction: t.instruction,
-          depends_on_index: (t.depends_on ?? [])
-            .map((depId) => idToIndex.get(depId))
-            .filter((idx): idx is number => idx !== undefined),
-          max_retries: t.max_retries,
-          output_file_name: t.output_file_path?.replace(/^outputs\//, ""),
-        })),
-        notify_on_complete: detail.notify_on_complete,
-      });
-      setTaskGroups((prev) => [newDetail, ...prev]);
-    } catch (e) {
-      setError(getErrorMessage(e));
-    }
-  };
-
   const toggleInviteSelection = (profileID: string) => {
     setSelectedInviteIDs((prev) => {
       const next = new Set(prev);
@@ -2284,11 +2134,10 @@ export function ThreadDetailPage() {
                 focusAgentProfile={focusAgentProfile}
                 readTargetAgentID={readTargetAgentID}
                 readTargetAgentIDs={readTargetAgentIDs}
-              readAutoRoutedTo={readAutoRoutedTo}
-              readTaskGroupID={readTaskGroupID}
-              readMetadataType={readMetadataType}
-              formatRelativeTime={formatRelativeTime}
-            />
+                readAutoRoutedTo={readAutoRoutedTo}
+                readMetadataType={readMetadataType}
+                formatRelativeTime={formatRelativeTime}
+              />
           </div>
 
           {/* ── Input area ── */}
@@ -2727,19 +2576,6 @@ export function ThreadDetailPage() {
             }}
             onReviseProposal={(proposalId) => {
               void runProposalAction(proposalId, "revise");
-            }}
-            threadTaskGroupsEnabled={threadTaskGroupsEnabled}
-            onToggleThreadTaskGroups={() =>
-              setThreadTaskGroupsEnabled((prev) => !prev)
-            }
-            taskGroups={orderedTaskGroups}
-            taskGroupsLoading={taskGroupsLoading}
-            taskGroupStatusTone={taskGroupStatusTone}
-            onDeleteTaskGroup={(groupId) => {
-              void handleDeleteTaskGroup(groupId);
-            }}
-            onRetryTaskGroup={(groupId) => {
-              void handleRetryTaskGroup(groupId);
             }}
             workItemLinks={workItemLinks}
             orderedWorkItemLinks={orderedWorkItemLinks}

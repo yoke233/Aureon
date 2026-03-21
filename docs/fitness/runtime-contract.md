@@ -6,10 +6,10 @@ threshold:
   warn: 80
 metrics:
   - name: thread_runtime_spec_present
-    command: Select-String -Path .\docs\spec\README.md,.\docs\spec\thread-agent-runtime.zh-CN.md,.\docs\spec\thread-task-dag.zh-CN.md -Pattern 'thread\.send|thread\.task\.started|thread\.task\.completed'
+    command: Select-String -Path .\docs\spec\README.md,.\docs\spec\thread-agent-runtime.zh-CN.md -Pattern 'thread\.send|subscribe_thread|unsubscribe_thread'
     hard_gate: false
   - name: thread_runtime_frontend_subscriptions
-    command: Select-String -Path .\web\src\pages\ThreadDetailPage.tsx -Pattern 'subscribe_thread|thread\.task\.started|thread\.task\.completed'
+    command: Select-String -Path .\web\src\pages\ThreadDetailPage.tsx -Pattern 'subscribe_thread|unsubscribe_thread|thread\.send'
     hard_gate: false
   - name: thread_runtime_frontend_tests
     command: Select-String -Path .\web\src\pages\ThreadDetailPage.test.tsx -Pattern 'subscribe_thread|thread\.send'
@@ -21,7 +21,7 @@ metrics:
 
 # Runtime Contract 证据
 
-> 本文件借鉴 `routa` 的“行为规则必须可验证”思路，但聚焦本项目当前最核心的运行时契约：Thread + ThreadTask + WebSocket。
+> 本文件借鉴 `routa` 的“行为规则必须可验证”思路，但聚焦本项目当前最核心的运行时契约：Thread + WebSocket。
 
 ## 规则目标
 
@@ -37,19 +37,16 @@ metrics:
 - `subscribe_thread`
 - `unsubscribe_thread`
 
-### 2. ThreadTask 事件
+### 2. Thread 订阅生命周期
 
-- `thread.task_group.created`
-- `thread.task_group.completed`
-- `thread.task.started`
-- `thread.task.completed`
+- `subscribe_thread`
+- `unsubscribe_thread`
 
 ## 证据来源
 
 - 现行说明：
   - [spec/README.md](D:/project/ai-workflow/docs/spec/README.md)
   - [thread-agent-runtime.zh-CN.md](D:/project/ai-workflow/docs/spec/thread-agent-runtime.zh-CN.md)
-  - [thread-task-dag.zh-CN.md](D:/project/ai-workflow/docs/spec/thread-task-dag.zh-CN.md)
 - 前端类型与订阅：
   - [ws.ts](D:/project/ai-workflow/web/src/types/ws.ts)
   - [ThreadDetailPage.tsx](D:/project/ai-workflow/web/src/pages/ThreadDetailPage.tsx)
@@ -60,5 +57,5 @@ metrics:
 ## 变更规则
 
 - 修改线程运行时协议时，不允许只改 `docs/spec`
-- 修改 `thread.task.*` 事件时，不允许只改后端事件常量，不改前端订阅和测试
+- 修改 thread WebSocket 协议时，不允许只改后端事件常量，不改前端订阅和测试
 - 如果运行时语义仍处于过渡态，必须在 `docs/spec/README.md` 或对应专题文档中写清“当前实现状态”

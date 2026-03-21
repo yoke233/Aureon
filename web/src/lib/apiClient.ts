@@ -83,10 +83,6 @@ import type {
   InitiativeDetail,
   ApproveInitiativeRequest,
   RejectInitiativeRequest,
-  ThreadTaskGroup,
-  ThreadTaskGroupDetail,
-  CreateTaskGroupRequest,
-  TaskSignalRequest,
   Notification,
   CreateNotificationRequest,
   UnreadCountResponse,
@@ -383,13 +379,6 @@ export interface ApiClient {
   rejectInitiative(initiativeId: number, body: RejectInitiativeRequest): Promise<Initiative>;
   cancelInitiative(initiativeId: number): Promise<Initiative>;
   listInitiativeThreads(initiativeId: number): Promise<ThreadInitiativeLink[]>;
-  // Thread Task Groups
-  listThreadTaskGroups(threadId: number, params?: { limit?: number; offset?: number }): Promise<ThreadTaskGroup[]>;
-  createThreadTaskGroup(threadId: number, body: CreateTaskGroupRequest): Promise<ThreadTaskGroupDetail>;
-  getThreadTaskGroup(groupId: number): Promise<ThreadTaskGroupDetail>;
-  deleteThreadTaskGroup(groupId: number): Promise<void>;
-  signalThreadTask(taskId: number, body: TaskSignalRequest): Promise<{ status: string }>;
-
   // Thread Agent Sessions
   inviteThreadAgent(threadId: number, body: { agent_profile_id: string }): Promise<ThreadMember>;
   listThreadAgents(threadId: number): Promise<ThreadMember[]>;
@@ -1262,32 +1251,6 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
       request<ThreadInitiativeLink[]>({
         path: `/initiatives/${initiativeId}/threads`,
       }).then((items) => (Array.isArray(items) ? items : [])),
-    listThreadTaskGroups: (threadId, params) =>
-      request<ThreadTaskGroup[]>({
-        path: `/threads/${threadId}/task-groups`,
-        query: { limit: params?.limit, offset: params?.offset },
-      }).then((items) => (Array.isArray(items) ? items : [])),
-    createThreadTaskGroup: (threadId, body) =>
-      request<ThreadTaskGroupDetail, CreateTaskGroupRequest>({
-        path: `/threads/${threadId}/task-groups`,
-        method: "POST",
-        body,
-      }),
-    getThreadTaskGroup: (groupId) =>
-      request<ThreadTaskGroupDetail>({
-        path: `/task-groups/${groupId}`,
-      }),
-    deleteThreadTaskGroup: (groupId) =>
-      request<void>({
-        path: `/task-groups/${groupId}`,
-        method: "DELETE",
-      }),
-    signalThreadTask: (taskId, body) =>
-      request<{ status: string }, TaskSignalRequest>({
-        path: `/thread-tasks/${taskId}/signal`,
-        method: "POST",
-        body,
-      }),
     inviteThreadAgent: (threadId, body) =>
       request<ThreadMember, { agent_profile_id: string }>({
         path: `/threads/${threadId}/agents`,

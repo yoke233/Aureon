@@ -10,26 +10,26 @@ import (
 )
 
 type createWorkItemRequest struct {
-	ProjectID         *int64         `json:"project_id,omitempty"`
+	ProjectID       *int64         `json:"project_id,omitempty"`
 	ResourceSpaceID *int64         `json:"resource_space_id,omitempty"`
-	Title             string         `json:"title"`
-	Body              string         `json:"body,omitempty"`
-	Priority          string         `json:"priority,omitempty"`
-	Labels            []string       `json:"labels,omitempty"`
-	DependsOn         []int64        `json:"depends_on,omitempty"`
-	Metadata          map[string]any `json:"metadata,omitempty"`
+	Title           string         `json:"title"`
+	Body            string         `json:"body,omitempty"`
+	Priority        string         `json:"priority,omitempty"`
+	Labels          []string       `json:"labels,omitempty"`
+	DependsOn       []int64        `json:"depends_on,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 type updateWorkItemRequest struct {
-	ProjectID         *int64         `json:"project_id,omitempty"`
+	ProjectID       *int64         `json:"project_id,omitempty"`
 	ResourceSpaceID *int64         `json:"resource_space_id,omitempty"`
-	Title             *string        `json:"title,omitempty"`
-	Body              *string        `json:"body,omitempty"`
-	Status            *string        `json:"status,omitempty"`
-	Priority          *string        `json:"priority,omitempty"`
-	Labels            *[]string      `json:"labels,omitempty"`
-	DependsOn         *[]int64       `json:"depends_on,omitempty"`
-	Metadata          map[string]any `json:"metadata,omitempty"`
+	Title           *string        `json:"title,omitempty"`
+	Body            *string        `json:"body,omitempty"`
+	Status          *string        `json:"status,omitempty"`
+	Priority        *string        `json:"priority,omitempty"`
+	Labels          *[]string      `json:"labels,omitempty"`
+	DependsOn       *[]int64       `json:"depends_on,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 func (h *Handler) createWorkItem(w http.ResponseWriter, r *http.Request) {
@@ -39,14 +39,14 @@ func (h *Handler) createWorkItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workItem, err := h.workItemService().CreateWorkItem(r.Context(), workitemapp.CreateWorkItemInput{
-		ProjectID:         req.ProjectID,
+		ProjectID:       req.ProjectID,
 		ResourceSpaceID: req.ResourceSpaceID,
-		Title:             req.Title,
-		Body:              req.Body,
-		Priority:          req.Priority,
-		Labels:            req.Labels,
-		DependsOn:         req.DependsOn,
-		Metadata:          req.Metadata,
+		Title:           req.Title,
+		Body:            req.Body,
+		Priority:        req.Priority,
+		Labels:          req.Labels,
+		DependsOn:       req.DependsOn,
+		Metadata:        req.Metadata,
 	})
 	if err != nil {
 		if writeWorkItemAppError(w, err) {
@@ -135,16 +135,16 @@ func (h *Handler) updateWorkItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated, err := h.workItemService().UpdateWorkItem(r.Context(), workitemapp.UpdateWorkItemInput{
-		ID:                id,
-		ProjectID:         req.ProjectID,
+		ID:              id,
+		ProjectID:       req.ProjectID,
 		ResourceSpaceID: req.ResourceSpaceID,
-		Title:             req.Title,
-		Body:              req.Body,
-		Status:            req.Status,
-		Priority:          req.Priority,
-		Labels:            req.Labels,
-		DependsOn:         req.DependsOn,
-		Metadata:          req.Metadata,
+		Title:           req.Title,
+		Body:            req.Body,
+		Status:          req.Status,
+		Priority:        req.Priority,
+		Labels:          req.Labels,
+		DependsOn:       req.DependsOn,
+		Metadata:        req.Metadata,
 	})
 	if err != nil {
 		if writeWorkItemAppError(w, err) {

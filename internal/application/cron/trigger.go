@@ -291,10 +291,10 @@ func (t *Trigger) countActiveInstances(ctx context.Context, templateWorkItemID i
 func (t *Trigger) cloneAndSubmit(ctx context.Context, source *core.WorkItem) (int64, error) {
 	// 1. Clone work item.
 	newWorkItem := &core.WorkItem{
-		ProjectID:         source.ProjectID,
+		ProjectID:       source.ProjectID,
 		ResourceSpaceID: source.ResourceSpaceID,
-		Title:             source.Title + " [cron " + time.Now().UTC().Format("01-02 15:04") + "]",
-		Status:            core.WorkItemOpen,
+		Title:           source.Title + " [cron " + time.Now().UTC().Format("01-02 15:04") + "]",
+		Status:          core.WorkItemOpen,
 		Metadata: map[string]any{
 			MetaSourceWorkItemID: strconv.FormatInt(source.ID, 10),
 		},

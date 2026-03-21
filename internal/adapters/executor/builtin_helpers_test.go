@@ -141,7 +141,7 @@ func (n *noopStore) ListActionIODecls(context.Context, int64) ([]*core.ActionIOD
 func (n *noopStore) ListActionIODeclsByDirection(context.Context, int64, core.IODirection) ([]*core.ActionIODecl, error) {
 	panic("unused")
 }
-func (n *noopStore) DeleteActionIODecl(context.Context, int64) error { panic("unused") }
+func (n *noopStore) DeleteActionIODecl(context.Context, int64) error               { panic("unused") }
 func (n *noopStore) CreateWorkItem(context.Context, *core.WorkItem) (int64, error) { panic("unused") }
 func (n *noopStore) GetWorkItem(context.Context, int64) (*core.WorkItem, error)    { panic("unused") }
 func (n *noopStore) ListWorkItems(context.Context, core.WorkItemFilter) ([]*core.WorkItem, error) {
@@ -434,7 +434,7 @@ func (n *noopStore) ListInsightsByInspection(context.Context, int64) ([]*core.In
 func (n *noopStore) GetFindingRecurrenceCount(context.Context, core.FindingCategory, *int64, *int64) (int, error) {
 	panic("unused")
 }
-func (n *noopStore) Close() error                                             { return nil }
+func (n *noopStore) Close() error { return nil }
 
 func assertErr(message string) error { return &errString{message: message} }
 

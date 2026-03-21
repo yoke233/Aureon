@@ -80,27 +80,27 @@ type Bootstrapper interface {
 }
 
 type CreateWorkItemInput struct {
-	ProjectID         *int64
+	ProjectID       *int64
 	ResourceSpaceID *int64
-	Title             string
-	Body              string
-	Priority          string
-	Labels            []string
-	DependsOn         []int64
-	Metadata          map[string]any
+	Title           string
+	Body            string
+	Priority        string
+	Labels          []string
+	DependsOn       []int64
+	Metadata        map[string]any
 }
 
 type UpdateWorkItemInput struct {
-	ID                int64
-	ProjectID         *int64
+	ID              int64
+	ProjectID       *int64
 	ResourceSpaceID *int64
-	Title             *string
-	Body              *string
-	Status            *string
-	Priority          *string
-	Labels            *[]string
-	DependsOn         *[]int64
-	Metadata          map[string]any
+	Title           *string
+	Body            *string
+	Status          *string
+	Priority        *string
+	Labels          *[]string
+	DependsOn       *[]int64
+	Metadata        map[string]any
 }
 
 type RunWorkItemResult struct {

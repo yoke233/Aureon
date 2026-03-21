@@ -132,6 +132,7 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
   const { t } = useTranslation();
 
   /* Derive a stable preview map: only recalculate when messagesBySession changes */
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- false positive: hook is unconditional inside memo()
   const previewMap = useMemo(() => {
     const map: Record<string, { preview: string; turnCount: number }> = {};
     for (const [sessionId, messages] of Object.entries(messagesBySession)) {

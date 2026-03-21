@@ -203,11 +203,11 @@ func TestBootstrapPRIssueForIssue_RollsBackCreatedStepsOnFailure(t *testing.T) {
 	space.ID = spaceID
 
 	issue := &core.WorkItem{
-		ProjectID:         &project.ID,
+		ProjectID:       &project.ID,
 		ResourceSpaceID: &space.ID,
-		Title:             "rollback issue",
-		Status:            core.WorkItemOpen,
-		Priority:          core.PriorityMedium,
+		Title:           "rollback issue",
+		Status:          core.WorkItemOpen,
+		Priority:        core.PriorityMedium,
 	}
 	issueID, err := h.store.CreateWorkItem(context.Background(), issue)
 	if err != nil {

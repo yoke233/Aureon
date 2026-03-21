@@ -516,9 +516,9 @@ func TestAPI_CreateIssue_AutoBootstrapsSelectedBindingWhenMultipleSCMReposExist(
 	selected := createResource("repo-b", repoB)
 
 	issueResp, err := post(ts, "/work-items", map[string]any{
-		"title":               "auto-issue-selected-binding",
-		"priority":            "medium",
-		"project_id":          project.ID,
+		"title":             "auto-issue-selected-binding",
+		"priority":          "medium",
+		"project_id":        project.ID,
 		"resource_space_id": selected.ID,
 	})
 	if err != nil {

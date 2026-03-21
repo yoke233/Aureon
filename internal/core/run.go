@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -24,6 +25,23 @@ const (
 	ErrKindPermanent ErrorKind = "permanent" // no point retrying
 	ErrKindNeedHelp  ErrorKind = "need_help" // requires human/lead intervention
 )
+
+func (s RunStatus) Valid() bool {
+	switch s {
+	case RunCreated, RunRunning, RunSucceeded, RunFailed, RunCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseRunStatus(raw string) (RunStatus, error) {
+	s := RunStatus(strings.TrimSpace(raw))
+	if !s.Valid() {
+		return "", fmt.Errorf("invalid run status %q", raw)
+	}
+	return s, nil
+}
 
 // Run is a single attempt to execute an Action. An Action may have multiple Runs (retries).
 type Run struct {

@@ -114,3 +114,95 @@ func TestCanTransitionWorkItemStatus(t *testing.T) {
 		t.Error("same status transition should be valid")
 	}
 }
+
+func TestFeatureStatusValid(t *testing.T) {
+	valid := []FeatureStatus{FeaturePending, FeaturePass, FeatureFail, FeatureSkipped}
+	for _, v := range valid {
+		if !v.Valid() {
+			t.Errorf("FeatureStatus(%q).Valid() = false, want true", v)
+		}
+	}
+	if FeatureStatus("bogus").Valid() {
+		t.Error("FeatureStatus(bogus).Valid() = true, want false")
+	}
+}
+
+func TestParseFeatureStatus(t *testing.T) {
+	got, err := ParseFeatureStatus("pass")
+	if err != nil || got != FeaturePass {
+		t.Fatalf("ParseFeatureStatus(pass) = (%q, %v), want (pass, nil)", got, err)
+	}
+	_, err = ParseFeatureStatus("nope")
+	if err == nil {
+		t.Fatal("ParseFeatureStatus(nope) should return error")
+	}
+}
+
+func TestInspectionStatusValid(t *testing.T) {
+	valid := []InspectionStatus{InspectionStatusPending, InspectionStatusRunning, InspectionStatusCompleted, InspectionStatusFailed}
+	for _, v := range valid {
+		if !v.Valid() {
+			t.Errorf("InspectionStatus(%q).Valid() = false, want true", v)
+		}
+	}
+	if InspectionStatus("bogus").Valid() {
+		t.Error("InspectionStatus(bogus).Valid() = true, want false")
+	}
+}
+
+func TestParseInspectionStatus(t *testing.T) {
+	got, err := ParseInspectionStatus("running")
+	if err != nil || got != InspectionStatusRunning {
+		t.Fatalf("ParseInspectionStatus(running) = (%q, %v), want (running, nil)", got, err)
+	}
+	_, err = ParseInspectionStatus("nope")
+	if err == nil {
+		t.Fatal("ParseInspectionStatus(nope) should return error")
+	}
+}
+
+func TestRunProbeStatusValid(t *testing.T) {
+	valid := []RunProbeStatus{RunProbePending, RunProbeSent, RunProbeAnswered, RunProbeTimeout, RunProbeUnreachable, RunProbeFailed}
+	for _, v := range valid {
+		if !v.Valid() {
+			t.Errorf("RunProbeStatus(%q).Valid() = false, want true", v)
+		}
+	}
+	if RunProbeStatus("bogus").Valid() {
+		t.Error("RunProbeStatus(bogus).Valid() = true, want false")
+	}
+}
+
+func TestParseRunProbeStatus(t *testing.T) {
+	got, err := ParseRunProbeStatus("sent")
+	if err != nil || got != RunProbeSent {
+		t.Fatalf("ParseRunProbeStatus(sent) = (%q, %v), want (sent, nil)", got, err)
+	}
+	_, err = ParseRunProbeStatus("nope")
+	if err == nil {
+		t.Fatal("ParseRunProbeStatus(nope) should return error")
+	}
+}
+
+func TestRunProbeVerdictValid(t *testing.T) {
+	valid := []RunProbeVerdict{RunProbeAlive, RunProbeBlocked, RunProbeHung, RunProbeDead, RunProbeUnknown}
+	for _, v := range valid {
+		if !v.Valid() {
+			t.Errorf("RunProbeVerdict(%q).Valid() = false, want true", v)
+		}
+	}
+	if RunProbeVerdict("bogus").Valid() {
+		t.Error("RunProbeVerdict(bogus).Valid() = true, want false")
+	}
+}
+
+func TestParseInitiativeStatus(t *testing.T) {
+	got, err := ParseInitiativeStatus("executing")
+	if err != nil || got != InitiativeExecuting {
+		t.Fatalf("ParseInitiativeStatus(executing) = (%q, %v), want (executing, nil)", got, err)
+	}
+	_, err = ParseInitiativeStatus("nope")
+	if err == nil {
+		t.Fatal("ParseInitiativeStatus(nope) should return error")
+	}
+}

@@ -116,7 +116,7 @@ export function ChatInputBar(props: ChatInputBarProps) {
                 ? t("chat.inputPlaceholderActive")
                 : t("chat.inputPlaceholderNew", { driver: currentDriverLabel, project: currentProjectLabel })
             }
-            className="h-auto flex-1 border-0 p-0 text-sm shadow-none focus-visible:ring-0"
+            className="h-auto flex-1 border-0 p-0 text-[16px] md:text-sm shadow-none focus-visible:ring-0"
             value={messageInput}
             disabled={isDisabled}
             onChange={(event) => onMessageChange(event.target.value)}
@@ -129,7 +129,7 @@ export function ChatInputBar(props: ChatInputBarProps) {
           <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+              className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
               disabled={isDisabled}
               onClick={() => fileInputRef.current?.click()}
               title={t("chat.uploadFile")}
@@ -140,7 +140,7 @@ export function ChatInputBar(props: ChatInputBarProps) {
               <Button
                 size="icon"
                 variant="destructive"
-                className="h-8 w-8"
+                className="h-10 w-10"
                 onClick={onCancel}
               >
                 <Square className="h-3.5 w-3.5" />
@@ -148,7 +148,7 @@ export function ChatInputBar(props: ChatInputBarProps) {
             ) : (
               <Button
                 size="icon"
-                className="h-8 w-8"
+                className="h-10 w-10"
                 disabled={isDisabled}
                 onClick={onSend}
               >

@@ -300,7 +300,7 @@ export function MobileHomePage() {
       {/* ======= Header ======= */}
       <header className="shrink-0 border-b px-4 py-3 md:px-6">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+          <div className="hidden items-center gap-2.5 md:flex">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <GitBranch className="h-4 w-4" />
             </div>
@@ -312,7 +312,7 @@ export function MobileHomePage() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8"
+              className="h-10 w-10"
               onClick={() => setShowSearch(!showSearch)}
             >
               <Search className="h-4 w-4" />
@@ -320,7 +320,7 @@ export function MobileHomePage() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8"
+              className="h-10 w-10"
               onClick={() => setShowFilters(!showFilters)}
             >
               <Filter className="h-4 w-4" />
@@ -344,7 +344,7 @@ export function MobileHomePage() {
                       })
                     : t("chat.selectDriverFirst")
                 }
-                className="w-full resize-none rounded-xl border bg-white/90 px-4 py-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50 dark:bg-slate-800/90"
+                className="w-full resize-none rounded-xl border bg-white/90 px-4 py-3 text-[16px] md:text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50 dark:bg-slate-800/90"
                 rows={3}
                 value={messageInput}
                 disabled={submitting || !draftSessionReady}
@@ -412,7 +412,7 @@ export function MobileHomePage() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-10 w-10"
                     disabled={submitting || !draftSessionReady}
                     onClick={() => fileInputRef.current?.click()}
                     title={t("chat.uploadFile")}
@@ -421,7 +421,7 @@ export function MobileHomePage() {
                   </Button>
                   <Button
                     size="icon"
-                    className="h-8 w-8 rounded-full"
+                    className="h-10 w-10 rounded-full"
                     disabled={submitting || !draftSessionReady}
                     onClick={() => void sendMessage()}
                   >

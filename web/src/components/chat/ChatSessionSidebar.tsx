@@ -111,6 +111,8 @@ interface ChatSessionSidebarProps {
   onGroupToggle: (key: string) => void;
   onCreateSession: () => void;
   onArchiveSession?: (sessionId: string) => void;
+  drawerOpen?: boolean;
+  onClose?: () => void;
 }
 
 export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSessionSidebarProps) {
@@ -124,12 +126,19 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
     collapsedGroups,
     pendingPermissionSessionIds,
     onSearchChange,
-    onSessionSelect,
     onGroupToggle,
     onCreateSession,
     onArchiveSession,
   } = props;
   const { t } = useTranslation();
+
+  const isDrawer = props.drawerOpen !== undefined;
+  if (isDrawer && !props.drawerOpen) return null;
+
+  const handleSessionSelect = (sessionId: string) => {
+    props.onSessionSelect(sessionId);
+    if (isDrawer && props.onClose) props.onClose();
+  };
 
   /* Derive a stable preview map: only recalculate when messagesBySession changes */
   const previewMap = useMemo(() => {
@@ -143,8 +152,8 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
     return map;
   }, [messagesBySession]);
 
-  return (
-    <div className="flex w-72 flex-col border-r bg-sidebar">
+  const content = (
+    <div className={cn("flex w-72 flex-col border-r bg-sidebar", isDrawer && "h-screen")}>
       <div className="border-b p-3">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{t("chat.sessionList")}</h2>
@@ -205,7 +214,7 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
                   preview={info?.preview || t("chat.noMessages")}
                   turnCount={info?.turnCount ?? 0}
                   hasPermission={pendingPermissionSessionIds.has(session.session_id)}
-                  onSelect={onSessionSelect}
+                  onSelect={handleSessionSelect}
                   onArchive={onArchiveSession}
                 />
               );
@@ -220,4 +229,17 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
       </div>
     </div>
   );
+
+  if (isDrawer) {
+    return (
+      <div className="fixed inset-0 z-50 flex" onClick={props.onClose}>
+        <div onClick={(e) => e.stopPropagation()}>
+          {content}
+        </div>
+        <div className="flex-1 drawer-overlay" />
+      </div>
+    );
+  }
+
+  return content;
 });

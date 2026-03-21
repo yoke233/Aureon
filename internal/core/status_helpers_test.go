@@ -53,3 +53,64 @@ func TestParseActionStatus(t *testing.T) {
 		t.Fatal("ParseActionStatus(nope) should return error")
 	}
 }
+
+func TestRunStatusValid(t *testing.T) {
+	valid := []RunStatus{RunCreated, RunRunning, RunSucceeded, RunFailed, RunCancelled}
+	for _, v := range valid {
+		if !v.Valid() {
+			t.Errorf("RunStatus(%q).Valid() = false, want true", v)
+		}
+	}
+	if RunStatus("bogus").Valid() {
+		t.Error("RunStatus(bogus).Valid() = true, want false")
+	}
+}
+
+func TestParseRunStatus(t *testing.T) {
+	got, err := ParseRunStatus("running")
+	if err != nil || got != RunRunning {
+		t.Fatalf("ParseRunStatus(running) = (%q, %v), want (running, nil)", got, err)
+	}
+	_, err = ParseRunStatus("nope")
+	if err == nil {
+		t.Fatal("ParseRunStatus(nope) should return error")
+	}
+}
+
+func TestWorkItemStatusValid(t *testing.T) {
+	valid := []WorkItemStatus{
+		WorkItemOpen, WorkItemAccepted, WorkItemQueued, WorkItemRunning,
+		WorkItemBlocked, WorkItemFailed, WorkItemDone, WorkItemCancelled, WorkItemClosed,
+	}
+	for _, v := range valid {
+		if !v.Valid() {
+			t.Errorf("WorkItemStatus(%q).Valid() = false, want true", v)
+		}
+	}
+	if WorkItemStatus("bogus").Valid() {
+		t.Error("WorkItemStatus(bogus).Valid() = true, want false")
+	}
+}
+
+func TestParseWorkItemStatus(t *testing.T) {
+	got, err := ParseWorkItemStatus("running")
+	if err != nil || got != WorkItemRunning {
+		t.Fatalf("ParseWorkItemStatus(running) = (%q, %v), want (running, nil)", got, err)
+	}
+	_, err = ParseWorkItemStatus("nope")
+	if err == nil {
+		t.Fatal("ParseWorkItemStatus(nope) should return error")
+	}
+}
+
+func TestCanTransitionWorkItemStatus(t *testing.T) {
+	if !CanTransitionWorkItemStatus(WorkItemOpen, WorkItemAccepted) {
+		t.Error("open -> accepted should be valid")
+	}
+	if CanTransitionWorkItemStatus(WorkItemDone, WorkItemOpen) {
+		t.Error("done -> open should be invalid")
+	}
+	if !CanTransitionWorkItemStatus(WorkItemRunning, WorkItemRunning) {
+		t.Error("same status transition should be valid")
+	}
+}

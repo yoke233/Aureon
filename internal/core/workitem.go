@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -20,6 +22,50 @@ const (
 	WorkItemCancelled WorkItemStatus = "cancelled"
 	WorkItemClosed    WorkItemStatus = "closed"
 )
+
+func (s WorkItemStatus) Valid() bool {
+	switch s {
+	case WorkItemOpen, WorkItemAccepted, WorkItemQueued, WorkItemRunning,
+		WorkItemBlocked, WorkItemFailed, WorkItemDone, WorkItemCancelled, WorkItemClosed:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseWorkItemStatus(raw string) (WorkItemStatus, error) {
+	s := WorkItemStatus(strings.TrimSpace(raw))
+	if !s.Valid() {
+		return "", fmt.Errorf("invalid work item status %q", raw)
+	}
+	return s, nil
+}
+
+// CanTransitionWorkItemStatus returns true if transitioning from `from` to `to` is allowed.
+// Same-status is always permitted (idempotent update).
+var workItemTransitions = map[WorkItemStatus][]WorkItemStatus{
+	WorkItemOpen:      {WorkItemAccepted, WorkItemCancelled, WorkItemClosed},
+	WorkItemAccepted:  {WorkItemQueued, WorkItemCancelled, WorkItemClosed},
+	WorkItemQueued:    {WorkItemRunning, WorkItemBlocked, WorkItemCancelled},
+	WorkItemRunning:   {WorkItemDone, WorkItemFailed, WorkItemBlocked, WorkItemCancelled},
+	WorkItemBlocked:   {WorkItemQueued, WorkItemRunning, WorkItemCancelled},
+	WorkItemFailed:    {WorkItemQueued, WorkItemCancelled, WorkItemClosed},
+	WorkItemDone:      {WorkItemClosed},
+	WorkItemCancelled: {WorkItemClosed},
+	WorkItemClosed:    {},
+}
+
+func CanTransitionWorkItemStatus(from, to WorkItemStatus) bool {
+	if from == to {
+		return true
+	}
+	for _, allowed := range workItemTransitions[from] {
+		if allowed == to {
+			return true
+		}
+	}
+	return false
+}
 
 // WorkItemPriority represents the urgency of a WorkItem.
 type WorkItemPriority string

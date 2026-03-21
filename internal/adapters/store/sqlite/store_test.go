@@ -439,6 +439,46 @@ func TestRunResultFields(t *testing.T) {
 	}
 }
 
+func TestGetLatestRunWithResultPrefersMetadataOnlyArtifact(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	fID, _ := s.CreateWorkItem(ctx, &core.WorkItem{Title: "f", Status: core.WorkItemOpen})
+	sID, _ := s.CreateAction(ctx, &core.Action{WorkItemID: fID, Name: "s", Type: core.ActionExec, Status: core.ActionPending})
+
+	firstID, _ := s.CreateRun(ctx, &core.Run{ActionID: sID, WorkItemID: fID, Status: core.RunSucceeded, Attempt: 1})
+	first, err := s.GetRun(ctx, firstID)
+	if err != nil {
+		t.Fatalf("get first run: %v", err)
+	}
+	first.ResultMarkdown = "legacy markdown result"
+	if err := s.UpdateRun(ctx, first); err != nil {
+		t.Fatalf("update first run: %v", err)
+	}
+
+	secondID, _ := s.CreateRun(ctx, &core.Run{ActionID: sID, WorkItemID: fID, Status: core.RunSucceeded, Attempt: 2})
+	second, err := s.GetRun(ctx, secondID)
+	if err != nil {
+		t.Fatalf("get second run: %v", err)
+	}
+	second.ResultMetadata = map[string]any{
+		core.ResultMetaArtifactNamespace: "gstack",
+		core.ResultMetaArtifactType:      "review_report",
+		core.ResultMetaArtifactRelPath:   ".ai-workflow/artifacts/gstack/review/demo.md",
+	}
+	if err := s.UpdateRun(ctx, second); err != nil {
+		t.Fatalf("update second run: %v", err)
+	}
+
+	latest, err := s.GetLatestRunWithResult(ctx, sID)
+	if err != nil {
+		t.Fatalf("GetLatestRunWithResult() error = %v", err)
+	}
+	if latest.ID != secondID {
+		t.Fatalf("expected latest run %d, got %d", secondID, latest.ID)
+	}
+}
+
 func TestAgentContextCRUD(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

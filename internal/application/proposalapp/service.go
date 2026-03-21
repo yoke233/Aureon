@@ -35,6 +35,8 @@ type UpdateProposalInput struct {
 	Title           *string
 	Summary         *string
 	Content         *string
+	ProposedBy      *string
+	WorkItemDrafts  *[]core.ProposalWorkItemDraft
 	Metadata        *map[string]any
 	SourceMessageID *int64
 }
@@ -152,6 +154,23 @@ func (s *Service) UpdateProposal(ctx context.Context, input UpdateProposalInput)
 	}
 	if input.Content != nil {
 		proposal.Content = strings.TrimSpace(*input.Content)
+	}
+	if input.ProposedBy != nil {
+		proposedBy := strings.TrimSpace(*input.ProposedBy)
+		if proposedBy == "" {
+			return nil, fmt.Errorf("proposed_by is required")
+		}
+		proposal.ProposedBy = proposedBy
+	}
+	if input.WorkItemDrafts != nil {
+		normalized, err := normalizeDrafts(*input.WorkItemDrafts, false)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateDraftProjects(ctx, s.store, normalized); err != nil {
+			return nil, err
+		}
+		proposal.WorkItemDrafts = normalized
 	}
 	if input.Metadata != nil {
 		proposal.Metadata = cloneAnyMap(*input.Metadata)

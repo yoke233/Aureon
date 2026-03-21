@@ -203,6 +203,9 @@ func (h *Handler) Register(r chi.Router) {
 	// Runs
 	r.Get("/steps/{stepID}/runs", h.listRuns)
 	r.Get("/runs/{runID}", h.getRun)
+	r.Get("/steps/{stepID}/artifact/latest", h.getLatestDeliverable)
+	r.Get("/runs/{runID}/artifacts", h.listDeliverablesByRun)
+	r.Get("/artifacts/{artifactID}", h.getDeliverable)
 
 	// Events
 	r.Get("/events", h.listEvents)

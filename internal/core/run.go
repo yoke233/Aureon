@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // RunStatus represents the lifecycle state of a Run.
 type RunStatus string
@@ -48,5 +51,5 @@ type Run struct {
 
 // HasResult returns true if this Run produced a non-empty result.
 func (r *Run) HasResult() bool {
-	return r.ResultMarkdown != ""
+	return strings.TrimSpace(r.ResultMarkdown) != "" || HasArtifactResultMetadata(r.ResultMetadata)
 }

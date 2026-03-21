@@ -20,11 +20,13 @@ type createProposalRequest struct {
 }
 
 type updateProposalRequest struct {
-	Title           *string         `json:"title,omitempty"`
-	Summary         *string         `json:"summary,omitempty"`
-	Content         *string         `json:"content,omitempty"`
-	SourceMessageID *int64          `json:"source_message_id,omitempty"`
-	Metadata        *map[string]any `json:"metadata,omitempty"`
+	Title           *string                       `json:"title,omitempty"`
+	Summary         *string                       `json:"summary,omitempty"`
+	Content         *string                       `json:"content,omitempty"`
+	ProposedBy      *string                       `json:"proposed_by,omitempty"`
+	WorkItemDrafts  *[]core.ProposalWorkItemDraft `json:"work_item_drafts,omitempty"`
+	SourceMessageID *int64                        `json:"source_message_id,omitempty"`
+	Metadata        *map[string]any               `json:"metadata,omitempty"`
 }
 
 type replaceProposalDraftsRequest struct {
@@ -133,6 +135,8 @@ func (h *Handler) updateThreadProposal(w http.ResponseWriter, r *http.Request) {
 		Title:           req.Title,
 		Summary:         req.Summary,
 		Content:         req.Content,
+		ProposedBy:      req.ProposedBy,
+		WorkItemDrafts:  req.WorkItemDrafts,
 		SourceMessageID: req.SourceMessageID,
 		Metadata:        req.Metadata,
 	})

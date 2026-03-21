@@ -145,6 +145,11 @@ func TestRunHasResult(t *testing.T) {
 	if !run.HasResult() {
 		t.Fatal("expected non-empty result to be true")
 	}
+
+	run = &Run{ResultMetadata: map[string]any{ResultMetaArtifactRelPath: ".ai-workflow/artifacts/gstack/review/demo.md"}}
+	if !run.HasResult() {
+		t.Fatal("expected artifact metadata-only result to be true")
+	}
 }
 
 func TestProbeSignalConversions(t *testing.T) {

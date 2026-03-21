@@ -96,16 +96,19 @@ func (s *Store) UpdateRun(ctx context.Context, e *core.Run) error {
 }
 
 func (s *Store) GetLatestRunWithResult(ctx context.Context, actionID int64) (*core.Run, error) {
-	var model RunModel
+	var models []RunModel
 	err := s.orm.WithContext(ctx).
-		Where("step_id = ? AND result_markdown != '' AND result_markdown IS NOT NULL", actionID).
+		Where("step_id = ?", actionID).
 		Order("id DESC").
-		First(&model).Error
+		Find(&models).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, core.ErrNotFound
-		}
 		return nil, fmt.Errorf("get latest run with result for action %d: %w", actionID, err)
 	}
-	return model.toCore(), nil
+	for i := range models {
+		run := models[i].toCore()
+		if run.HasResult() {
+			return run, nil
+		}
+	}
+	return nil, core.ErrNotFound
 }

@@ -208,6 +208,70 @@ func TestServiceRejectAndReviseProposal(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateProposalAtomicallyUpdatesDraftsAndProposedBy(t *testing.T) {
+	store := newProposalServiceTestStore(t)
+	svc := New(Config{Store: store, Tx: proposalTx{base: store}})
+	ctx := context.Background()
+
+	threadID, err := store.CreateThread(ctx, &core.Thread{Title: "proposal edit", Status: core.ThreadActive, OwnerID: "user-1"})
+	if err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	projectID, err := store.CreateProject(ctx, &core.Project{Name: "project-a"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	proposal, err := svc.CreateProposal(ctx, CreateProposalInput{
+		ThreadID:   threadID,
+		Title:      "旧提案",
+		Summary:    "旧摘要",
+		Content:    "旧内容",
+		ProposedBy: "owner-1",
+		WorkItemDrafts: []core.ProposalWorkItemDraft{
+			{TempID: "draft-a", Title: "旧任务", Priority: core.PriorityMedium},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal: %v", err)
+	}
+
+	title := "新提案"
+	summary := "新摘要"
+	content := "新内容"
+	proposedBy := "lead-2"
+	drafts := []core.ProposalWorkItemDraft{
+		{TempID: "draft-a", Title: "新任务", Body: "更新 body", Priority: core.PriorityHigh, ProjectID: &projectID},
+	}
+	updated, err := svc.UpdateProposal(ctx, UpdateProposalInput{
+		ID:             proposal.ID,
+		Title:          &title,
+		Summary:        &summary,
+		Content:        &content,
+		ProposedBy:     &proposedBy,
+		WorkItemDrafts: &drafts,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProposal: %v", err)
+	}
+	if updated.ProposedBy != proposedBy {
+		t.Fatalf("proposal proposed_by = %q, want %q", updated.ProposedBy, proposedBy)
+	}
+	if len(updated.WorkItemDrafts) != 1 || updated.WorkItemDrafts[0].Title != "新任务" {
+		t.Fatalf("proposal drafts = %+v", updated.WorkItemDrafts)
+	}
+
+	persisted, err := svc.GetProposal(ctx, proposal.ID)
+	if err != nil {
+		t.Fatalf("GetProposal: %v", err)
+	}
+	if persisted.ProposedBy != proposedBy {
+		t.Fatalf("persisted proposed_by = %q, want %q", persisted.ProposedBy, proposedBy)
+	}
+	if len(persisted.WorkItemDrafts) != 1 || persisted.WorkItemDrafts[0].Title != "新任务" {
+		t.Fatalf("persisted drafts = %+v", persisted.WorkItemDrafts)
+	}
+}
+
 func TestServiceSubmitRequiresDrafts(t *testing.T) {
 	store := newProposalServiceTestStore(t)
 	svc := New(Config{Store: store, Tx: proposalTx{base: store}})

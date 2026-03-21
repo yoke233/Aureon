@@ -6,9 +6,10 @@ import "time"
 type ActionType string
 
 const (
-	ActionExec ActionType = "exec"
-	ActionGate ActionType = "gate"
-	ActionPlan ActionType = "plan"
+	ActionExec      ActionType = "exec"
+	ActionGate      ActionType = "gate"
+	ActionPlan      ActionType = "plan"
+	ActionComposite ActionType = "composite"
 )
 
 // ActionStatus represents the lifecycle state of an Action.

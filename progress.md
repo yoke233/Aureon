@@ -8,4 +8,5 @@
 - 已补正式计划文档：`docs/plan/2026-03-21-frontend-thread-proposal-initiative-plan.zh-CN.md`
 - 已完成 `task-017`：补齐 `web/src/types/apiV2.ts` 与 `web/src/lib/apiClient.ts` 的 Proposal / Initiative 契约，并新增 `apiClient` 路由测试。
 - 已通过验证：`npm --prefix web test -- --run src/lib/apiClient.test.ts`
-- 当前进入 `task-018` review：检查契约层是否存在字段漂移、缺失路由或测试盲区。
+- 已完成 `task-018` review：未发现需要修复的 correctness 问题；再次通过 `npm --prefix web test -- --run src/lib/apiClient.test.ts` 与 `pwsh -NoProfile -File .\\scripts\\test\\frontend-build.ps1`。
+- 当前进入 `task-019`：准备在线程页补 proposal 操作面。

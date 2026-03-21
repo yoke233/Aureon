@@ -30,7 +30,8 @@
 ## 当前执行
 
 - `task-017` 已完成实现与验证：补齐 `Proposal / Initiative` 前端类型、`apiClient` 契约和路由命中测试。
-- 当前进入 `task-018`：对 Phase 1 契约层实现做 review，并修复发现的问题。
+- `task-018` 已完成 review：未发现需要修复的 correctness 问题，单测与 build 已通过。
+- 当前进入 `task-019`：在线程页补 proposal 列表、创建和审批操作面。
 
 ## 本轮结论
 

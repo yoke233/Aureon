@@ -2,11 +2,12 @@
 
 ## 目的
 
-这份 runbook 用于给本轮 Requirement -> Thread -> Proposal -> Initiative 三阶段能力留痕，覆盖：
+这份 runbook 用于给本轮 Requirement -> Thread -> Proposal -> Initiative -> WorkItem Execution 留痕，覆盖：
 
 - 本轮功能与提交落点
 - 已实际执行的验证命令与结果
 - 如何重跑“虚拟全流程”
+- 如何重跑“thread 输出 workitem 关系组并继续执行”的完整链路
 - 后续如果切换到真实 ACP，应如何启动、验证与留档
 
 ## 本轮变更范围
@@ -34,6 +35,12 @@
   - Thread meeting 启动与消息派发
   - Proposal Create / Submit / Approve
   - Initiative materialize
+- 本轮继续补了一条更完整的集成测试，覆盖：
+  - Proposal Reject / Revise / Resubmit
+  - thread 产出 3 个带 `depends_on` 的 work item 关系组
+  - Initiative Propose / Approve
+  - root work item 自动提交、dependent work item 自动解锁
+  - work item 内部 gate reject -> rework -> approve
 
 ## 代码落点
 
@@ -58,18 +65,21 @@
 
 ```powershell
 go test ./internal/adapters/http -run TestAPI_RequirementToProposalToInitiativeFlow -count=1 -v
+go test ./internal/adapters/http -run TestIntegration_RequirementToWorkItemExecutionFlow -count=1 -v
 go test ./internal/adapters/http -count=1
 ```
 
 结果：
 
 - `TestAPI_RequirementToProposalToInitiativeFlow`：`PASS`
+- `TestIntegration_RequirementToWorkItemExecutionFlow`：`PASS`
 - `./internal/adapters/http`：`PASS`
 
 说明：
 
-- 第一条命令直接验证虚拟全流程闭环。
-- 第二条命令验证新增测试没有破坏现有 thread / websocket / proposal / requirement HTTP 行为。
+- 第一条命令直接验证 Requirement -> Proposal -> Initiative 的稳定基线。
+- 第二条命令验证 thread 收敛到 work item 关系组后，继续走 initiative 审批与 work item DAG 执行闭环。
+- 第三条命令验证新增测试没有破坏现有 thread / websocket / proposal / requirement HTTP 行为。
 
 ### 同一任务链此前已通过的验证
 
@@ -104,6 +114,28 @@ go test ./internal/adapters/http -run TestAPI_RequirementToProposalToInitiativeF
 6. submit proposal
 7. approve proposal
 8. 校验 initiative 与 2 个 initiative items 已物化
+
+### 完整 work item 关系组闭环
+
+```powershell
+go test ./internal/adapters/http -run TestIntegration_RequirementToWorkItemExecutionFlow -count=1 -v
+```
+
+这条测试会在临时 SQLite + 内存 bus + scheduler 环境中完成：
+
+1. 创建 backend/frontend/qa 三个 project 与 resource space
+2. 用 stub LLM 产出 requirement analysis，并创建 `group_chat` thread
+3. 通过 stub thread runtime 模拟 3 个 agent 发言收敛
+4. 创建 proposal
+5. submit proposal
+6. reject proposal
+7. revise proposal，并把草案改成 3 个 work item 的依赖链
+8. resubmit + approve proposal，物化 initiative 与 work item 关系组
+9. 为 3 个 work item 补内部 steps
+10. propose + approve initiative
+11. 自动执行 root work item，随后自动解锁 dependent work item
+12. 在前端 work item 内模拟 gate reject -> rework -> approve
+13. 校验 3 个 work item 全部 done，initiative 最终收敛为 done
 
 ### 扩展回归
 
@@ -141,6 +173,32 @@ go test ./internal/adapters/http -count=1
 - initiative 物化：
   - 状态为 `draft`
   - 生成 2 个 items
+
+当前 `TestIntegration_RequirementToWorkItemExecutionFlow` 额外覆盖以下证据点：
+
+- proposal 审核返工：
+  - reject
+  - revise
+  - replace drafts
+  - resubmit
+- thread 讨论输出模型：
+  - 最终不是 `taskgroup`
+  - 而是 3 个 `work_item_drafts`
+  - `depends_on` 形成 `backend -> frontend -> qa` 关系链
+- initiative 执行链：
+  - `propose`
+  - `approve`
+  - root work item 自动进入调度
+  - dependent work item 先处于 `accepted`，依赖完成后自动排队执行
+- work item 内部执行链：
+  - 前端 work item 发生 gate reject
+  - 触发 rework 后再次执行
+  - gate 最终 approve
+- thread 留痕：
+  - `meeting_summary`
+  - `proposal_rejected`
+  - `proposal_revised`
+  - `proposal_merged`
 
 ## 如果后面要切到真实 ACP，怎么跑
 

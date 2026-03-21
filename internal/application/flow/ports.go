@@ -23,7 +23,6 @@ type Store interface {
 // EventStore is the persistence port required for persisting emitted events.
 type EventStore interface {
 	core.EventStore
-	core.JournalStore
 }
 
 // EventPublisher is the minimal outbound event port required by work item orchestration.

@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -74,91 +73,6 @@ type JournalStore interface {
 }
 
 // ── Mapping functions: existing types → JournalEntry ──
-
-// EventToJournalEntry converts an Event to a JournalEntry.
-// Returns nil for events that should not be journaled (thread, chat, notification).
-func EventToJournalEntry(e *Event) *JournalEntry {
-	if e == nil {
-		return nil
-	}
-
-	// Skip events that belong to separate domains.
-	t := string(e.Type)
-	if strings.HasPrefix(t, "thread.") ||
-		strings.HasPrefix(t, "chat.") ||
-		strings.HasPrefix(t, "notification.") {
-		return nil
-	}
-
-	kind := eventTypeToJournalKind(e)
-	source := JournalSourceSystem
-
-	// Tool audit events come from agents.
-	if e.Category == EventCategoryToolAudit {
-		kind = JournalToolCall
-		source = JournalSourceAgent
-	}
-
-	summary := t
-	if kind == JournalToolCall {
-		if name, ok := e.Data["tool_name"].(string); ok && name != "" {
-			summary = name
-		}
-	}
-
-	return &JournalEntry{
-		WorkItemID: e.WorkItemID,
-		ActionID:   e.ActionID,
-		RunID:      e.RunID,
-		Kind:       kind,
-		Source:     source,
-		Summary:    summary,
-		Payload:    e.Data,
-		Actor:      "system",
-		CreatedAt:  e.Timestamp,
-	}
-}
-
-func eventTypeToJournalKind(e *Event) JournalKind {
-	t := string(e.Type)
-	switch {
-	case strings.HasPrefix(t, "work_item."),
-		strings.HasPrefix(t, "action.ready"),
-		strings.HasPrefix(t, "action.started"),
-		strings.HasPrefix(t, "action.completed"),
-		strings.HasPrefix(t, "action.failed"),
-		strings.HasPrefix(t, "action.blocked"),
-		strings.HasPrefix(t, "run.created"),
-		strings.HasPrefix(t, "run.started"),
-		strings.HasPrefix(t, "run.succeeded"),
-		strings.HasPrefix(t, "run.failed"):
-		return JournalStateChange
-
-	case t == string(EventGatePassed),
-		t == string(EventGateRejected),
-		t == string(EventActionNeedHelp),
-		t == string(EventActionSignal):
-		return JournalSignal
-
-	case t == string(EventGateAwaitingHuman):
-		return JournalContext
-
-	case t == string(EventGateReworkLimitReached):
-		return JournalError
-
-	case t == string(EventActionUnblocked):
-		return JournalHumanAction
-
-	case t == string(EventRunAgentOutput):
-		return JournalAgentOutput
-
-	case strings.HasPrefix(t, "run.probe_"):
-		return JournalProbe
-
-	default:
-		return JournalSystem
-	}
-}
 
 // ActionSignalToJournalEntry converts an ActionSignal to a JournalEntry.
 func ActionSignalToJournalEntry(s *ActionSignal) *JournalEntry {

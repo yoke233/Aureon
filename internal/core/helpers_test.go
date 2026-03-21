@@ -212,45 +212,6 @@ func TestProbeSignalConversions(t *testing.T) {
 func TestJournalEntryConversions(t *testing.T) {
 	now := time.Now().UTC().Round(0)
 
-	if EventToJournalEntry(nil) != nil {
-		t.Fatal("expected nil event to produce nil journal entry")
-	}
-	if EventToJournalEntry(&Event{Type: EventChatOutput}) != nil {
-		t.Fatal("expected chat events to be skipped")
-	}
-	if EventToJournalEntry(&Event{Type: EventThreadMessage}) != nil {
-		t.Fatal("expected thread events to be skipped")
-	}
-	if EventToJournalEntry(&Event{Type: EventNotificationCreated}) != nil {
-		t.Fatal("expected notification events to be skipped")
-	}
-
-	toolAudit := EventToJournalEntry(&Event{
-		Type:       EventRunStarted,
-		Category:   EventCategoryToolAudit,
-		WorkItemID: 1,
-		ActionID:   2,
-		RunID:      3,
-		Data:       map[string]any{"tool_name": "functions.shell_command"},
-		Timestamp:  now,
-	})
-	if toolAudit == nil || toolAudit.Kind != JournalToolCall || toolAudit.Source != JournalSourceAgent {
-		t.Fatalf("unexpected tool audit journal entry: %+v", toolAudit)
-	}
-	if toolAudit.Summary != "functions.shell_command" {
-		t.Fatalf("unexpected tool audit summary: %q", toolAudit.Summary)
-	}
-
-	stateChange := EventToJournalEntry(&Event{
-		Type:       EventWorkItemStarted,
-		WorkItemID: 5,
-		Data:       map[string]any{"reason": "manual"},
-		Timestamp:  now,
-	})
-	if stateChange == nil || stateChange.Kind != JournalStateChange {
-		t.Fatalf("unexpected state change journal entry: %+v", stateChange)
-	}
-
 	signalEntry := ActionSignalToJournalEntry(&ActionSignal{
 		WorkItemID:     5,
 		ActionID:       6,

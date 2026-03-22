@@ -204,7 +204,7 @@ func validateRuntimeAgentBindings(cfg *Config) error {
 		}
 
 		llmConfigID := strings.TrimSpace(profile.LLMConfigID)
-		if llmConfigID == "" {
+		if profilellm.IsSystemLLMConfig(llmConfigID) {
 			continue
 		}
 		llmCfg, ok := llmMap[llmConfigID]

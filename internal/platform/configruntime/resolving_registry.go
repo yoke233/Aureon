@@ -85,7 +85,7 @@ func (r *resolvingRegistry) materializeProfile(profile *core.AgentProfile) (*cor
 	}
 
 	llmConfigID := strings.TrimSpace(cloned.LLMConfigID)
-	if llmConfigID != "" && r.resolveLLM != nil {
+	if !profilellm.IsSystemLLMConfig(llmConfigID) && r.resolveLLM != nil {
 		llmCfg, err := r.resolveLLM(llmConfigID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve llm config %q for profile %q: %w", llmConfigID, cloned.ID, err)

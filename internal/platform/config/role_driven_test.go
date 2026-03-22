@@ -54,6 +54,25 @@ func TestValidateRuntimeAgentBindingsRejectsMissingLLMConfig(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeAgentBindingsAcceptsSystemLLMConfig(t *testing.T) {
+	cfg := &Config{}
+	cfg.Runtime.Agents.Drivers = []RuntimeDriverConfig{{
+		ID:            "claude-acp",
+		LaunchCommand: "npx",
+		LaunchArgs:    []string{"-y", "@zed-industries/claude-agent-acp"},
+	}}
+	cfg.Runtime.Agents.Profiles = []RuntimeProfileConfig{{
+		ID:          "lead",
+		Driver:      "claude-acp",
+		LLMConfigID: "system",
+		Role:        "lead",
+	}}
+
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestValidateRuntimeAgentBindingsRejectsIncompatibleProvider(t *testing.T) {
 	cfg := &Config{}
 	cfg.Runtime.LLM.Configs = []RuntimeLLMEntryConfig{{

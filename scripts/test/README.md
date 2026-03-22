@@ -23,7 +23,7 @@ GitHub Actions now runs native `go` / `npm` commands directly. These PowerShell 
 - `frontend-unit.ps1`: run frontend unit tests.
 - `frontend-build.ps1`: run frontend production build.
 - `frontend-ci.ps1`: run the recommended frontend baseline in local Windows environments (`lint -> unit -> build`), with optional `-WithE2E`.
-- `frontend-e2e.ps1`: run Playwright browser E2E for the project creation flow (`local_path` + `local_new`).
+- `frontend-e2e.ps1`: run Playwright browser E2E for the current authenticated project creation flow (`/projects/new` + local working directory binding).
 
 ## Recommended Frontend Flow
 

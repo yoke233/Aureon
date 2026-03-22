@@ -3,61 +3,41 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const APP_URL = process.env.APP_URL ?? "http://localhost:5173";
+const APP_TOKEN = process.env.APP_TOKEN ?? "";
 
-const assertCreateSucceeded = async (page: Page) => {
-  const infoBox = page.locator("p.mt-3.rounded-md.border.border-sky-200").first();
-  await expect(infoBox).toBeVisible({ timeout: 15_000 });
-  await expect
-    .poll(async () => (await infoBox.textContent()) ?? "", { timeout: 60_000 })
-    .toMatch(/project created|项目创建成功|创建成功/i);
+const ensureAuthenticated = async (page: Page) => {
+  const loginHeading = page.getByRole("heading", { name: /登录|Login/ });
+  if (!(await loginHeading.isVisible().catch(() => false))) {
+    return;
+  }
+
+  if (!APP_TOKEN) {
+    throw new Error("APP_TOKEN is required when the app redirects to the login page.");
+  }
+
+  await page.getByLabel("API Token").fill(APP_TOKEN);
+  await page.getByRole("button", { name: /登录|Login/ }).click();
 };
 
-test("项目创建面板可完成 local_path 与 local_new 创建流程", async ({ page }) => {
+test("项目创建页可创建项目并绑定本地工作目录", async ({ page }) => {
   const runID = Date.now();
-  const localPathName = `e2e-local-path-${runID}`;
-  const localPathRepo = `D:/project/ai-workflow/.runtime/${localPathName}`;
-  const localNewName = `e2e-local-new-${runID}`;
-  const expectedLocalNewSlug = localNewName.toLowerCase();
+  const projectName = `e2e-project-${runID}`;
+  const workingDir = "D:/project/ai-workflow";
+  const createProjectUrl = new URL(APP_URL);
+  createProjectUrl.pathname = "/projects/new";
 
-  await page.goto(APP_URL, { waitUntil: "networkidle" });
-  await expect(page.getByRole("heading", { name: "AI Workflow Workbench" })).toBeVisible();
+  await page.goto(createProjectUrl.toString(), { waitUntil: "networkidle" });
+  await ensureAuthenticated(page);
+  await expect(page.getByRole("heading", { name: "新建项目" })).toBeVisible({ timeout: 15_000 });
 
-  await page.selectOption("#create-source-type", "local_path");
-  await page.fill("#create-project-name", localPathName);
-  await page.fill("#create-repo-path", localPathRepo);
+  await page.getByPlaceholder("例如：ai-workflow").fill(projectName);
+  await page.getByPlaceholder("描述项目的目标、技术栈和范围...").fill("Playwright e2e project creation regression");
+  await page.getByPlaceholder("D:/project/my-repo").fill(workingDir);
   await page.getByRole("button", { name: "创建项目" }).click();
 
-  await expect(page.getByText("请求 ID:")).toBeVisible({ timeout: 15_000 });
-  await assertCreateSucceeded(page);
-  await expect
-    .poll(async () => {
-      return page
-        .locator("#project-select option")
-        .filter({ hasText: localPathName })
-        .count();
-    }, { timeout: 60_000 })
-    .toBeGreaterThan(0);
-
-  await page.selectOption("#create-source-type", "local_new");
-  await page.fill("#create-project-name", localNewName);
-  await page.getByRole("button", { name: "创建项目" }).click();
-
-  await assertCreateSucceeded(page);
-  await expect
-    .poll(async () => {
-      return page
-        .locator("#project-select option")
-        .filter({ hasText: localNewName })
-        .count();
-    }, { timeout: 60_000 })
-    .toBeGreaterThan(0);
-
-  await expect
-    .poll(async () => {
-      const hint = await page.locator("p.mt-2.text-xs.text-slate-500").textContent();
-      return hint ?? "";
-    }, { timeout: 60_000 })
-    .toContain(expectedLocalNewSlug);
+  await expect(page).toHaveURL(/\/projects$/);
+  await expect(page.getByRole("heading", { name: "项目" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(projectName).first()).toBeVisible({ timeout: 60_000 });
 
   const screenshotPath = join(".runtime", "playwright", `project-creation-${runID}.png`);
   mkdirSync(dirname(screenshotPath), { recursive: true });

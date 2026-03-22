@@ -119,7 +119,6 @@ export function ChatPage() {
     driverId: string;
     title: string;
   } | null>(null);
-  const prevScrollHeightRef = useRef<number>(0);
   const justSwitchedSessionRef = useRef(false);
 
   // Feed pagination: show last FEED_PAGE_SIZE entries, expand on scroll-to-top
@@ -546,6 +545,10 @@ export function ChatPage() {
   const { chatFeedEntries, visibleFeedEntries, hasMoreFeedEntries } = useChatFeed(
     currentMessages, currentActivities, feedVisibleCount,
   );
+  const firstVisibleFeedIndex = Math.max(
+    chatFeedEntries.length - visibleFeedEntries.length,
+    0,
+  );
 
   const visiblePendingPermissions = useMemo(
     () => pendingPermissions.filter((perm) => perm.session_id === activeSession),
@@ -567,24 +570,21 @@ export function ChatPage() {
       const el = e.currentTarget;
       // Track whether user is near the bottom (within 80px)
       isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      if (el.scrollTop < 80 && hasMoreFeedEntries && !loadingMore) {
-        prevScrollHeightRef.current = el.scrollHeight;
-        setLoadingMore(true);
-        setFeedVisibleCount((prev) => prev + FEED_PAGE_SIZE);
-      }
     },
-    [hasMoreFeedEntries, loadingMore],
+    [],
   );
 
-  // After prepending entries, restore scroll position so the view doesn't jump
+  const handleFeedStartReached = useCallback(() => {
+    if (!hasMoreFeedEntries || loadingMore) {
+      return;
+    }
+    setLoadingMore(true);
+    setFeedVisibleCount((prev) => prev + FEED_PAGE_SIZE);
+  }, [hasMoreFeedEntries, loadingMore]);
+
   useEffect(() => {
     if (!loadingMore) return;
-    const el = messageContainerRef.current;
-    if (!el || prevScrollHeightRef.current === 0) return;
-    // Wait for DOM to repaint with the new content
     requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight - prevScrollHeightRef.current;
-      prevScrollHeightRef.current = 0;
       setLoadingMore(false);
     });
   }, [visibleFeedEntries.length, loadingMore]);
@@ -1451,11 +1451,13 @@ export function ChatPage() {
           visibleFeedEntries={visibleFeedEntries}
           copiedMessageId={copiedMessageId}
           collapsedActivityGroups={collapsedActivityGroups}
+          firstVisibleFeedIndex={firstVisibleFeedIndex}
           activeSession={activeSession}
           sessionRunning={sessionRunning ?? false}
           messageContainerRef={messageContainerRef}
           messagesEndRef={messagesEndRef}
           onMessageListScroll={handleChatScroll}
+          onFeedStartReached={handleFeedStartReached}
           onCopyMessage={(id, content) => void handleCopyMessage(id, content)}
           onCreateWorkItem={handleCreateWorkItem}
           lastActivityText={lastActivityText}

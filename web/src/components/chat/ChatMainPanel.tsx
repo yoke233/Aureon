@@ -10,7 +10,10 @@ import type { LLMConfigItem } from "@/types/system";
 import { ChatEventsPanel } from "./ChatEventsPanel";
 import { ChatScrollTrack } from "./ChatScrollTrack";
 import { DraftSessionSetup } from "./DraftSessionSetup";
-import { MessageFeedView } from "./MessageFeedView";
+import {
+  MessageFeedView,
+  VIRTUALIZE_MIN_CHAT_FEED_ENTRIES,
+} from "./MessageFeedView";
 import type { ChatFeedEntry, LeadDriverOption } from "./chatTypes";
 
 interface ChatMainPanelViewProps {
@@ -58,6 +61,8 @@ interface ChatMainPanelFeedProps extends MessageListScrollProps {
   activeSession: string | null;
   sessionRunning: boolean;
   lastActivityText: string;
+  firstVisibleFeedIndex: number;
+  onFeedStartReached: () => void;
   onCopyMessage: (id: string, content: string) => void;
   onCreateWorkItem: (id: string, content: string) => void;
   onActivityGroupToggle: (id: string) => void;
@@ -105,16 +110,22 @@ export function ChatMainPanel({
   copiedMessageId,
   collapsedActivityGroups,
   lastActivityText,
+  firstVisibleFeedIndex,
   activeSession,
   sessionRunning,
   messageContainerRef,
   messagesEndRef,
   onMessageListScroll,
+  onFeedStartReached,
   onCopyMessage,
   onCreateWorkItem,
   onActivityGroupToggle,
 }: ChatMainPanelProps) {
   const { t } = useTranslation();
+  const usesVirtualizedFeed =
+    detailView === "chat" &&
+    !isDraftSessionView &&
+    chatFeedEntries.length >= VIRTUALIZE_MIN_CHAT_FEED_ENTRIES;
 
   return (
     <MessageListViewport
@@ -122,7 +133,7 @@ export function ChatMainPanel({
       messagesEndRef={messagesEndRef}
       onMessageListScroll={onMessageListScroll}
       viewportClassName="absolute inset-0 overflow-y-auto px-5 py-4 pr-6 [scrollbar-gutter:stable]"
-      overlay={<ChatScrollTrack containerRef={messageContainerRef} />}
+      overlay={usesVirtualizedFeed ? undefined : <ChatScrollTrack containerRef={messageContainerRef} />}
     >
         {detailView === "events" ? (
           <ChatEventsPanel events={currentEvents} />
@@ -163,14 +174,6 @@ export function ChatMainPanel({
           </div>
         ) : (
           <div className="mx-auto w-full max-w-[1200px] space-y-1">
-            {hasMoreFeedEntries && (
-              <div className="flex items-center justify-center gap-1.5 py-3 text-xs text-muted-foreground">
-                {loadingMore && <Loader2 className="h-3 w-3 animate-spin" />}
-                {loadingMore
-                  ? t("chat.loadingMore", { defaultValue: "加载中..." })
-                  : t("chat.scrollUpForMore", { defaultValue: "↑ 向上滚动加载更早消息" })}
-              </div>
-            )}
             <MessageFeedView
               entries={visibleFeedEntries}
               submitting={submitting && !!activeSession}
@@ -178,6 +181,11 @@ export function ChatMainPanel({
               lastActivityText={lastActivityText}
               copiedMessageId={copiedMessageId}
               collapsedActivityGroups={collapsedActivityGroups}
+              hasMoreEntries={hasMoreFeedEntries}
+              loadingMore={loadingMore}
+              firstVisibleItemIndex={firstVisibleFeedIndex}
+              messageContainerRef={messageContainerRef}
+              onStartReached={onFeedStartReached}
               onCopyMessage={onCopyMessage}
               onCreateWorkItem={onCreateWorkItem}
               onActivityGroupToggle={onActivityGroupToggle}

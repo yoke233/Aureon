@@ -15,7 +15,7 @@ type RunProbeRuntimeRequest struct {
 	RunID        int64
 	InvocationID string
 	SessionID    string
-	OwnerID      string
+	AgentID      string
 	Question     string
 	Timeout      time.Duration
 }

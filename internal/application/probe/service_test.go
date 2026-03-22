@@ -116,8 +116,8 @@ func TestRunProbeService_RequestRunProbeAnsweredBlocked(t *testing.T) {
 	if runtime.calls != 1 {
 		t.Fatalf("probe runtime calls = %d, want 1", runtime.calls)
 	}
-	if runtime.last.OwnerID != "worker-a" {
-		t.Fatalf("probe owner = %q, want worker-a", runtime.last.OwnerID)
+	if runtime.last.AgentID != "worker-a" {
+		t.Fatalf("probe agent = %q, want worker-a", runtime.last.AgentID)
 	}
 
 	var gotRequested, gotSent, gotAnswered bool
@@ -150,7 +150,7 @@ func TestRunProbeService_RejectsConcurrentActiveProbe(t *testing.T) {
 		ActionID:       runRec.ActionID,
 		AgentContextID: &agentCtx.ID,
 		SessionID:      agentCtx.SessionID,
-		OwnerID:        agentCtx.WorkerID,
+		AgentID:        agentCtx.WorkerID,
 		TriggerSource:  core.RunProbeTriggerManual,
 		Question:       "probe",
 		Status:         core.RunProbeSent,

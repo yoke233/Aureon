@@ -370,10 +370,10 @@ func (m *NATSSessionManager) RecoverRuns(ctx context.Context, since time.Time) (
 
 // ProbeRun routes a probe request to the owning remote worker over NATS request-reply.
 func (m *NATSSessionManager) ProbeRun(ctx context.Context, req runtimeapp.RunProbeRuntimeRequest) (*runtimeapp.RunProbeRuntimeResult, error) {
-	if strings.TrimSpace(req.OwnerID) == "" {
+	if strings.TrimSpace(req.AgentID) == "" {
 		return &runtimeapp.RunProbeRuntimeResult{
 			Reachable:  false,
-			Error:      "missing run owner",
+			Error:      "missing run agent",
 			ObservedAt: time.Now().UTC(),
 		}, nil
 	}
@@ -389,7 +389,7 @@ func (m *NATSSessionManager) ProbeRun(ctx context.Context, req runtimeapp.RunPro
 		return nil, fmt.Errorf("marshal probe request: %w", err)
 	}
 
-	subject := fmt.Sprintf("%s.probe.request.%s", m.prefix, req.OwnerID)
+	subject := fmt.Sprintf("%s.probe.request.%s", m.prefix, req.AgentID)
 	replyCtx := ctx
 	cancel := func() {}
 	if req.Timeout > 0 {

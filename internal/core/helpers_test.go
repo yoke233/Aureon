@@ -134,7 +134,7 @@ func TestProbeSignalConversions(t *testing.T) {
 		ActionID:       13,
 		AgentContextID: &agentContextID,
 		SessionID:      "session-1",
-		OwnerID:        "owner-1",
+		AgentID:        "owner-1",
 		TriggerSource:  RunProbeTriggerManual,
 		Question:       "still alive?",
 		Status:         RunProbeSent,

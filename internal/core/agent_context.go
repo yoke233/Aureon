@@ -11,8 +11,8 @@ type AgentContext struct {
 	SessionID        string     `json:"-"` // ACP session is internal routing state.
 	Summary          string     `json:"summary,omitempty"`
 	TurnCount        int        `json:"turn_count"`
-	WorkerID         string     `json:"owner_id,omitempty"`
-	WorkerLastSeenAt *time.Time `json:"owner_last_seen_at,omitempty"`
+	WorkerID         string     `json:"worker_id,omitempty"`
+	WorkerLastSeenAt *time.Time `json:"worker_last_seen_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 }

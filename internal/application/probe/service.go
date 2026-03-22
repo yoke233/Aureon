@@ -94,7 +94,7 @@ func (s *RunProbeService) RequestRunProbe(ctx context.Context, runID int64, sour
 		ActionID:       runRec.ActionID,
 		AgentContextID: route.AgentContextID,
 		SessionID:      route.SessionID,
-		OwnerID:        route.OwnerID,
+		AgentID:        route.AgentID,
 		TriggerSource:  source,
 		Question:       trimmedQuestion,
 		Status:         core.RunProbePending,
@@ -124,7 +124,7 @@ func (s *RunProbeService) RequestRunProbe(ctx context.Context, runID int64, sour
 	runtimeResult, err := s.sessionManager.ProbeRun(ctx, RunProbeRuntimeRequest{
 		RunID:     runID,
 		SessionID: route.SessionID,
-		OwnerID:   route.OwnerID,
+		AgentID:   route.AgentID,
 		Question:  trimmedQuestion,
 		Timeout:   timeout,
 	})

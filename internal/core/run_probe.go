@@ -79,7 +79,7 @@ type RunProbe struct {
 	ActionID       int64                 `json:"action_id"`
 	AgentContextID *int64                `json:"agent_context_id,omitempty"`
 	SessionID      string                `json:"-"`
-	OwnerID        string                `json:"owner_id,omitempty"`
+	AgentID        string                `json:"agent_id,omitempty"`
 	TriggerSource  RunProbeTriggerSource `json:"trigger_source"`
 	Question       string                `json:"question"`
 	Status         RunProbeStatus        `json:"status"`
@@ -98,6 +98,6 @@ type RunProbeRoute struct {
 	ActionID        int64
 	AgentContextID  *int64
 	SessionID       string
-	OwnerID         string
-	OwnerLastSeenAt *time.Time
+	AgentID         string
+	AgentLastSeenAt *time.Time
 }

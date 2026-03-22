@@ -222,7 +222,7 @@ func TestRunProbeService_RequestRunProbeStoreErrors(t *testing.T) {
 		service := NewRunProbeService(RunProbeServiceConfig{
 			Store: &probeStoreWrapper{
 				Store:          store,
-				route:          &core.RunProbeRoute{RunID: runRec.ID, WorkItemID: runRec.WorkItemID, ActionID: runRec.ActionID, AgentContextID: &agentCtx.ID, SessionID: agentCtx.SessionID, OwnerID: agentCtx.WorkerID},
+				route:          &core.RunProbeRoute{RunID: runRec.ID, WorkItemID: runRec.WorkItemID, ActionID: runRec.ActionID, AgentContextID: &agentCtx.ID, SessionID: agentCtx.SessionID, AgentID: agentCtx.WorkerID},
 				updateProbeErr: errors.New("update failed"),
 			},
 			SessionManager: &probeRuntimeStub{},

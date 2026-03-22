@@ -222,14 +222,14 @@ func (s *Store) GetRunProbeRoute(ctx context.Context, runID int64) (*core.RunPro
 		ActionID        int64      `gorm:"column:action_id"`
 		AgentContextID  *int64     `gorm:"column:agent_context_id"`
 		SessionID       string     `gorm:"column:session_id"`
-		OwnerID         string     `gorm:"column:owner_id"`
-		OwnerLastSeenAt *time.Time `gorm:"column:worker_last_seen_at"`
+		AgentID         string     `gorm:"column:agent_id"`
+		AgentLastSeenAt *time.Time `gorm:"column:worker_last_seen_at"`
 	}
 
 	var row probeRouteRow
 	err := s.orm.WithContext(ctx).
 		Table("runs e").
-		Select("e.id AS run_id, e.work_item_id, e.action_id, e.agent_context_id, COALESCE(ac.session_id, '') AS session_id, COALESCE(ac.worker_id, '') AS owner_id, ac.worker_last_seen_at").
+		Select("e.id AS run_id, e.work_item_id, e.action_id, e.agent_context_id, COALESCE(ac.session_id, '') AS session_id, COALESCE(ac.worker_id, '') AS agent_id, ac.worker_last_seen_at").
 		Joins("LEFT JOIN agent_contexts ac ON ac.id = e.agent_context_id").
 		Where("e.id = ?", runID).
 		Scan(&row).Error
@@ -245,7 +245,7 @@ func (s *Store) GetRunProbeRoute(ctx context.Context, runID int64) (*core.RunPro
 		ActionID:        row.ActionID,
 		AgentContextID:  row.AgentContextID,
 		SessionID:       row.SessionID,
-		OwnerID:         row.OwnerID,
-		OwnerLastSeenAt: row.OwnerLastSeenAt,
+		AgentID:         row.AgentID,
+		AgentLastSeenAt: row.AgentLastSeenAt,
 	}, nil
 }

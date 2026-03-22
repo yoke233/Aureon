@@ -103,8 +103,8 @@ func newProbeSignalPayload(probe *RunProbe) map[string]any {
 	if probe.SessionID != "" {
 		payload["session_id"] = probe.SessionID
 	}
-	if probe.OwnerID != "" {
-		payload["owner_id"] = probe.OwnerID
+	if probe.AgentID != "" {
+		payload["agent_id"] = probe.AgentID
 	}
 	if probe.Error != "" {
 		payload["error"] = probe.Error
@@ -178,8 +178,11 @@ func ProbeFromSignal(sig *ActionSignal) *RunProbe {
 	if v, ok := sig.Payload["session_id"].(string); ok {
 		p.SessionID = v
 	}
-	if v, ok := sig.Payload["owner_id"].(string); ok {
-		p.OwnerID = v
+	if v, ok := sig.Payload["agent_id"].(string); ok {
+		p.AgentID = v
+	} else if v, ok := sig.Payload["owner_id"].(string); ok {
+		// Backward compat: legacy payloads stored this field as "owner_id".
+		p.AgentID = v
 	}
 	if v, ok := sig.Payload["reply_text"].(string); ok {
 		p.ReplyText = v

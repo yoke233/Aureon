@@ -12,6 +12,24 @@ import (
 	"github.com/yoke233/zhanggui/internal/core"
 )
 
+// ACP session update type constants — these match the wire values produced by
+// the acpclient decoder and are used to route incoming SessionUpdate events.
+const (
+	updateTypeAgentThoughtChunk = "agent_thought_chunk"
+	updateTypeAgentMessageChunk = "agent_message_chunk"
+	updateTypeAgentThought      = "agent_thought"
+	updateTypeAgentMessage      = "agent_message"
+	updateTypeToolCall          = "tool_call"
+	updateTypeToolCallUpdate    = "tool_call_update"
+	updateTypeToolCallCompleted = "tool_call_completed"
+	updateTypeUsageUpdate       = "usage_update"
+)
+
+// Tool-call status values.
+const (
+	toolCallStatusCompleted = "completed"
+)
+
 type Scope struct {
 	WorkItemID int64
 	ActionID   int64
@@ -56,14 +74,14 @@ func (b *EventBridge) HandleSessionUpdate(ctx context.Context, update acpclient.
 	// For final "agent_message" / "agent_thought" events, discard (reset) their
 	// own pending buffer because the update itself carries the authoritative content.
 	switch update.Type {
-	case "agent_thought_chunk":
+	case updateTypeAgentThoughtChunk:
 		b.flushMessage(ctx)
-	case "agent_message_chunk":
+	case updateTypeAgentMessageChunk:
 		b.flushThought(ctx)
-	case "agent_message":
+	case updateTypeAgentMessage:
 		b.flushThought(ctx)
 		b.resetPendingMessage()
-	case "agent_thought":
+	case updateTypeAgentThought:
 		b.flushMessage(ctx)
 		b.resetPendingThought()
 	default:
@@ -72,25 +90,25 @@ func (b *EventBridge) HandleSessionUpdate(ctx context.Context, update acpclient.
 
 	// Phase 2: publish the current update.
 	switch update.Type {
-	case "agent_thought_chunk":
+	case updateTypeAgentThoughtChunk:
 		b.mu.Lock()
 		b.pendingThought.WriteString(update.Text)
 		b.mu.Unlock()
 		b.publishChunk(ctx, update)
-	case "agent_message_chunk":
+	case updateTypeAgentMessageChunk:
 		b.mu.Lock()
 		b.pendingMessage.WriteString(update.Text)
 		b.mu.Unlock()
 		b.publishChunk(ctx, update)
-	case "tool_call":
+	case updateTypeToolCall:
 		b.publishToolCall(ctx, update)
-	case "tool_call_update":
-		if update.Status == "completed" {
+	case updateTypeToolCallUpdate:
+		if update.Status == toolCallStatusCompleted {
 			b.publishToolCallCompleted(ctx, update)
 		} else {
 			b.publishToolCallUpdate(ctx, update)
 		}
-	case "usage_update":
+	case updateTypeUsageUpdate:
 		b.publishUsageUpdate(ctx, update)
 	default:
 		b.publishChunk(ctx, update)
@@ -127,7 +145,7 @@ func (b *EventBridge) flushThought(ctx context.Context) {
 	b.mu.Unlock()
 	if thought != "" {
 		b.publish(ctx, map[string]any{
-			"type":    "agent_thought",
+			"type":    updateTypeAgentThought,
 			"content": thought,
 		})
 	}
@@ -140,7 +158,7 @@ func (b *EventBridge) flushMessage(ctx context.Context) {
 	b.mu.Unlock()
 	if message != "" {
 		b.publish(ctx, map[string]any{
-			"type":    "agent_message",
+			"type":    updateTypeAgentMessage,
 			"content": message,
 		})
 	}
@@ -157,7 +175,7 @@ func (b *EventBridge) publishChunk(ctx context.Context, update acpclient.Session
 }
 
 func (b *EventBridge) publishToolCall(ctx context.Context, update acpclient.SessionUpdate) {
-	data := map[string]any{"type": "tool_call"}
+	data := map[string]any{"type": updateTypeToolCall}
 	var parsed struct {
 		Title      string `json:"title"`
 		ToolCallID string `json:"toolCallId"`
@@ -183,7 +201,7 @@ func (b *EventBridge) publishToolCallUpdate(ctx context.Context, update acpclien
 		return
 	}
 	data := map[string]any{
-		"type":         "tool_call",
+		"type":         updateTypeToolCall,
 		"tool_call_id": parsed.ToolCallID,
 	}
 	if parsed.Title != "" {
@@ -193,7 +211,7 @@ func (b *EventBridge) publishToolCallUpdate(ctx context.Context, update acpclien
 }
 
 func (b *EventBridge) publishToolCallCompleted(ctx context.Context, update acpclient.SessionUpdate) {
-	data := map[string]any{"type": "tool_call_completed"}
+	data := map[string]any{"type": updateTypeToolCallCompleted}
 	var parsed struct {
 		Title      string `json:"title"`
 		ToolCallID string `json:"toolCallId"`
@@ -226,7 +244,7 @@ func (b *EventBridge) publishToolCallCompleted(ctx context.Context, update acpcl
 }
 
 func (b *EventBridge) publishUsageUpdate(ctx context.Context, update acpclient.SessionUpdate) {
-	data := map[string]any{"type": "usage_update"}
+	data := map[string]any{"type": updateTypeUsageUpdate}
 	var usage struct {
 		Size int64 `json:"size"`
 		Used int64 `json:"used"`

@@ -78,9 +78,7 @@ func convertProfiles(driverCfgs []config.RuntimeDriverConfig, profileCfgs []conf
 				},
 			}
 			if llmCfg, ok := llmMap[c.LLMConfigID]; ok {
-				if profilellm.ValidateDriverProviderCompatibility(d.ID, d.LaunchCommand, d.LaunchArgs, llmCfg.Type) == nil {
-					driverCfg.Env = profilellm.MergeEnv(profilellm.BuildEnv(NewProviderConfigFromEntry(&llmCfg)), driverCfg.Env)
-				}
+				driverCfg.Env = profilellm.MergeEnv(profilellm.BuildEnv(NewProviderConfigFromEntry(&llmCfg)), driverCfg.Env)
 			}
 		}
 		out[i] = &core.AgentProfile{

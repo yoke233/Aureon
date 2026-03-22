@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -320,7 +319,7 @@ func (h *Handler) handleWSChatSend(msg wsMessage, writeJSON func(v any) error) {
 		}
 	}
 
-	accepted, err := h.lead.StartChat(context.Background(), chatapp.Request{
+	accepted, err := h.lead.StartChat(h.backgroundContext(), chatapp.Request{
 		SessionID:   strings.TrimSpace(req.SessionID),
 		Message:     req.Message,
 		Attachments: req.Attachments,
@@ -435,7 +434,7 @@ func (h *Handler) handleWSChatSetConfig(msg wsMessage, writeJSON func(v any) err
 		return
 	}
 
-	configOptions, err := h.lead.SetConfigOption(context.Background(), sessionID, req.ConfigID, req.Value)
+	configOptions, err := h.lead.SetConfigOption(h.backgroundContext(), sessionID, req.ConfigID, req.Value)
 	if err != nil {
 		_ = writeJSON(wsOutboundMessage{
 			Type: "chat.error",
@@ -499,7 +498,7 @@ func (h *Handler) handleWSChatSetMode(msg wsMessage, writeJSON func(v any) error
 		return
 	}
 
-	modes, err := h.lead.SetSessionMode(context.Background(), sessionID, req.ModeID)
+	modes, err := h.lead.SetSessionMode(h.backgroundContext(), sessionID, req.ModeID)
 	if err != nil {
 		_ = writeJSON(wsOutboundMessage{
 			Type: "chat.error",
@@ -723,7 +722,7 @@ func (h *Handler) handleWSThreadSend(msg wsMessage, writeJSON func(v any) error)
 		return
 	}
 
-	_, _, err := h.createThreadMessageAndRoute(context.Background(), threadMessageInput{
+	_, _, err := h.createThreadMessageAndRoute(h.backgroundContext(), threadMessageInput{
 		ThreadID:         req.ThreadID,
 		SenderID:         req.SenderID,
 		Role:             "human",
@@ -805,7 +804,7 @@ func (h *Handler) handleWSSubscribeThread(msg wsMessage, writeJSON func(v any) e
 		return
 	}
 
-	if _, err := h.store.GetThread(context.Background(), req.ThreadID); err != nil {
+	if _, err := h.store.GetThread(h.backgroundContext(), req.ThreadID); err != nil {
 		if err == core.ErrNotFound {
 			_ = writeJSON(wsOutboundMessage{
 				Type: "thread.error",
@@ -854,7 +853,7 @@ func (h *Handler) handleWSUnsubscribeThread(msg wsMessage, writeJSON func(v any)
 		return
 	}
 
-	if _, err := h.store.GetThread(context.Background(), req.ThreadID); err != nil {
+	if _, err := h.store.GetThread(h.backgroundContext(), req.ThreadID); err != nil {
 		if err == core.ErrNotFound {
 			_ = writeJSON(wsOutboundMessage{
 				Type: "thread.error",

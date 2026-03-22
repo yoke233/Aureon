@@ -11,7 +11,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,9 +31,9 @@ func bootstrapTestSetup(t *testing.T) (client *acpclient.Client, sessionID acppr
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 
-	binaryPath := filepath.Join(repoRoot, "ai-flow.exe")
-	if _, err := os.Stat(binaryPath); err != nil {
-		t.Skipf("ai-flow.exe not found at %s — run 'go build -tags dev -o ai-flow.exe ./cmd/ai-flow' first", binaryPath)
+	binaryPath, err := findDevBinary(repoRoot)
+	if err != nil {
+		t.Skipf("%v — run 'pwsh -NoProfile -File .\\scripts\\dev\\build-ai-flow.ps1' first", err)
 	}
 
 	dbPath := filepath.Join(repoRoot, ".ai-workflow", "data.db")

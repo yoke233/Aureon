@@ -40,12 +40,13 @@ func (h *Handler) workItemService() *workitemapp.Service {
 		tx = workItemAppTx{store: txStore}
 	}
 	return workitemapp.New(workitemapp.Config{
-		Store:       h.store,
-		Tx:          tx,
-		Scheduler:   h.scheduler,
-		Runner:      h.engine,
-		Bus:         h.bus,
-		BootstrapPR: workItemAppBootstrapper{handler: h},
+		Store:             h.store,
+		Tx:                tx,
+		Scheduler:         h.scheduler,
+		Runner:            h.engine,
+		Bus:               h.bus,
+		BootstrapPR:       workItemAppBootstrapper{handler: h},
+		BackgroundContext: h.backgroundContext(),
 	})
 }
 

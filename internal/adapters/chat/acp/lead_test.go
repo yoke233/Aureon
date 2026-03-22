@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"testing"
+	"time"
 
 	acpproto "github.com/coder/acp-go-sdk"
 	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
@@ -78,6 +79,7 @@ type fakeChatACPClient struct {
 	newSessionID  acpproto.SessionId
 	loadSessionID acpproto.SessionId
 	promptReply   string
+	promptFn      func(context.Context, acpproto.PromptRequest) (*acpclient.PromptResult, error)
 
 	initializeCalls int
 	newCalls        int
@@ -109,8 +111,11 @@ func (f *fakeChatACPClient) LoadSessionResult(_ context.Context, req acpproto.Lo
 	f.lastLoad = req
 	return acpclient.SessionResult{SessionID: f.loadSessionID}, nil
 }
-func (f *fakeChatACPClient) Prompt(context.Context, acpproto.PromptRequest) (*acpclient.PromptResult, error) {
+func (f *fakeChatACPClient) Prompt(ctx context.Context, req acpproto.PromptRequest) (*acpclient.PromptResult, error) {
 	f.promptCalls++
+	if f.promptFn != nil {
+		return f.promptFn(ctx, req)
+	}
 	return &acpclient.PromptResult{Text: f.promptReply}, nil
 }
 func (f *fakeChatACPClient) SetConfigOption(context.Context, acpproto.SetSessionConfigOptionRequest) ([]acpproto.SessionConfigOptionSelect, error) {
@@ -255,6 +260,70 @@ func TestLeadAgentPersistsProjectAndProfileSelection(t *testing.T) {
 	}
 	if detail.ProfileID != "lead-alt" || detail.ProfileName != "Claude Lead" {
 		t.Fatalf("unexpected profile info: %+v", detail.SessionSummary)
+	}
+}
+
+func TestLeadAgentStartChatUsesBackgroundContext(t *testing.T) {
+	registry := &fakeLeadRegistry{
+		profile: &core.AgentProfile{
+			ID:   "lead",
+			Name: "Codex Lead",
+			Role: core.RoleLead,
+			Driver: core.DriverConfig{
+				LaunchCommand: "fake",
+			},
+		},
+	}
+
+	releasePrompt := make(chan struct{})
+	client := &fakeChatACPClient{
+		newSessionID: "acp-session-bg",
+		promptFn: func(ctx context.Context, _ acpproto.PromptRequest) (*acpclient.PromptResult, error) {
+			select {
+			case <-releasePrompt:
+				return &acpclient.PromptResult{Text: "async reply"}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		},
+	}
+
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
+	agent := NewLeadAgent(LeadAgentConfig{
+		Registry: registry,
+		Bus:      membus.NewBus(),
+		Sandbox:  v2sandbox.NoopSandbox{},
+		DataDir:  t.TempDir(),
+		NewClient: func(_ acpclient.LaunchConfig, _ acpproto.Client, _opts ...acpclient.Option) (ChatACPClient, error) {
+			return client, nil
+		},
+		BackgroundContext: bgCtx,
+	})
+	defer agent.Shutdown()
+
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	resp, err := agent.StartChat(reqCtx, chatapp.Request{Message: "后台发送"})
+	if err != nil {
+		t.Fatalf("StartChat: %v", err)
+	}
+	reqCancel()
+	close(releasePrompt)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		detail, detailErr := agent.GetSession(context.Background(), resp.SessionID)
+		if detailErr == nil && len(detail.Messages) >= 2 {
+			if got := detail.Messages[1].Content; got != "async reply" {
+				t.Fatalf("assistant message = %q, want async reply", got)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for async reply, last err=%v", detailErr)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

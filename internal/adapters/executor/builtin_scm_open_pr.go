@@ -13,10 +13,7 @@ import (
 
 // runBuiltinSCMOpenPR creates or finds an open change request using the registered SCM providers.
 // It is provider-agnostic (GitHub PR today; GitLab MR later).
-func runBuiltinSCMOpenPR(ctx context.Context, store core.Store, bus core.EventBus, tokens flowapp.SCMTokens, action *core.Action, run *core.Run) error {
-	if store == nil {
-		return fmt.Errorf("builtin scm_open_pr: store is nil")
-	}
+func runBuiltinSCMOpenPR(ctx context.Context, bus core.EventBus, tokens flowapp.SCMTokens, action *core.Action, run *core.Run) error {
 	ws := flowapp.WorkspaceFromContext(ctx)
 	if ws == nil || strings.TrimSpace(ws.Path) == "" {
 		return fmt.Errorf("builtin scm_open_pr: workspace is required")
@@ -151,7 +148,7 @@ func runBuiltinSCMOpenPR(ctx context.Context, store core.Store, bus core.EventBu
 		fmt.Sprintf("- time_utc: %s", time.Now().UTC().Format(time.RFC3339)),
 	}, "\n")
 
-	return storeBuiltinArtifact(ctx, store, bus, action, run, md, map[string]any{
+	return storeBuiltinArtifact(ctx, bus, action, run, md, map[string]any{
 		"provider":    repo.Kind,
 		"pr_number":   cr.Number,
 		"pr_url":      cr.URL,

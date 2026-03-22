@@ -40,7 +40,7 @@ func buildFlowStack(base *bootstrapBase, bootstrapCfg *config.Config, scmTokens 
 	llmClient := buildCollectorClient(bootstrapCfg)
 	executor := buildActionExecutor(base.store, base.bus, base.registry, sessionMgr, base.runtimeManager, bootstrapCfg, base.dataDir, scmTokens, upgradeFn, base.signalCfg)
 	engine := buildWorkItemEngine(base.store, base.bus, executor, base.registry, base.runtimeManager, bootstrapCfg, base.dataDir, scmTokens, llmClient)
-	schedulerCtx, schedulerStop := context.WithCancel(context.Background())
+	schedulerCtx, schedulerStop := context.WithCancel(base.appCtx)
 	schedulerCfg := resolveWorkItemSchedulerConfig(bootstrapCfg)
 	scheduler := flowapp.NewWorkItemScheduler(engine, base.store, base.bus, schedulerCfg)
 	go scheduler.Start(schedulerCtx)
@@ -149,7 +149,7 @@ func buildActionExecutor(
 	var executor flowapp.ActionExecutor
 	if mockEnabled {
 		slog.Warn("bootstrap: using mock action executor (no ACP processes will be spawned)")
-		executor = executoradapter.NewMockActionExecutor(store, bus)
+		executor = executoradapter.NewMockActionExecutor(bus)
 	} else {
 		var auditLogger *audit.Logger
 		if bootstrapCfg != nil && bootstrapCfg.Audit.Enabled {
@@ -178,8 +178,7 @@ func buildActionExecutor(
 	}
 
 	return executoradapter.NewCompositeActionExecutor(executoradapter.CompositeStepExecutorConfig{
-		Store: store,
-		Bus:   bus,
+		Bus: bus,
 		SCMTokens: flowapp.SCMTokens{
 			GitHub: strings.TrimSpace(scmTokens.GitHub),
 			Codeup: strings.TrimSpace(scmTokens.Codeup),

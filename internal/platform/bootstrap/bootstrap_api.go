@@ -19,6 +19,7 @@ import (
 
 type apiStack struct {
 	leadAgent        *chatacp.LeadAgent
+	threadPool       *agentruntime.ThreadSessionPool
 	probeSvc         *probeapp.RunProbeService
 	inspectionEngine *inspectionapp.Engine
 	registrar        func(chi.Router)
@@ -66,6 +67,7 @@ func buildAPIStack(
 			Interval:       gcCfg.Interval.Duration,
 			RepoMaxAge:     gcCfg.RepoMaxAge.Duration,
 		},
+		BackgroundContext: base.appCtx,
 	})
 
 	var dagGen api.DAGGenerator
@@ -86,6 +88,7 @@ func buildAPIStack(
 
 	// Create ThreadSessionPool for real ACP agent sessions in threads.
 	threadPool := agentruntime.NewThreadSessionPool(base.store, base.bus, base.registry, base.dataDir)
+	threadPool.SetBackgroundContext(base.appCtx)
 	threadPool.SetThreadSharedBootTemplate(bootstrapCfg.Runtime.Prompts.ThreadSharedBootTemplate)
 	if base.signalCfg != nil {
 		threadPool.SetSignalConfig(base.signalCfg.ServerAddr, base.signalCfg.TokenRegistry)
@@ -100,6 +103,7 @@ func buildAPIStack(
 	if base.dataDir != "" {
 		apiOpts = append(apiOpts, api.WithDataDir(base.dataDir))
 	}
+	apiOpts = append(apiOpts, api.WithBackgroundContext(base.appCtx))
 	if flow.llmClient != nil {
 		apiOpts = append(apiOpts, api.WithTextCompleter(flow.llmClient))
 		apiOpts = append(apiOpts, api.WithRequirementCompleter(llmplanning.NewCompleter(flow.llmClient)))
@@ -113,6 +117,7 @@ func buildAPIStack(
 
 	return &apiStack{
 		leadAgent:        leadAgent,
+		threadPool:       threadPool,
 		probeSvc:         probeSvc,
 		inspectionEngine: inspEngine,
 		registrar:        func(r chi.Router) { handler.Register(r) },

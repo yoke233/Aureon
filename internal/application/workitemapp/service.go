@@ -15,31 +15,34 @@ type initiativeMembershipReader interface {
 }
 
 type Config struct {
-	Store       Store
-	Tx          Tx
-	Scheduler   Scheduler
-	Runner      Runner
-	Bus         EventPublisher
-	BootstrapPR Bootstrapper
+	Store             Store
+	Tx                Tx
+	Scheduler         Scheduler
+	Runner            Runner
+	Bus               EventPublisher
+	BootstrapPR       Bootstrapper
+	BackgroundContext context.Context
 }
 
 type Service struct {
-	store       Store
-	tx          Tx
-	scheduler   Scheduler
-	runner      Runner
-	bus         EventPublisher
-	bootstrapPR Bootstrapper
+	store         Store
+	tx            Tx
+	scheduler     Scheduler
+	runner        Runner
+	bus           EventPublisher
+	bootstrapPR   Bootstrapper
+	backgroundCtx context.Context
 }
 
 func New(cfg Config) *Service {
 	return &Service{
-		store:       cfg.Store,
-		tx:          cfg.Tx,
-		scheduler:   cfg.Scheduler,
-		runner:      cfg.Runner,
-		bus:         cfg.Bus,
-		bootstrapPR: cfg.BootstrapPR,
+		store:         cfg.Store,
+		tx:            cfg.Tx,
+		scheduler:     cfg.Scheduler,
+		runner:        cfg.Runner,
+		bus:           cfg.Bus,
+		bootstrapPR:   cfg.BootstrapPR,
+		backgroundCtx: cfg.BackgroundContext,
 	}
 }
 
@@ -222,7 +225,7 @@ func (s *Service) RunWorkItem(ctx context.Context, workItemID int64) (*RunWorkIt
 	if s.runner == nil {
 		return nil, fmt.Errorf("runner is not configured")
 	}
-	go s.runInBackground(workItemID)
+	go s.runInBackground(s.backgroundContext(), workItemID)
 
 	return &RunWorkItemResult{
 		Queued:  false,
@@ -252,8 +255,7 @@ func (s *Service) CancelWorkItem(ctx context.Context, workItemID int64) error {
 	return err
 }
 
-func (s *Service) runInBackground(workItemID int64) {
-	ctx := context.Background()
+func (s *Service) runInBackground(ctx context.Context, workItemID int64) {
 	if err := s.runner.Run(ctx, workItemID); err != nil && s.bus != nil {
 		s.bus.Publish(ctx, core.Event{
 			Type:       core.EventWorkItemFailed,
@@ -262,6 +264,13 @@ func (s *Service) runInBackground(workItemID int64) {
 			Data:       map[string]any{"error": err.Error()},
 		})
 	}
+}
+
+func (s *Service) backgroundContext() context.Context {
+	if s != nil && s.backgroundCtx != nil {
+		return s.backgroundCtx
+	}
+	return context.Background()
 }
 
 func (s *Service) deleteAggregate(ctx context.Context, workItemID int64) error {

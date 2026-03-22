@@ -24,7 +24,7 @@ import (
 // ACPExecutorConfig configures the ACP action executor.
 type ACPExecutorConfig struct {
 	Registry                 core.AgentRegistry
-	Store                    core.Store
+	Store                    Store
 	Bus                      core.EventBus
 	DefaultWorkDir           string
 	MCPResolver              func(profileID string, agentSupportsSSE bool) []acpproto.McpServer
@@ -509,7 +509,7 @@ func decisionToSignalType(decision string) (core.SignalType, bool) {
 // If not, it parses the agent output for an AI_WORKFLOW_SIGNAL line and creates the
 // ActionSignal internally. This covers network-isolated environments where the agent
 // cannot curl the decision endpoint.
-func tryFallbackSignal(ctx context.Context, store core.Store, bus core.EventBus, auditLogger *audit.Logger, action *core.Action, run *core.Run, replyText, profileID string) {
+func tryFallbackSignal(ctx context.Context, store core.ActionSignalStore, bus core.EventBus, auditLogger *audit.Logger, action *core.Action, run *core.Run, replyText, profileID string) {
 	// Check if a terminal signal was already received via HTTP curl.
 	existing, _ := store.GetLatestActionSignal(ctx, action.ID,
 		core.SignalComplete, core.SignalNeedHelp, core.SignalApprove, core.SignalReject)

@@ -25,7 +25,6 @@ import (
 // WatchRun returns the cached result immediately.
 type LocalSessionManager struct {
 	pool    *ACPSessionPool
-	store   core.Store
 	sandbox v2sandbox.Sandbox
 
 	mu          sync.Mutex
@@ -74,10 +73,9 @@ type localInvocation struct {
 }
 
 // NewLocalSessionManager creates a session manager that runs agents in-process.
-func NewLocalSessionManager(pool *ACPSessionPool, store core.Store, sandbox v2sandbox.Sandbox) *LocalSessionManager {
+func NewLocalSessionManager(pool *ACPSessionPool, sandbox v2sandbox.Sandbox) *LocalSessionManager {
 	return &LocalSessionManager{
 		pool:        pool,
-		store:       store,
 		sandbox:     sandbox,
 		handles:     make(map[string]*localHandle),
 		invocations: make(map[string]*localInvocation),

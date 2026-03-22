@@ -64,6 +64,8 @@ type LeadAgentConfig struct {
 
 	// GC controls workspace resource reclamation.
 	GC GCConfig
+	// BackgroundContext is the application-scoped context used for async chat work.
+	BackgroundContext context.Context
 }
 
 // GCConfig controls workspace resource reclamation for chat sessions.
@@ -196,6 +198,13 @@ func NewLeadAgent(cfg LeadAgentConfig) *LeadAgent {
 		agent.gcOrphanWorkspaces()
 	}
 	return agent
+}
+
+func (l *LeadAgent) backgroundContext() context.Context {
+	if l != nil && l.cfg.BackgroundContext != nil {
+		return l.cfg.BackgroundContext
+	}
+	return context.Background()
 }
 
 // StartGC launches the periodic GC goroutine. Call this after the server is
@@ -395,8 +404,9 @@ func (l *LeadAgent) StartChat(ctx context.Context, req chatapp.Request) (*chatap
 
 	attachments := req.Attachments
 	go func() {
-		if _, runErr := l.runPrompt(context.Background(), publicSessionID, sess, message, attachments); runErr != nil {
-			sess.bridge.PublishData(context.Background(), map[string]any{
+		runCtx := l.backgroundContext()
+		if _, runErr := l.runPrompt(runCtx, publicSessionID, sess, message, attachments); runErr != nil {
+			sess.bridge.PublishData(runCtx, map[string]any{
 				"type":    "error",
 				"content": runErr.Error(),
 			})
@@ -546,7 +556,7 @@ func (l *LeadAgent) endRun(sessionID string) {
 	if pending == nil {
 		delete(l.activeRuns, id)
 	} else {
-		dispatchCtx, dispatchCancel = context.WithCancel(context.Background())
+		dispatchCtx, dispatchCancel = context.WithCancel(l.backgroundContext())
 		l.activeRuns[id] = dispatchCancel
 	}
 	l.activeMu.Unlock()
@@ -567,7 +577,7 @@ func (l *LeadAgent) endRun(sessionID string) {
 		return
 	}
 
-	sess.bridge.PublishData(context.Background(), map[string]any{
+	sess.bridge.PublishData(dispatchCtx, map[string]any{
 		"type": "pending_dispatched",
 	})
 
@@ -585,7 +595,7 @@ func (l *LeadAgent) runPending(ctx context.Context, cancel context.CancelFunc, s
 		SessionId: sess.sessionID,
 		Prompt:    promptBlocks,
 	})
-	sess.bridge.FlushPending(context.Background())
+	sess.bridge.FlushPending(ctx)
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -593,7 +603,7 @@ func (l *LeadAgent) runPending(ctx context.Context, cancel context.CancelFunc, s
 		} else {
 			l.removeSession(sessionID)
 		}
-		sess.bridge.PublishData(context.Background(), map[string]any{
+		sess.bridge.PublishData(ctx, map[string]any{
 			"type":    "error",
 			"content": fmt.Sprintf("pending dispatch failed: %v", err),
 		})
@@ -601,7 +611,7 @@ func (l *LeadAgent) runPending(ctx context.Context, cancel context.CancelFunc, s
 	}
 	if result == nil {
 		l.removeSession(sessionID)
-		sess.bridge.PublishData(context.Background(), map[string]any{
+		sess.bridge.PublishData(ctx, map[string]any{
 			"type":    "error",
 			"content": "empty result from agent",
 		})
@@ -611,14 +621,14 @@ func (l *LeadAgent) runPending(ctx context.Context, cancel context.CancelFunc, s
 	reply := strings.TrimSpace(result.Text)
 	if reply == "" {
 		l.removeSession(sessionID)
-		sess.bridge.PublishData(context.Background(), map[string]any{
+		sess.bridge.PublishData(ctx, map[string]any{
 			"type":    "error",
 			"content": "empty reply from agent",
 		})
 		return
 	}
 
-	sess.bridge.PublishData(context.Background(), map[string]any{"type": "done"})
+	sess.bridge.PublishData(ctx, map[string]any{"type": "done"})
 	l.appendMessage(sessionID, "assistant", reply)
 	l.resetSessionIdle(sessionID, sess)
 }
@@ -735,7 +745,7 @@ func (l *LeadAgent) CancelChat(sessionID string) error {
 	sess := l.sessions[id]
 	l.mu.Unlock()
 	if sess != nil {
-		cancelCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
+		cancelCtx, c := context.WithTimeout(l.backgroundContext(), 3*time.Second)
 		defer c()
 		_ = sess.client.Cancel(cancelCtx, acpproto.CancelNotification{SessionId: sess.sessionID})
 	}
@@ -2001,7 +2011,7 @@ func buildLeadTitle(message string) string {
 // generateSessionTitle uses the LLM to produce a concise title and updates the
 // session catalog + emits a chat.session_title event so the frontend can refresh.
 func (l *LeadAgent) generateSessionTitle(sessionID string, messages []chatapp.Message) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(l.backgroundContext(), 15*time.Second)
 	defer cancel()
 
 	var sb strings.Builder

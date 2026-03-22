@@ -2,7 +2,10 @@ import { create } from "zustand";
 import type { ParsedVscodeTheme } from "@/lib/vscodeTheme";
 import { parseVscodeTheme } from "@/lib/vscodeTheme";
 import {
+  type BundledThemeManifestEntry,
+  getBundledTheme,
   listUserThemes,
+  listBundledThemes,
   getUserTheme as fetchUserThemeJson,
   saveUserTheme as apiSaveTheme,
   deleteUserTheme as apiDeleteTheme,
@@ -31,13 +34,7 @@ export interface StoredVscodeTheme {
 }
 
 /** Entry from /themes/manifest.json (bundled in the binary) */
-export interface BundledThemeEntry {
-  id: string;
-  name: string;
-  type: "dark" | "light";
-  folder: string;
-  description: string;
-}
+export type BundledThemeEntry = BundledThemeManifestEntry;
 
 /** Lightweight entry returned by GET /api/themes (user-saved on disk) */
 export interface UserThemeEntry {
@@ -231,10 +228,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (get().bundledThemes.length > 0) return;
     set({ bundledLoading: true });
     try {
-      const resp = await fetch("/themes/manifest.json");
-      if (!resp.ok) return;
-      const data = (await resp.json()) as { themes: BundledThemeEntry[] };
-      set({ bundledThemes: data.themes ?? [] });
+      const themes = await listBundledThemes();
+      set({ bundledThemes: themes });
     } catch {
       // silent
     } finally {
@@ -251,9 +246,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const entry = get().bundledThemes.find((t) => t.id === id);
     if (!entry) return;
     try {
-      const resp = await fetch(`/themes/${entry.folder}/theme.json`);
-      if (!resp.ok) return;
-      const text = await resp.text();
+      const text = await getBundledTheme(entry.folder);
+      if (!text) return;
       const parsed = parseVscodeTheme(text, `${entry.folder}.json`);
       const stored: StoredVscodeTheme = {
         id: entry.id,

@@ -101,11 +101,12 @@ func (h *Handler) dispatchThreadAgentWork(thread *core.Thread, message *core.Thr
 	}
 
 	go func(profileIDs []string) {
+		ctx := h.backgroundContext()
 		switch mode {
 		case threadMeetingModeConcurrent:
-			h.runConcurrentMeeting(context.Background(), thread, message, profileIDs)
+			h.runConcurrentMeeting(ctx, thread, message, profileIDs)
 		case threadMeetingModeGroupChat:
-			h.runGroupChatMeeting(context.Background(), thread, message, profileIDs)
+			h.runGroupChatMeeting(ctx, thread, message, profileIDs)
 		default:
 			for _, profileID := range profileIDs {
 				h.runDirectThreadDispatch(thread, message, profileID, targetAgentID)
@@ -118,7 +119,7 @@ func (h *Handler) runDirectThreadDispatch(thread *core.Thread, message *core.Thr
 	if h == nil || h.threadPool == nil || thread == nil || message == nil {
 		return
 	}
-	ctx := context.Background()
+	ctx := h.backgroundContext()
 	h.publishThreadThinking(ctx, message.ThreadID, profileID, message.ID)
 	routedMessage := buildDirectThreadDispatchPrompt(message, profileID, targetAgentID)
 	if sendErr := h.threadPool.SendMessage(ctx, message.ThreadID, profileID, routedMessage); sendErr != nil {

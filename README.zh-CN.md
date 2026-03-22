@@ -90,6 +90,12 @@ CGO_ENABLED=0 go build -o ./dist/ai-flow ./cmd/ai-flow
 
 `scripts/test/` 下的 PowerShell 脚本仍可用于 Windows 本地冒烟和手动回归，但 CI 已不再依赖它们。
 
+本地执行 `cmd/acp-probe` 的 bootstrap/probe 测试时，建议把 dev 二进制构建到运行态目录，而不是仓库根目录：
+
+```powershell
+pwsh -NoProfile -File .\scripts\dev\build-ai-flow.ps1
+```
+
 ## CI/CD
 
 现在仓库的 GitHub Actions 已覆盖前后端主流水线：

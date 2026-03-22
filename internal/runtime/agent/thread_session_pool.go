@@ -51,11 +51,12 @@ type TokenGenerator interface {
 // Unlike ACPSessionPool (which is tied to WorkItem lifecycle), ThreadSessionPool
 // is driven by user invite/remove actions and has no Action/Run concept.
 type ThreadSessionPool struct {
-	store                    core.Store
+	store                    ThreadSessionStore
 	bus                      core.EventBus
 	registry                 core.AgentRegistry
 	dataDir                  string
 	threadSharedBootTemplate string
+	backgroundCtx            context.Context
 
 	// Signal config: injected into agent launch env for thread agent callbacks.
 	serverAddr    string
@@ -75,7 +76,7 @@ const (
 )
 
 // NewThreadSessionPool creates a pool for managing Thread agent ACP sessions.
-func NewThreadSessionPool(store core.Store, bus core.EventBus, registry core.AgentRegistry, dataDir string) *ThreadSessionPool {
+func NewThreadSessionPool(store ThreadSessionStore, bus core.EventBus, registry core.AgentRegistry, dataDir string) *ThreadSessionPool {
 	return &ThreadSessionPool{
 		store:    store,
 		bus:      bus,
@@ -83,6 +84,13 @@ func NewThreadSessionPool(store core.Store, bus core.EventBus, registry core.Age
 		dataDir:  strings.TrimSpace(dataDir),
 		sessions: make(map[threadSessionKey]*threadPooledSession),
 	}
+}
+
+func (p *ThreadSessionPool) SetBackgroundContext(ctx context.Context) {
+	if p == nil {
+		return
+	}
+	p.backgroundCtx = ctx
 }
 
 // SetSignalConfig configures the server address and token generator for agent signal injection.
@@ -231,12 +239,19 @@ func (p *ThreadSessionPool) InviteAgent(ctx context.Context, threadID int64, pro
 // bootSessionBackground runs the full ACP boot sequence in a background
 // goroutine and publishes success/failure events via the EventBus.
 func (p *ThreadSessionPool) bootSessionBackground(member *core.ThreadMember, profile *core.AgentProfile, priorSummary string, priorSessionID string) {
-	bootCtx, cancel := context.WithTimeout(context.Background(), threadBootTimeout)
+	bootCtx, cancel := context.WithTimeout(p.backgroundContext(), threadBootTimeout)
 	defer cancel()
 	if _, err := p.bootSession(bootCtx, member, profile, priorSummary, priorSessionID); err != nil {
 		slog.Warn("thread pool: background boot failed",
 			"thread_id", member.ThreadID, "profile", profile.ID, "error", err)
 	}
+}
+
+func (p *ThreadSessionPool) backgroundContext() context.Context {
+	if p != nil && p.backgroundCtx != nil {
+		return p.backgroundCtx
+	}
+	return context.Background()
 }
 
 func (p *ThreadSessionPool) bootSession(ctx context.Context, member *core.ThreadMember, profile *core.AgentProfile, priorSummary string, priorSessionID string) (*core.ThreadMember, error) {

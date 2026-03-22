@@ -90,6 +90,12 @@ CGO_ENABLED=0 go build -o ./dist/ai-flow ./cmd/ai-flow
 
 PowerShell scripts under `scripts/test/` remain available for local Windows smoke and manual regression, but CI no longer depends on them.
 
+For local `cmd/acp-probe` bootstrap tests, build the dev binary into the runtime sandbox instead of the repository root:
+
+```powershell
+pwsh -NoProfile -File .\scripts\dev\build-ai-flow.ps1
+```
+
 ## CI/CD
 
 GitHub Actions now covers the full frontend/backend pipeline:

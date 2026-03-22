@@ -361,6 +361,64 @@ func TestThreadPoolSendMessage(t *testing.T) {
 	}
 }
 
+func TestThreadPoolInviteAgentUsesBackgroundContext(t *testing.T) {
+	profile := newTestProfile("agent-bg")
+
+	store := newThreadSessionPoolTestStore(t)
+	bus := membus.NewBus()
+	dataDir := t.TempDir()
+
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	defer backgroundCancel()
+
+	pool := NewThreadSessionPool(store, bus, &mockRegistry{
+		profiles: map[string]*core.AgentProfile{profile.ID: profile},
+	}, dataDir)
+	pool.SetBackgroundContext(backgroundCtx)
+	defer pool.Close()
+
+	observedCtx := make(chan context.Context, 1)
+	bootstrapDone := make(chan struct{})
+	pool.bootstrapFn = func(ctx context.Context, _ acpclient.BootstrapConfig) (*acpclient.BootstrapResult, error) {
+		observedCtx <- ctx
+		<-ctx.Done()
+		close(bootstrapDone)
+		return nil, ctx.Err()
+	}
+
+	threadID, err := store.CreateThread(context.Background(), &core.Thread{
+		Title: "Background Thread", OwnerID: "owner-1", Status: core.ThreadActive,
+	})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	if _, err := pool.InviteAgent(reqCtx, threadID, profile.ID); err != nil {
+		t.Fatalf("InviteAgent: %v", err)
+	}
+
+	var bootCtx context.Context
+	select {
+	case bootCtx = <-observedCtx:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for bootstrap context")
+	}
+
+	reqCancel()
+	time.Sleep(20 * time.Millisecond)
+	if err := bootCtx.Err(); err != nil {
+		t.Fatalf("bootstrap context should outlive request context, got %v", err)
+	}
+
+	backgroundCancel()
+	select {
+	case <-bootstrapDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background context cancellation")
+	}
+}
+
 func TestThreadPoolTokenTracking(t *testing.T) {
 	server := &fakeACPServer{replyText: "token reply"}
 	profile := newTestProfile("agent-tokens")

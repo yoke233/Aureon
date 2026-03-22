@@ -52,11 +52,17 @@ func startBootstrapLifecycle(
 		if lifecycle.probeWatchCancel != nil {
 			lifecycle.probeWatchCancel()
 		}
+		if base.appCancel != nil {
+			base.appCancel()
+		}
 		if base.runtimeManager != nil {
 			_ = base.runtimeManager.Close()
 		}
 		if flow.sessionMgr != nil {
 			flow.sessionMgr.Close()
+		}
+		if apiStack.threadPool != nil {
+			apiStack.threadPool.Close()
 		}
 		if apiStack.leadAgent != nil {
 			apiStack.leadAgent.Shutdown()

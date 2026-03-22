@@ -27,7 +27,7 @@ func buildSessionManager(
 	}
 
 	local := func() runtimeapp.SessionManager {
-		return agentruntime.NewLocalSessionManager(acpPool, store, sb)
+		return agentruntime.NewLocalSessionManager(acpPool, sb)
 	}
 
 	if smMode == "nats" {
@@ -46,6 +46,7 @@ func buildSessionManager(
 }
 
 func buildNATSSessionManager(cfg *config.Config, store core.Store, _ string) (*agentruntime.NATSSessionManager, error) {
+	_ = store
 	if cfg == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
@@ -73,7 +74,6 @@ func buildNATSSessionManager(cfg *config.Config, store core.Store, _ string) (*a
 		NATSConn:     nc,
 		StreamPrefix: prefix,
 		ServerID:     strings.TrimSpace(cfg.Runtime.SessionManager.ServerID),
-		Store:        store,
 	})
 }
 

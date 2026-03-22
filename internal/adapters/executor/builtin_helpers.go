@@ -12,12 +12,9 @@ import (
 	"github.com/yoke233/zhanggui/internal/core"
 )
 
-func storeBuiltinArtifact(ctx context.Context, store core.Store, bus core.EventBus, action *core.Action, runRec *core.Run, markdown string, metadata map[string]any) error {
+func storeBuiltinArtifact(ctx context.Context, bus core.EventBus, action *core.Action, runRec *core.Run, markdown string, metadata map[string]any) error {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if store == nil {
-		return fmt.Errorf("storeBuiltinArtifact: store is nil")
 	}
 	if action == nil || runRec == nil {
 		return fmt.Errorf("storeBuiltinArtifact: action/run is nil")

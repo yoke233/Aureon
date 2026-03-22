@@ -9,7 +9,13 @@ import {
   type ReactNode,
 } from "react";
 import { createApiClient, type ApiClient } from "@/lib/apiClient";
+import {
+  clearStoredApiToken,
+  persistStoredApiToken,
+  readStoredApiToken,
+} from "@/lib/authToken";
 import { fetchDesktopBootstrap, isDesktop } from "@/lib/desktopBridge";
+import { createHttpTransport } from "@/lib/httpTransport";
 import { getErrorMessage } from "@/lib/v2Workbench";
 import { createWsClient, type WsClient } from "@/lib/wsClient";
 import type { Project } from "@/types/apiV2";
@@ -21,7 +27,6 @@ const DEFAULT_API_BASE_URL =
 const DEFAULT_WS_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
   "/api";
-const TOKEN_STORAGE_KEY = "ai-workflow-api-token";
 const PROJECT_STORAGE_KEY = "ai-workflow-selected-project-id";
 
 type AuthStatus = "checking" | "ready" | "error";
@@ -49,25 +54,6 @@ interface WorkbenchContextValue {
 }
 
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
-
-const readTokenFromStorage = (): string | null => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(TOKEN_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-  const token = raw.trim();
-  return token.length > 0 ? token : null;
-};
-
-const persistTokenToStorage = (token: string): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-};
 
 const readSelectedProjectId = (): number | null => {
   if (typeof window === "undefined") {
@@ -101,7 +87,7 @@ const resolveTokenFromLocation = (): ResolvedToken => {
   if (queryToken.length > 0) {
     return { token: queryToken, source: "query" };
   }
-  const storageToken = readTokenFromStorage();
+  const storageToken = readStoredApiToken();
   if (storageToken) {
     return { token: storageToken, source: "storage" };
   }
@@ -121,17 +107,10 @@ interface ProviderProps {
   children: ReactNode;
 }
 
-const clearTokenFromStorage = (): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-};
-
 export function WorkbenchProvider({ children }: ProviderProps) {
   const tokenRef = useRef<string | null>(null);
-  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
-  const [wsBaseUrl, setWsBaseUrl] = useState(DEFAULT_WS_BASE_URL);
+  const apiBaseUrl = DEFAULT_API_BASE_URL;
+  const wsBaseUrl = DEFAULT_WS_BASE_URL;
   const [loginAttempt, setLoginAttempt] = useState(0);
 
   const apiClient = useMemo(
@@ -195,24 +174,13 @@ export function WorkbenchProvider({ children }: ProviderProps) {
     let cancelled = false;
     const runningInDesktop = isDesktop();
 
-    const checkAuthRequired = async (baseUrl: string): Promise<boolean> => {
-      try {
-        const res = await fetch(`${baseUrl}/auth/status`);
-        if (res.ok) {
-          const data = await res.json();
-          return data.auth_required !== false;
-        }
-      } catch {
-        // If endpoint unavailable, assume auth required for safety.
-      }
-      return true;
-    };
-
     const bootstrap = async (): Promise<void> => {
       let token = resolvedToken.token;
       let tokenSource = resolvedToken.source;
       const effectiveApiBaseUrl = apiBaseUrl;
-      const effectiveWsBaseUrl = wsBaseUrl;
+      const bootstrapTransport = createHttpTransport({
+        baseUrl: effectiveApiBaseUrl,
+      });
 
       if (runningInDesktop) {
         try {
@@ -222,7 +190,7 @@ export function WorkbenchProvider({ children }: ProviderProps) {
           }
           token = desktop.token;
           tokenSource = "storage";
-          persistTokenToStorage(desktop.token);
+          persistStoredApiToken(desktop.token);
         } catch (error) {
           if (!cancelled) {
             setAuthStatus("error");
@@ -233,9 +201,23 @@ export function WorkbenchProvider({ children }: ProviderProps) {
       }
 
       // Check if server requires authentication at all.
-      const authRequired = await checkAuthRequired(effectiveApiBaseUrl);
+      let authRequired = true;
+      try {
+        const authStatus = await bootstrapTransport.request<{ auth_required?: boolean }>({
+          path: "/auth/status",
+          responseType: "json",
+          omitAuth: true,
+        });
+        authRequired = authStatus.auth_required !== false;
+      } catch {
+        // If endpoint unavailable, assume auth required for safety.
+      }
       if (cancelled) {
         return;
+      }
+
+      if (tokenSource === "query") {
+        cleanupTokenFromUrl();
       }
 
       if (!authRequired) {
@@ -244,11 +226,7 @@ export function WorkbenchProvider({ children }: ProviderProps) {
         setAuthStatus("checking");
         setAuthError(null);
         try {
-          const noAuthClient = createApiClient({
-            baseUrl: effectiveApiBaseUrl,
-            getToken: () => null,
-          });
-          const listed = await noAuthClient.listProjects({ limit: 200, offset: 0 });
+          const listed = await apiClient.listProjects({ limit: 200, offset: 0 });
           if (cancelled) {
             return;
           }
@@ -277,24 +255,18 @@ export function WorkbenchProvider({ children }: ProviderProps) {
       setAuthError(null);
 
       try {
-        const bootstrapClient = createApiClient({
-          baseUrl: effectiveApiBaseUrl,
-          getToken: () => token,
-        });
-        const listed = await bootstrapClient.listProjects({ limit: 200, offset: 0 });
+        const listed = await apiClient.listProjects({ limit: 200, offset: 0 });
         if (cancelled) {
           return;
         }
         applyProjects(Array.isArray(listed) ? listed : []);
         if (tokenSource === "query") {
-          persistTokenToStorage(token);
-          cleanupTokenFromUrl();
+          persistStoredApiToken(token);
         }
-        setApiBaseUrl(effectiveApiBaseUrl);
-        setWsBaseUrl(effectiveWsBaseUrl);
         setAuthStatus("ready");
       } catch (error) {
         if (!cancelled) {
+          tokenRef.current = null;
           setProjects([]);
           setAuthStatus("error");
           setAuthError(`Token 校验失败：${getErrorMessage(error)}`);
@@ -306,7 +278,7 @@ export function WorkbenchProvider({ children }: ProviderProps) {
     return () => {
       cancelled = true;
     };
-  }, [apiBaseUrl, applyProjects, wsBaseUrl, loginAttempt]);
+  }, [apiBaseUrl, apiClient, applyProjects, loginAttempt]);
 
   useEffect(() => {
     if (authStatus !== "ready") {
@@ -324,16 +296,18 @@ export function WorkbenchProvider({ children }: ProviderProps) {
   }, []);
 
   const login = useCallback((token: string) => {
-    persistTokenToStorage(token);
+    persistStoredApiToken(token);
     setLoginAttempt((n) => n + 1);
   }, []);
 
   const logout = useCallback(() => {
     tokenRef.current = null;
-    clearTokenFromStorage();
-    setAuthStatus("error");
+    clearStoredApiToken();
+    setAuthStatus("checking");
     setAuthError(null);
     setProjects([]);
+    setProjectsError(null);
+    setLoginAttempt((n) => n + 1);
   }, []);
 
   const value = useMemo<WorkbenchContextValue>(() => {

@@ -68,7 +68,7 @@ func (s *switchingEventHandler) HandleSessionUpdate(ctx context.Context, update 
 // ACPSessionPool caches ACP processes + sessions per (work item, agent profile).
 // It enables session reuse (prompt caching + conversational continuity).
 type ACPSessionPool struct {
-	store core.Store
+	store AgentContextStore
 	bus   core.EventBus
 
 	mu              sync.Mutex
@@ -79,7 +79,7 @@ type ACPSessionPool struct {
 	sub *core.Subscription
 }
 
-func NewACPSessionPool(store core.Store, bus core.EventBus) *ACPSessionPool {
+func NewACPSessionPool(store AgentContextStore, bus core.EventBus) *ACPSessionPool {
 	p := &ACPSessionPool{
 		store:    store,
 		bus:      bus,

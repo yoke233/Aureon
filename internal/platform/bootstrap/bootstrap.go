@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -28,9 +29,11 @@ type AgentSignalConfig struct {
 // Build creates the runtime store, event bus, engine, event persister, and API handler.
 // Returns the store (for lifecycle), the agent registry, runtime manager, cleanup func, and route registrar.
 func Build(storePath string, roleResolver *acpclient.RoleResolver, bootstrapCfg *config.Config, scmTokens SCMTokens, upgradeFn executoradapter.UpgradeFunc, signalCfg *AgentSignalConfig) (*sqlite.Store, core.AgentRegistry, *configruntime.Manager, func(), func(chi.Router)) {
+	appCtx, appCancel := context.WithCancel(context.Background())
 	fmt.Println("[startup] bootstrap: init base")
-	base, err := initBootstrapBase(storePath, roleResolver, bootstrapCfg)
+	base, err := initBootstrapBase(appCtx, appCancel, storePath, roleResolver, bootstrapCfg)
 	if err != nil {
+		appCancel()
 		slog.Error("bootstrap: init failed", "error", err)
 		return nil, nil, nil, nil, nil
 	}
@@ -38,6 +41,7 @@ func Build(storePath string, roleResolver *acpclient.RoleResolver, bootstrapCfg 
 	fmt.Println("[startup] bootstrap: build flow stack")
 	flow, err := buildFlowStack(base, bootstrapCfg, scmTokens, upgradeFn)
 	if err != nil {
+		appCancel()
 		slog.Error("bootstrap: flow assembly failed", "error", err)
 		base.persister.Stop()
 		base.store.Close()

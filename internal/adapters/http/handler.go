@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -38,6 +39,7 @@ type Handler struct {
 	inspectionEngine    *inspectionapp.Engine
 	dataDir             string
 	drivers             DriverConfigService
+	backgroundCtx       context.Context
 }
 
 // NewHandler creates the workflow API handler.
@@ -141,6 +143,18 @@ func WithDataDir(dir string) HandlerOption {
 // WithDriverConfigService sets the runtime-backed driver config service.
 func WithDriverConfigService(service DriverConfigService) HandlerOption {
 	return func(h *Handler) { h.drivers = service }
+}
+
+// WithBackgroundContext sets the application-scoped context used by async adapter work.
+func WithBackgroundContext(ctx context.Context) HandlerOption {
+	return func(h *Handler) { h.backgroundCtx = ctx }
+}
+
+func (h *Handler) backgroundContext() context.Context {
+	if h != nil && h.backgroundCtx != nil {
+		return h.backgroundCtx
+	}
+	return context.Background()
 }
 
 // Register mounts all workflow routes onto the given chi router.

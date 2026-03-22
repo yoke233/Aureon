@@ -4,6 +4,8 @@ This folder stores reusable one-shot test scripts for local backend/frontend reg
 
 GitHub Actions now runs native `go` / `npm` commands directly. These PowerShell scripts remain as a Windows-friendly local regression layer and are no longer the CI source of truth.
 
+The thin wrapper scripts now delegate to `runner.ps1`, which centralizes the shared setup, logging, and orchestration logic while keeping the existing file entrypoints stable.
+
 ## Safety Defaults
 
 - No infinite loops.

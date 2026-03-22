@@ -366,7 +366,7 @@ func setupRealEnv(t *testing.T) *realEnv {
 
 	// Build the ACP execution stack: Pool → SessionManager → Executor.
 	acpPool := agentruntime.NewACPSessionPool(store, bus)
-	sessionMgr := agentruntime.NewLocalSessionManager(acpPool, store, nil) // no sandbox for test
+	sessionMgr := agentruntime.NewLocalSessionManager(acpPool, nil) // no sandbox for test
 	t.Cleanup(sessionMgr.Close)
 
 	executor := executoradapter.NewACPActionExecutor(executoradapter.ACPExecutorConfig{

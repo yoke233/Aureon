@@ -4,6 +4,8 @@ artifacts/
 .tmp/
 .claude/
 .agents/
+.harness-lock/
+.harness-lock.released.*/
 /ai-flow
 /vendor-sync
 /data.db
@@ -13,6 +15,8 @@ artifacts/
 .ai-workflow/
 node_modules/
 *.tsbuildinfo
+/vitest-*.log
+/pencil-new.pen
 
 # Go
 *.exe

@@ -17,14 +17,14 @@ func TestStoreBuiltinArtifact(t *testing.T) {
 	sub := bus.Subscribe(core.SubscribeOpts{BufferSize: 4})
 	defer sub.Cancel()
 
-	if err := storeBuiltinArtifact(context.Background(), nil, nil, step, execRec, "done", nil); err == nil {
-		t.Fatal("expected nil store to fail")
+	if err := storeBuiltinArtifact(context.Background(), nil, nil, execRec, "done", nil); err == nil {
+		t.Fatal("expected nil action to fail")
 	}
-	if err := storeBuiltinArtifact(context.Background(), &noopStore{}, nil, nil, execRec, "done", nil); err == nil {
-		t.Fatal("expected nil step to fail")
+	if err := storeBuiltinArtifact(context.Background(), nil, step, nil, "done", nil); err == nil {
+		t.Fatal("expected nil run to fail")
 	}
 
-	err := storeBuiltinArtifact(context.Background(), &noopStore{}, bus, step, execRec, "  done  ", map[string]any{"source": "builtin"})
+	err := storeBuiltinArtifact(context.Background(), bus, step, execRec, "  done  ", map[string]any{"source": "builtin"})
 	if err != nil {
 		t.Fatalf("storeBuiltinArtifact() error = %v", err)
 	}

@@ -19,6 +19,7 @@ cd "$(dirname "$0")/.."
 PORT="${PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 BUILD_TAGS="${BUILD_TAGS:-dev}"
+BINARY_PATH="${AI_FLOW_BINARY_PATH:-.runtime/bin/ai-flow}"
 
 MODE="all"
 USE_BUILD=false
@@ -65,9 +66,9 @@ check_deps() {
 start_backend() {
     if $USE_BUILD; then
         echo "==> Building binary (tags: $BUILD_TAGS)..."
-        go build -tags "$BUILD_TAGS" -o ./ai-flow ./cmd/ai-flow
+        BUILD_TAGS="$BUILD_TAGS" bash scripts/dev/build-ai-flow.sh "$BINARY_PATH"
         echo "==> Starting ai-flow binary on :$PORT"
-        ./ai-flow server --port "$PORT" &
+        "$BINARY_PATH" server --port "$PORT" &
         BACKEND_PID=$!
     else
         echo "==> Starting backend (go run, tags: $BUILD_TAGS) on :$PORT"

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/yoke233/zhanggui/internal/adapters/store/sqlite"
 	"github.com/yoke233/zhanggui/internal/core"
@@ -42,6 +43,19 @@ type bootstrapStub struct {
 	calls        int
 	lastWorkItem int64
 }
+
+type runnerStub struct {
+	run func(context.Context, int64) error
+}
+
+func (r *runnerStub) Run(ctx context.Context, workItemID int64) error {
+	if r.run != nil {
+		return r.run(ctx, workItemID)
+	}
+	return nil
+}
+
+func (r *runnerStub) Cancel(context.Context, int64) error { return nil }
 
 func (b *bootstrapStub) BootstrapPRWorkItem(_ context.Context, workItemID int64) error {
 	b.calls++
@@ -480,6 +494,88 @@ func TestServiceDeleteWorkItemRollsBackWhenAggregateDeleteFails(t *testing.T) {
 	}
 	if feature.WorkItemID == nil || *feature.WorkItemID != workItemID {
 		t.Fatalf("expected feature entry work item link to roll back, got %+v", feature)
+	}
+}
+
+func TestServiceRunWorkItemUsesBackgroundContext(t *testing.T) {
+	store := newWorkItemAppTestStore(t)
+	ctx := context.Background()
+
+	projectID, err := store.CreateProject(ctx, &core.Project{Name: "project-run"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	workItemID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		ProjectID: &projectID,
+		Title:     "run me",
+		Status:    core.WorkItemOpen,
+		Priority:  core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create work item: %v", err)
+	}
+	if _, err := store.CreateAction(ctx, &core.Action{
+		WorkItemID: workItemID,
+		Name:       "exec",
+		Type:       core.ActionExec,
+		Status:     core.ActionPending,
+		Position:   0,
+	}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	defer backgroundCancel()
+
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	defer reqCancel()
+
+	observed := make(chan context.Context, 1)
+	done := make(chan struct{})
+	runner := &runnerStub{
+		run: func(runCtx context.Context, workItemID int64) error {
+			if workItemID == 0 {
+				t.Fatal("expected work item ID")
+			}
+			observed <- runCtx
+			<-runCtx.Done()
+			close(done)
+			return runCtx.Err()
+		},
+	}
+
+	svc := New(Config{
+		Store:             store,
+		Runner:            runner,
+		BackgroundContext: backgroundCtx,
+	})
+
+	result, err := svc.RunWorkItem(reqCtx, workItemID)
+	if err != nil {
+		t.Fatalf("RunWorkItem: %v", err)
+	}
+	if result == nil || result.Queued {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+
+	var runCtx context.Context
+	select {
+	case runCtx = <-observed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for runner context")
+	}
+
+	reqCancel()
+	time.Sleep(20 * time.Millisecond)
+	if err := runCtx.Err(); err != nil {
+		t.Fatalf("runner context should outlive request context, got %v", err)
+	}
+
+	backgroundCancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background context cancellation")
 	}
 }
 

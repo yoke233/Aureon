@@ -36,8 +36,8 @@ type ExecutorWorkerConfig struct {
 	// If empty, the worker consumes from all agent types ("*").
 	AgentTypes []string
 
-	// Store is used for agent context persistence.
-	Store core.Store
+	// Store is used for run route + agent context persistence.
+	Store RunRouteStore
 
 	// Registry resolves agent profiles and drivers.
 	Registry core.AgentRegistry

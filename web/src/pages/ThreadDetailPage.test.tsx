@@ -129,24 +129,43 @@ function renderPage(initialEntry = "/threads/1") {
 }
 
 describe("ThreadDetailPage", () => {
+  const rafTimers = new Map<number, number>();
+  let rafHandleCounter = 0;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    rafTimers.clear();
+    rafHandleCounter = 0;
     void i18n.changeLanguage("zh-CN");
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
     });
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
-      window.setTimeout(() => cb(performance.now()), 0),
-    );
-    vi.stubGlobal("cancelAnimationFrame", (id: number) =>
-      window.clearTimeout(id),
-    );
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      const rafID = ++rafHandleCounter;
+      const timeoutID = window.setTimeout(() => {
+        rafTimers.delete(rafID);
+        cb(performance.now());
+      }, 0);
+      rafTimers.set(rafID, timeoutID);
+      return rafID;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      const timeoutID = rafTimers.get(id);
+      if (timeoutID != null) {
+        window.clearTimeout(timeoutID);
+        rafTimers.delete(id);
+      }
+    });
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     cleanup();
+    for (const timeoutID of rafTimers.values()) {
+      window.clearTimeout(timeoutID);
+    }
+    rafTimers.clear();
+    vi.unstubAllGlobals();
   });
 
   it("进入页面订阅 thread，并通过 thread.send + 实时事件更新消息列表", async () => {

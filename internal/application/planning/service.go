@@ -92,7 +92,7 @@ func (s *Service) Generate(ctx context.Context, input GenerateInput) (*Generated
 
 // Materialize creates Actions in the store for a given work item from a GeneratedDAG.
 // It delegates to the package-level MaterializeDAG function.
-func (s *Service) Materialize(ctx context.Context, store core.Store, workItemID int64, dag *GeneratedDAG) ([]*core.Action, error) {
+func (s *Service) Materialize(ctx context.Context, store ActionMaterializer, workItemID int64, dag *GeneratedDAG) ([]*core.Action, error) {
 	return MaterializeDAG(ctx, store, workItemID, dag)
 }
 

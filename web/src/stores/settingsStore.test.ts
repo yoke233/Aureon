@@ -7,6 +7,8 @@ vi.mock("@/lib/themeApi", () => ({
   getUserTheme: vi.fn().mockResolvedValue(null),
   saveUserTheme: vi.fn().mockResolvedValue(true),
   deleteUserTheme: vi.fn().mockResolvedValue(true),
+  listBundledThemes: vi.fn().mockResolvedValue([]),
+  getBundledTheme: vi.fn().mockResolvedValue(null),
 }));
 
 describe("settingsStore", () => {
@@ -108,5 +110,61 @@ describe("settingsStore", () => {
     localStorage.setItem("ai-workflow-settings", JSON.stringify({ theme: "vsc-test", fontSize: "md" }));
     const { useSettingsStore } = await import("./settingsStore");
     expect(useSettingsStore.getState().theme).toBe("vsc-test");
+  });
+
+  it("loadBundledManifest delegates to themeApi", async () => {
+    const { useSettingsStore } = await import("./settingsStore");
+    const { listBundledThemes } = await import("@/lib/themeApi");
+    vi.mocked(listBundledThemes).mockResolvedValueOnce([
+      {
+        id: "twilight",
+        name: "Twilight",
+        type: "dark",
+        folder: "twilight",
+        description: "Bundled",
+      },
+    ]);
+
+    await useSettingsStore.getState().loadBundledManifest();
+
+    expect(listBundledThemes).toHaveBeenCalledTimes(1);
+    expect(useSettingsStore.getState().bundledThemes).toEqual([
+      expect.objectContaining({ id: "twilight", folder: "twilight" }),
+    ]);
+  });
+
+  it("activateBundledTheme reads theme content through themeApi", async () => {
+    const { useSettingsStore } = await import("./settingsStore");
+    const { getBundledTheme } = await import("@/lib/themeApi");
+    useSettingsStore.setState({
+      bundledThemes: [
+        {
+          id: "twilight",
+          name: "Twilight",
+          type: "dark",
+          folder: "twilight",
+          description: "Bundled",
+        },
+      ],
+    });
+    vi.mocked(getBundledTheme).mockResolvedValueOnce(
+      JSON.stringify({
+        name: "Twilight",
+        type: "dark",
+        colors: {
+          "editor.background": "#1e1e1e",
+          "editor.foreground": "#d4d4d4",
+          "button.background": "#007acc",
+          "focusBorder": "#007acc",
+          "panel.border": "#444444",
+        },
+      }),
+    );
+
+    await useSettingsStore.getState().activateBundledTheme("twilight");
+
+    expect(getBundledTheme).toHaveBeenCalledWith("twilight");
+    expect(useSettingsStore.getState().theme).toBe("twilight");
+    expect(useSettingsStore.getState().bundledThemeCache.twilight).toBeDefined();
   });
 });

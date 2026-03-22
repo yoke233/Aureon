@@ -13,7 +13,7 @@ import (
 // It stores a small markdown artifact and publishes a single "done" agent_output event.
 //
 // Intended for local smoke tests and CI where external agent credentials are unavailable.
-func NewMockActionExecutor(store core.Store, bus core.EventBus) flowapp.ActionExecutor {
+func NewMockActionExecutor(bus core.EventBus) flowapp.ActionExecutor {
 	return func(ctx context.Context, action *core.Action, run *core.Run) error {
 		workDir := ""
 		if ws := flowapp.WorkspaceFromContext(ctx); ws != nil {

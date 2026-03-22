@@ -16,10 +16,7 @@ import (
 // The string argument is the absolute path to the newly built binary.
 type UpgradeFunc func(binaryPath string)
 
-func runBuiltinSelfUpgrade(ctx context.Context, store core.Store, bus core.EventBus, action *core.Action, run *core.Run, upgradeFn UpgradeFunc) error {
-	if store == nil {
-		return fmt.Errorf("builtin self_upgrade: store is nil")
-	}
+func runBuiltinSelfUpgrade(ctx context.Context, bus core.EventBus, action *core.Action, run *core.Run, upgradeFn UpgradeFunc) error {
 	if upgradeFn == nil {
 		return fmt.Errorf("builtin self_upgrade: upgrade function not configured (restart not supported)")
 	}
@@ -127,7 +124,7 @@ func runBuiltinSelfUpgrade(ctx context.Context, store core.Store, bus core.Event
 	}
 	markdown := fmt.Sprintf("self_upgrade: built %s at %s (pulled=%v)", headSHA[:minLen(headSHA, 8)], binaryOutput, pulled)
 
-	if err := storeBuiltinArtifact(ctx, store, bus, action, run, markdown, result); err != nil {
+	if err := storeBuiltinArtifact(ctx, bus, action, run, markdown, result); err != nil {
 		return fmt.Errorf("builtin self_upgrade: failed to store artifact: %w", err)
 	}
 

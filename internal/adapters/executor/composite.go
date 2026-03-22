@@ -11,8 +11,7 @@ import (
 
 // CompositeStepExecutorConfig wires builtin actions with an ACP fallback executor.
 type CompositeStepExecutorConfig struct {
-	Store core.Store
-	Bus   core.EventBus
+	Bus core.EventBus
 
 	SCMTokens flowapp.SCMTokens
 
@@ -44,11 +43,11 @@ func NewCompositeActionExecutor(cfg CompositeStepExecutorConfig) flowapp.ActionE
 		case "":
 			// fallthrough to ACP
 		case "git_commit_push":
-			return runBuiltinGitCommitPush(ctx, cfg.Store, cfg.Bus, cfg.SCMTokens, action, run)
+			return runBuiltinGitCommitPush(ctx, cfg.Bus, cfg.SCMTokens, action, run)
 		case "scm_open_pr", "github_open_pr":
-			return runBuiltinSCMOpenPR(ctx, cfg.Store, cfg.Bus, cfg.SCMTokens, action, run)
+			return runBuiltinSCMOpenPR(ctx, cfg.Bus, cfg.SCMTokens, action, run)
 		case "self_upgrade":
-			return runBuiltinSelfUpgrade(ctx, cfg.Store, cfg.Bus, action, run, cfg.UpgradeFunc)
+			return runBuiltinSelfUpgrade(ctx, cfg.Bus, action, run, cfg.UpgradeFunc)
 		default:
 			return fmt.Errorf("unknown builtin executor: %s", builtin)
 		}

@@ -9,9 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-
-	httpx "github.com/yoke233/zhanggui/internal/adapters/http/server"
-	"github.com/yoke233/zhanggui/internal/platform/bootstrap"
 )
 
 func RunServer(args []string) error {
@@ -22,67 +19,37 @@ func RunServer(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("[startup] loading config")
-	cfg, dataDir, secrets, err := LoadConfig()
+	fmt.Println("[startup] building runtime")
+	runtimeHost, err := BootstrapHTTPRuntime(HTTPRuntimeOptions{
+		Command:              "server",
+		ListenPort:           port,
+		WithSignalServerAddr: true,
+	})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("[startup] data dir: %s\n", dataDir)
-	closeLog, err := InitAppLogger(dataDir, "server")
-	if err != nil {
-		return err
-	}
-	defer closeLog()
-	serverPort := resolveServerPort(port, cfg.Server.Port)
-	listenAddr := buildServerAddress(cfg.Server.Host, serverPort)
+	defer runtimeHost.Close()
+	fmt.Printf("[startup] data dir: %s\n", runtimeHost.DataDir)
+	listenAddr := buildServerAddress(runtimeHost.Config.Server.Host, runtimeHost.ServerPort)
 	fmt.Println("[startup] resolving frontend assets")
 	frontendFS, err := ResolveFrontendFS()
 	if err != nil {
 		return err
 	}
-	tokenRegistry := httpx.NewTokenRegistry(secrets.Tokens)
-	signalCfg := &bootstrap.AgentSignalConfig{
-		TokenRegistry: tokenRegistry,
-		ServerAddr:    buildServerBaseURL(cfg.Server.Host, serverPort),
-	}
-	fmt.Println("[startup] building runtime")
-	store, _, runtimeManager, cleanup, registrar := bootstrap.Build(ExpandStorePath(cfg.Store.Path, dataDir), nil, cfg, bootstrap.SCMTokens{
-		GitHub: strings.TrimSpace(secrets.GitHub.PAT),
-		Codeup: strings.TrimSpace(secrets.Codeup.PAT),
-	}, nil, signalCfg)
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if store == nil || registrar == nil {
-		return fmt.Errorf("bootstrap server failed")
-	}
 	fmt.Println("[startup] creating http server")
-	skipAuth := !cfg.Server.IsAuthRequired()
-	srv := httpx.NewServer(httpx.Config{
-		Addr:           listenAddr,
-		Auth:           tokenRegistry,
-		Frontend:       frontendFS,
-		RouteRegistrar: registrar,
-		SkipAuth:       skipAuth,
-	})
+	srv := runtimeHost.NewServer(listenAddr, frontendFS, false)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Start() }()
 	fmt.Printf("Server started on %s (api: /api).\n", listenAddr)
-	if skipAuth {
+	if runtimeHost.SkipAuth {
 		fmt.Println("Auth: disabled (auth_required = false).")
-	} else if adminToken := secrets.AdminToken(); adminToken != "" {
-		fmt.Printf("Admin token: %s\n", adminToken)
+	} else if runtimeHost.AdminToken != "" {
+		fmt.Printf("Admin token: %s\n", runtimeHost.AdminToken)
 	}
 	select {
 	case err := <-errCh:
-		if runtimeManager != nil {
-			_ = runtimeManager.Close()
-		}
 		return err
 	case <-ctx.Done():
-		if runtimeManager != nil {
-			_ = runtimeManager.Close()
-		}
 		return srv.Shutdown(context.Background())
 	}
 }

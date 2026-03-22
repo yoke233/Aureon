@@ -27,9 +27,11 @@ type bootstrapBase struct {
 	runtimeManager *configruntime.Manager
 	dataDir        string
 	signalCfg      *AgentSignalConfig
+	appCtx         context.Context
+	appCancel      context.CancelFunc
 }
 
-func initBootstrapBase(storePath string, roleResolver *acpclient.RoleResolver, bootstrapCfg *config.Config) (*bootstrapBase, error) {
+func initBootstrapBase(appCtx context.Context, appCancel context.CancelFunc, storePath string, roleResolver *acpclient.RoleResolver, bootstrapCfg *config.Config) (*bootstrapBase, error) {
 	runtimeDBPath := strings.TrimSuffix(storePath, filepath.Ext(storePath)) + "_runtime.db"
 	fmt.Println("[startup] init base: open runtime store")
 	store, err := sqlite.New(runtimeDBPath)
@@ -41,7 +43,7 @@ func initBootstrapBase(storePath string, roleResolver *acpclient.RoleResolver, b
 	bus := membus.NewBus()
 	fmt.Println("[startup] init base: start event persister")
 	persister := flowapp.NewEventPersister(store, bus)
-	if err := persister.Start(context.Background()); err != nil {
+	if err := persister.Start(appCtx); err != nil {
 		store.Close()
 		return nil, fmt.Errorf("start event persister: %w", err)
 	}
@@ -63,7 +65,7 @@ func initBootstrapBase(storePath string, roleResolver *acpclient.RoleResolver, b
 	}
 
 	fmt.Println("[startup] init base: seed registry")
-	seedRegistry(context.Background(), store, bootstrapCfg, roleResolver)
+	seedRegistry(appCtx, store, bootstrapCfg, roleResolver)
 	fmt.Println("[startup] init base: build runtime manager")
 	runtimeManager := buildRuntimeManager(store, runtimeDBPath, bus)
 	registry := configruntime.NewResolvingRegistry(store, nil, nil)
@@ -79,5 +81,7 @@ func initBootstrapBase(storePath string, roleResolver *acpclient.RoleResolver, b
 		registry:       registry,
 		runtimeManager: runtimeManager,
 		dataDir:        dataDir,
+		appCtx:         appCtx,
+		appCancel:      appCancel,
 	}, nil
 }

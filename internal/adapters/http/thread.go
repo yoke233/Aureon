@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -697,7 +696,7 @@ func (h *Handler) inviteThreadAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		// Best-effort workspace sync (non-blocking for the response).
 		go func() {
-			if err := h.syncThreadWorkspaceContext(context.Background(), threadID); err != nil {
+			if err := h.syncThreadWorkspaceContext(h.backgroundContext(), threadID); err != nil {
 				slog.Warn("invite agent: sync thread workspace failed", "thread_id", threadID, "error", err)
 			}
 		}()

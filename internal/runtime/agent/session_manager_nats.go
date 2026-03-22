@@ -16,7 +16,6 @@ import (
 	"github.com/yoke233/zhanggui/internal/adapters/agent/acpclient"
 	natsprobe "github.com/yoke233/zhanggui/internal/adapters/probe/nats"
 	runtimeapp "github.com/yoke233/zhanggui/internal/application/runtime"
-	"github.com/yoke233/zhanggui/internal/core"
 )
 
 // NATSSessionManagerConfig configures the NATS-backed session manager.
@@ -31,9 +30,6 @@ type NATSSessionManagerConfig struct {
 	// Used as a prefix in invocation IDs to avoid collisions across servers.
 	// Auto-generated from hostname + PID if empty.
 	ServerID string
-
-	// Store is used for persisting run metadata.
-	Store core.Store
 }
 
 // NATSSessionManager implements SessionManager using NATS JetStream.
@@ -51,7 +47,6 @@ type NATSSessionManager struct {
 	js       jetstream.JetStream
 	prefix   string
 	serverID string
-	store    core.Store
 
 	mu      sync.Mutex
 	handles map[string]*natsHandle
@@ -139,7 +134,6 @@ func NewNATSSessionManager(cfg NATSSessionManagerConfig) (*NATSSessionManager, e
 		js:       js,
 		prefix:   prefix,
 		serverID: serverID,
-		store:    cfg.Store,
 		handles:  make(map[string]*natsHandle),
 	}
 

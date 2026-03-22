@@ -26,22 +26,6 @@ export interface AvailableCommand {
   };
 }
 
-export interface ConfigOptionValue {
-  value: string;
-  name: string;
-  description?: string;
-}
-
-export interface ConfigOption {
-  id: string;
-  name: string;
-  description?: string;
-  category?: string;
-  type: "select";
-  currentValue: string;
-  options: ConfigOptionValue[];
-}
-
 export interface ACPSessionUpdate {
   sessionUpdate?: string;
   availableCommands?: AvailableCommand[];

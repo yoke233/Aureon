@@ -501,9 +501,6 @@ export function WorkItemDetailPage() {
                         ) : null}
                         <span>回到来源讨论</span>
                       </div>
-                      {sourceThread?.summary ? (
-                        <div className="line-clamp-2 text-[11px] text-muted-foreground">{sourceThread.summary}</div>
-                      ) : null}
                     </div>
                     <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   </Link>

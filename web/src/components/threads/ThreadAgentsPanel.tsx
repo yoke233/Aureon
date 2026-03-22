@@ -5,9 +5,9 @@ import { Bot, Check, Loader2, Plus, User, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { AgentProfile, ThreadAgentSession, ThreadParticipant } from "@/types/apiV2";
+import type { AgentProfile, ThreadMember } from "@/types/apiV2";
 
-type AgentSessionWithProfileID = ThreadAgentSession & { agent_profile_id: string };
+type AgentSessionWithProfileID = ThreadMember & { agent_profile_id: string };
 
 interface ThreadAgentsPanelProps {
   inviteableProfiles: AgentProfile[];
@@ -22,7 +22,7 @@ interface ThreadAgentsPanelProps {
   agentCardRefs: MutableRefObject<Record<string, HTMLDivElement | null>>;
   removingAgentID: number | null;
   onRemoveAgent: (agentSessionID: number) => void;
-  participants: ThreadParticipant[];
+  participants: ThreadMember[];
   agentStatusColor: (status: string) => string;
 }
 

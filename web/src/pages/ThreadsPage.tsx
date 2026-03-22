@@ -90,7 +90,6 @@ export function ThreadsPage() {
     return threads.filter(
       (th) =>
         th.title.toLowerCase().includes(q) ||
-        (th.summary ?? "").toLowerCase().includes(q) ||
         String(th.id).includes(q),
     );
   }, [threads, search]);
@@ -269,11 +268,6 @@ export function ThreadsPage() {
                     </Badge>
                   )}
                 </div>
-                {th.summary && (
-                  <p className="mt-0.5 truncate text-xs text-slate-500">
-                    {th.summary}
-                  </p>
-                )}
                 <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-400">
                   <span className="flex items-center gap-1">
                     <Clock className="h-3 w-3" />

@@ -30,7 +30,6 @@ import type {
   CreateWorkItemRequest,
   UpdateWorkItemRequest,
   WorkItem,
-  WorkItemAttachment,
   CreateActionRequest,
   GenerateActionsRequest,
   Event,
@@ -389,9 +388,9 @@ export interface ApiClient {
   searchThreadFiles(threadId: number, query?: string, source?: "all" | "attachment" | "project" | "workspace", limit?: number): Promise<ThreadFileRef[]>;
 
   // Work Item Attachments
-  uploadWorkItemAttachment(workItemId: number, file: File): Promise<WorkItemAttachment>;
-  listWorkItemAttachments(workItemId: number): Promise<WorkItemAttachment[]>;
-  getWorkItemAttachment(attachmentId: number): Promise<WorkItemAttachment>;
+  uploadWorkItemAttachment(workItemId: number, file: File): Promise<Resource>;
+  listWorkItemAttachments(workItemId: number): Promise<Resource[]>;
+  getWorkItemAttachment(attachmentId: number): Promise<Resource>;
   deleteWorkItemAttachment(attachmentId: number): Promise<void>;
   getAttachmentDownloadUrl(attachmentId: number): string;
 
@@ -712,16 +711,16 @@ export const createApiClient = (opts: ApiClientOptions): ApiClient => {
     if (!response.ok) {
       throw new ApiError(response.status, extractErrorMessage(response.status, data), data);
     }
-    return data as WorkItemAttachment;
+    return data as Resource;
   };
 
   const listWorkItemAttachments: ApiClient["listWorkItemAttachments"] = (workItemId) =>
-    request<WorkItemAttachment[]>({
+    request<Resource[]>({
       path: `/work-items/${workItemId}/resources`,
     }).then((items) => (Array.isArray(items) ? items : []));
 
   const getWorkItemAttachment: ApiClient["getWorkItemAttachment"] = (attachmentId) =>
-    request<WorkItemAttachment>({
+    request<Resource>({
       path: `/resources/${attachmentId}`,
     });
 

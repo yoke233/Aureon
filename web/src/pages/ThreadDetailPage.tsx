@@ -25,10 +25,9 @@ import type {
   AgentProfile,
   Thread,
   ThreadMessage,
-  ThreadParticipant,
+  ThreadMember,
   ThreadProposal,
   ThreadWorkItemLink,
-  ThreadAgentSession,
   ThreadAttachment,
   ThreadFileRef,
   MessageFileRef,
@@ -307,7 +306,7 @@ function detectInviteIntent(
   return null;
 }
 
-type ThreadAgentSessionWithProfileID = ThreadAgentSession & {
+type ThreadMemberWithProfileID = ThreadMember & {
   agent_profile_id: string;
 };
 
@@ -473,7 +472,7 @@ export function ThreadDetailPage() {
 
   const [thread, setThread] = useState<Thread | null>(null);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
-  const [participants, setParticipants] = useState<ThreadParticipant[]>([]);
+  const [participants, setParticipants] = useState<ThreadMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [proposals, setProposals] = useState<ThreadProposal[]>([]);
@@ -498,7 +497,7 @@ export function ThreadDetailPage() {
   const [newWIBody, setNewWIBody] = useState("");
   const [showLinkWI, setShowLinkWI] = useState(false);
   const [linkWIId, setLinkWIId] = useState("");
-  const [agentSessions, setAgentSessions] = useState<ThreadAgentSession[]>([]);
+  const [agentSessions, setAgentSessions] = useState<ThreadMember[]>([]);
   const [attachments, setAttachments] = useState<ThreadAttachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [availableProfiles, setAvailableProfiles] = useState<AgentProfile[]>(
@@ -566,7 +565,7 @@ export function ThreadDetailPage() {
 
   const id = Number(threadId);
   const agentSessionsWithProfileID = agentSessions.filter(
-    (session): session is ThreadAgentSessionWithProfileID =>
+    (session): session is ThreadMemberWithProfileID =>
       typeof session.agent_profile_id === "string" &&
       session.agent_profile_id.trim().length > 0,
   );
@@ -1661,17 +1660,12 @@ export function ThreadDetailPage() {
 
   const handleOpenCreateWorkItem = () => {
     if (!thread) return;
-    if (!thread.summary?.trim()) {
-      setError("请先生成或填写 summary，再创建 WorkItem。");
-      setShowCreateWI(false);
-      return;
-    }
     setError(null);
     setShowCreateWI((prev) => {
       const next = !prev;
       if (next) {
         setNewWITitle(deriveWorkItemTitle(thread));
-        setNewWIBody(thread.summary?.trim() ?? "");
+        setNewWIBody("");
       }
       return next;
     });
@@ -1682,13 +1676,9 @@ export function ThreadDetailPage() {
     setError(null);
     try {
       const trimmedBody = newWIBody.trim();
-      const savedSummary = thread?.summary?.trim() ?? "";
       const workItem = await apiClient.createWorkItemFromThread(id, {
         title: newWITitle.trim(),
-        body:
-          trimmedBody !== "" && trimmedBody !== savedSummary
-            ? trimmedBody
-            : undefined,
+        body: trimmedBody !== "" ? trimmedBody : undefined,
       });
       const links = await apiClient.listWorkItemsByThread(id);
       setWorkItemLinks(links);

@@ -865,7 +865,6 @@ export interface Thread {
   title: string;
   status: ThreadStatus;
   owner_id?: string;
-  summary?: string;
   focus_project_id?: number;
   metadata?: Record<string, unknown>;
   created_at: string;
@@ -875,7 +874,6 @@ export interface Thread {
 export interface CreateThreadRequest {
   title: string;
   owner_id?: string;
-  summary?: string;
   focus_project_id?: number;
   metadata?: Record<string, unknown>;
 }
@@ -884,7 +882,6 @@ export interface UpdateThreadRequest {
   title?: string;
   status?: string;
   owner_id?: string;
-  summary?: string;
   focus_project_id?: number;
   metadata?: Record<string, unknown>;
 }
@@ -937,11 +934,6 @@ export interface ThreadMember {
   joined_at: string;
   last_active_at: string;
 }
-
-/** Backward-compatibility alias. */
-export type ThreadParticipant = ThreadMember;
-/** Backward-compatibility alias. */
-export type ThreadAgentSession = ThreadMember;
 
 export interface AddThreadParticipantRequest {
   user_id: string;
@@ -1192,12 +1184,6 @@ export interface FeatureManifestSnapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Work Item Attachments
-// ---------------------------------------------------------------------------
-
-export type WorkItemAttachment = Resource;
-
-// ---------------------------------------------------------------------------
 // Notifications
 // ---------------------------------------------------------------------------
 
@@ -1318,15 +1304,4 @@ export interface InspectionReport {
 export interface TriggerInspectionRequest {
   project_id?: number;
   lookback_hours?: number;
-}
-
-export interface StatusCount {
-  status: string;
-  count: number;
-}
-
-export interface ErrorKindCount {
-  error_kind: string;
-  count: number;
-  pct: number;
 }

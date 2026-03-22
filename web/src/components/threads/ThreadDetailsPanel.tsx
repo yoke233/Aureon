@@ -103,7 +103,7 @@ export function ThreadDetailsPanel({
                 variant="outline"
                 size="sm"
                 onClick={onSaveSummary}
-                disabled={savingSummary || summaryDraft.trim() === (thread.summary?.trim() ?? "")}
+                disabled={savingSummary || summaryDraft.trim() === ""}
               >
                 {savingSummary ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1 h-3.5 w-3.5" />}
                 {t("common.save", "Save")}

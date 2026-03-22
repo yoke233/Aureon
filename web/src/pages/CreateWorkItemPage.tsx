@@ -20,7 +20,7 @@ import { AttachmentUploader } from "@/components/AttachmentUploader";
 import { getScmFlowProviderFromBindings } from "@/lib/scm";
 import { getErrorMessage, normalizeActionTypeLabel } from "@/lib/v2Workbench";
 import { cn } from "@/lib/utils";
-import type { Action, DAGTemplate, ResourceSpace, WorkItemAttachment } from "@/types/apiV2";
+import type { Action, DAGTemplate, Resource, ResourceSpace } from "@/types/apiV2";
 
 const actionColors: Record<string, { bg: string; text: string }> = {
   exec: { bg: "bg-blue-50", text: "text-blue-600" },
@@ -45,7 +45,7 @@ export function CreateWorkItemPage() {
   const [busy, setBusy] = useState<"idle" | "generating" | "saving" | "running" | "from_template">("idle");
   const [error, setError] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [uploadedAttachments, setUploadedAttachments] = useState<WorkItemAttachment[]>([]);
+  const [uploadedAttachments, setUploadedAttachments] = useState<Resource[]>([]);
   const [uploading, setUploading] = useState(false);
   const [templates, setTemplates] = useState<DAGTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
@@ -148,7 +148,7 @@ export function CreateWorkItemPage() {
     }
     setUploading(true);
     try {
-      const results: WorkItemAttachment[] = [];
+      const results: Resource[] = [];
       for (const file of pendingFiles) {
         const attachment = await apiClient.uploadWorkItemAttachment(workItemId, file);
         results.push(attachment);

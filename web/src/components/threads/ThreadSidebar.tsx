@@ -29,8 +29,7 @@ import type {
   AgentProfile,
   Thread,
   ThreadAttachment,
-  ThreadAgentSession,
-  ThreadParticipant,
+  ThreadMember,
   ThreadProposal,
   ThreadWorkItemLink,
   WorkItem,
@@ -87,7 +86,7 @@ function SidebarSection({
 
 /* ── Types ── */
 
-type AgentSessionWithProfileID = ThreadAgentSession & { agent_profile_id: string };
+type AgentSessionWithProfileID = ThreadMember & { agent_profile_id: string };
 
 type ProposalDraftEditor = {
   temp_id: string;
@@ -139,7 +138,7 @@ export interface ThreadSidebarProps {
   agentStatusColor: (status: string) => string;
 
   // Members: participants
-  participants: ThreadParticipant[];
+  participants: ThreadMember[];
 
   // Proposals
   proposals: ThreadProposal[];

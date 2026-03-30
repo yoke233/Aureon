@@ -20,6 +20,7 @@ func TestRootCommandShowsHelpWhenNoArgs(t *testing.T) {
 		runExecutor:    func([]string) error { return nil },
 		runQualityGate: func([]string) error { return nil },
 		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs(nil)
 
@@ -47,6 +48,7 @@ func TestVersionCommandPrintsVersion(t *testing.T) {
 		runExecutor:    func([]string) error { return nil },
 		runQualityGate: func([]string) error { return nil },
 		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs([]string{"version"})
 
@@ -73,6 +75,7 @@ func TestServerCommandForwardsFlags(t *testing.T) {
 		runExecutor:    func([]string) error { return nil },
 		runQualityGate: func([]string) error { return nil },
 		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs([]string{"server", "--port", "9090"})
 
@@ -100,6 +103,7 @@ func TestExecutorCommandForwardsFlags(t *testing.T) {
 		},
 		runQualityGate: func([]string) error { return nil },
 		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs([]string{"executor", "--nats-url", "nats://local", "--agents", "claude,codex", "--max-concurrent", "4"})
 
@@ -126,7 +130,8 @@ func TestQualityGateCommandForwardsFlags(t *testing.T) {
 			gotArgs = append([]string(nil), args...)
 			return nil
 		},
-		runMCPServe: func([]string) error { return nil },
+		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs([]string{"quality-gate", "--skip-frontend"})
 
@@ -157,6 +162,7 @@ func TestMCPServeCommandInvokesRunner(t *testing.T) {
 			}
 			return nil
 		},
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs([]string{"mcp-serve"})
 
@@ -179,6 +185,7 @@ func TestUnknownCommandReturnsCobraError(t *testing.T) {
 		runExecutor:    func([]string) error { return nil },
 		runQualityGate: func([]string) error { return nil },
 		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs([]string{"nope"})
 
@@ -205,11 +212,45 @@ func TestRunWithArgsPropagatesRunnerError(t *testing.T) {
 		},
 		runQualityGate: func([]string) error { return nil },
 		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
 	})
 	cmd.SetArgs([]string{"server"})
 
 	err := cmd.Execute()
 	if !errors.Is(err, boom) {
 		t.Fatalf("Execute() error = %v, want %v", err, boom)
+	}
+}
+
+func TestOrchestrateCommandForwardsTaskCreateFlags(t *testing.T) {
+	t.Parallel()
+
+	var gotArgs []string
+	cmd := newRootCmd(commandDeps{
+		out:            &bytes.Buffer{},
+		err:            &bytes.Buffer{},
+		version:        versionString,
+		runServer:      func([]string) error { return nil },
+		runExecutor:    func([]string) error { return nil },
+		runQualityGate: func([]string) error { return nil },
+		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func(args []string) error {
+			gotArgs = append([]string(nil), args...)
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{
+		"orchestrate", "task", "create",
+		"--title", "CEO bootstrap",
+		"--project-id", "12",
+		"--json",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	want := []string{"task", "create", "--title", "CEO bootstrap", "--project-id", "12", "--json"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("orchestrate args = %#v, want %#v", gotArgs, want)
 	}
 }

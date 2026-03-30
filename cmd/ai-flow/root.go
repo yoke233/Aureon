@@ -20,6 +20,7 @@ type commandDeps struct {
 	runExecutor    func([]string) error
 	runQualityGate func([]string) error
 	runMCPServe    func([]string) error
+	runOrchestrate func([]string) error
 }
 
 func defaultCommandDeps() commandDeps {
@@ -31,6 +32,7 @@ func defaultCommandDeps() commandDeps {
 		runExecutor:    appcmd.RunExecutor,
 		runQualityGate: appcmd.RunQualityGate,
 		runMCPServe:    appcmd.RunMCPServe,
+		runOrchestrate: appcmd.RunOrchestrate,
 	}
 }
 
@@ -62,6 +64,7 @@ func newRootCmd(deps commandDeps) *cobra.Command {
 		newExecutorCmd(deps),
 		newQualityGateCmd(deps),
 		newMCPServeCmd(deps),
+		newOrchestrateCmd(deps),
 	)
 	return rootCmd
 }

@@ -8,6 +8,7 @@ import { badgeLabelForStatus, formatUsageValue } from "./chatUtils";
 interface ChatHeaderProps {
   session: SessionRecord | null;
   driverLabel: string;
+  profileLabel: string;
   messageCount: number;
   submitting: boolean;
   usage: ChatActivityView | undefined;
@@ -27,6 +28,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   const {
     session,
     driverLabel,
+    profileLabel,
     messageCount,
     submitting,
     usage,
@@ -98,7 +100,7 @@ export function ChatHeader(props: ChatHeaderProps) {
                 />
               ) : (
                 <>
-                  <span className="truncate text-[15px] font-semibold">{session?.title ?? "Lead Agent"}</span>
+                  <span className="truncate text-[15px] font-semibold">{session?.title ?? profileLabel}</span>
                   {session && onRenameSession && (
                     <button
                       type="button"
@@ -113,7 +115,7 @@ export function ChatHeader(props: ChatHeaderProps) {
               )}
             </div>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] text-muted-foreground md:text-xs">
-              <span>Lead Agent</span>
+              <span>{profileLabel}</span>
               <span>·</span>
               <span>{driverLabel}</span>
               <span className="hidden md:inline">·</span>

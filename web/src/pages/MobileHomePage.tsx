@@ -23,6 +23,8 @@ import { cn } from "@/lib/utils";
 import type { LeadDriverOption, SessionRecord } from "@/components/chat/chatTypes";
 import { EMPTY_PROFILE_VALUE } from "@/components/chat/chatTypes";
 import {
+  defaultDraftProfileID,
+  resolveProfileLabel,
   toSummaryRecord,
   normalizeDriverKey,
   driverLabelForId,
@@ -154,8 +156,14 @@ export function MobileHomePage() {
       ]);
       setDrivers(driverList);
       setLeadProfiles(profiles);
+      const selectedProfileID = defaultDraftProfileID(profiles);
+      setDraftProfileId((cur) => defaultDraftProfileID(profiles, cur || selectedProfileID));
       setDraftDriverId((cur) => {
         if (cur && driverList.some((d) => d.id === cur)) return cur;
+        const selectedProfile = profiles.find((profile) => profile.id === selectedProfileID);
+        if (selectedProfile?.driver_id && driverList.some((driver) => driver.id === selectedProfile.driver_id)) {
+          return selectedProfile.driver_id;
+        }
         return driverList[0]?.id ?? "";
       });
     } catch (e) {
@@ -197,12 +205,14 @@ export function MobileHomePage() {
   const [draftProfileId, setDraftProfileId] = useState("");
   // Auto-select first profile when loaded.
   useEffect(() => {
-    setDraftProfileId((cur) => {
-      if (cur && leadProfiles.some((p) => p.id === cur)) return cur;
-      return leadProfiles[0]?.id ?? "";
-    });
+    setDraftProfileId((cur) => defaultDraftProfileID(leadProfiles, cur));
   }, [leadProfiles]);
   const draftSessionReady = Boolean(draftProfileId && draftDriverId);
+  const currentProfileLabel = resolveProfileLabel(
+    leadProfiles.find((profile) => profile.id === draftProfileId)?.name,
+    draftProfileId,
+    t("chat.noProfile", { defaultValue: "当前 Agent" }),
+  );
   const filteredSessions = useMemo(() => {
     const query = sessionSearch.trim().toLowerCase();
     if (!query) return sessions;
@@ -340,7 +350,8 @@ export function MobileHomePage() {
                 placeholder={
                   draftSessionReady
                     ? t("mobileHome.inputPlaceholder", {
-                        defaultValue: "输入消息，开始与 Lead 对话...",
+                        profile: currentProfileLabel,
+                        defaultValue: "输入消息，开始与当前 Agent 对话...",
                       })
                     : t("chat.selectDriverFirst")
                 }
@@ -624,4 +635,3 @@ function SessionListItem({
     </button>
   );
 }
-

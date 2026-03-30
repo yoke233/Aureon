@@ -28,9 +28,6 @@ func buildRuntimeManager(store *sqlite.Store, runtimeDBPath string, bus core.Eve
 		DBPath: runtimeDBPath,
 	}
 	runtimeManager, err := configruntime.NewManager(cfgPath, secretsPath, mcpEnv, slog.Default(), func(ctx context.Context, snap *configruntime.Snapshot) error {
-		if err := configruntime.SyncRegistry(ctx, store, snap); err != nil {
-			return err
-		}
 		if bus != nil && snap != nil && snap.Config != nil && snap.Version > 1 {
 			bus.Publish(context.Background(), core.Event{
 				Type: core.EventRuntimeConfigReloaded,

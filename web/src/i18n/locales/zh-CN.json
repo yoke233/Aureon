@@ -757,23 +757,24 @@
     "send": "发送",
     "turns": "轮",
     "endSession": "结束会话",
-    "inputCapabilities": "Lead Agent 可以拆分任务、创建工作项、管理执行",
+    "inputCapabilities": "{{profile}} 可以拆分任务、创建工作项、管理执行",
     "inputHint": "Enter 发送 · Shift+Enter 换行",
     "agentActivity": "Agent 活动",
     "toolCalls": "工具调用",
     "noCommandsMatch": "无匹配的命令",
     "noLeadDriver": "还没有可用的 lead driver，请先到代理页面配置。",
+    "noProfile": "当前 Agent",
     "noProfileAvailable": "还没有可用的 Profile，请先到代理页面配置。",
     "noDriverAvailable": "还没有可用的 Driver，请先到代理页面配置。",
-    "inputPlaceholderActive": "输入消息，与 Lead Agent 对话...",
-    "inputPlaceholderNew": "输入消息，使用 Lead · {{driver}} 在 {{project}} 下开始会话...",
+    "inputPlaceholderActive": "输入消息，与 {{profile}} 对话...",
+    "inputPlaceholderNew": "输入消息，使用 {{profile}} · {{driver}} 在 {{project}} 下开始会话...",
     "useWorktree": "使用 Worktree",
     "useWorktreeHint": "关闭后将直接在项目目录中运行，不创建 Git Worktree",
     "llmConfig": "LLM 配置",
     "llmConfigSystem": "System (使用系统环境变量)"
   },
   "mobileHome": {
-    "inputPlaceholder": "输入消息，开始与 Lead 对话...",
+    "inputPlaceholder": "输入消息，开始与 {{profile}} 对话...",
     "allProjects": "全部项目"
   },
   "workItems": {

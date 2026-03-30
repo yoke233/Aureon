@@ -29,6 +29,7 @@ function renderBar(props?: Partial<React.ComponentProps<typeof ChatInputBar>>) {
     draftSessionReady: true,
     currentDriverLabel: "Codex",
     currentProjectLabel: "Alpha",
+    currentProfileLabel: "CEO Orchestrator",
     showCommandPalette: true,
     availableCommands: [
       { name: "deploy", description: "执行部署" },
@@ -129,6 +130,16 @@ describe("ChatInputBar", () => {
     const input = screen.getByRole("textbox") as HTMLInputElement;
     expect(input.disabled).toBe(true);
     expect((screen.getByTitle("上传文件或图片") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("根据当前 profile 渲染占位文案", () => {
+    renderBar({
+      currentSession: null,
+      showCommandPalette: false,
+      pendingFiles: [],
+    });
+
+    expect(screen.getByPlaceholderText("输入消息，使用 CEO Orchestrator · Codex 在 Alpha 下开始会话...")).toBeTruthy();
   });
 
   it("running 会话下显示取消按钮并允许继续输入", () => {

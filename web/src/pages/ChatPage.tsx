@@ -10,6 +10,7 @@ import { ChatInputBar } from "@/components/chat/ChatInputBar";
 import { ChatPageShell } from "@/components/chat/ChatPageShell";
 import { ChatErrorBanner } from "@/components/chat/ChatErrorBanner";
 import { PermissionBar } from "@/components/chat/PermissionBar";
+import { defaultDraftProfileID } from "@/components/chat/chatUtils";
 import { useChatFeed } from "@/components/chat/useChatFeed";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useChatSessionController } from "./chat/useChatSessionController";
@@ -73,6 +74,7 @@ export function ChatPage() {
     projectNameMap,
     leadDriverOptions,
     currentProjectLabel,
+    currentProfileLabel,
     draftSessionReady,
     currentDriverLabel,
     groupedSessions,
@@ -233,16 +235,16 @@ export function ChatPage() {
   }, [loadingMore, visibleFeedEntries.length]);
 
   const createSession = useCallback(() => {
+    const selectedProfileID = defaultDraftProfileID(leadProfiles);
     setDraftProjectId(selectedProjectId);
-    setDraftProfileId((current) => {
-      if (current && leadProfiles.some((profile) => profile.id === current)) {
-        return current;
-      }
-      return leadProfiles[0]?.id ?? "";
-    });
+    setDraftProfileId((current) => defaultDraftProfileID(leadProfiles, current || selectedProfileID));
     setDraftDriverId((current) => {
       if (current && drivers.some((driver) => driver.id === current)) {
         return current;
+      }
+      const selectedProfile = leadProfiles.find((profile) => profile.id === selectedProfileID);
+      if (selectedProfile?.driver_id && drivers.some((driver) => driver.id === selectedProfile.driver_id)) {
+        return selectedProfile.driver_id;
       }
       return leadDriverOptions[0]?.driverId ?? drivers[0]?.id ?? "";
     });
@@ -454,6 +456,7 @@ export function ChatPage() {
           <ChatHeader
             session={currentSession}
             driverLabel={currentDriverLabel}
+            profileLabel={currentProfileLabel}
             messageCount={currentMessages.length}
             submitting={submitting}
             usage={currentUsage}
@@ -492,6 +495,7 @@ export function ChatPage() {
           submitting={submitting}
           currentDriverLabel={currentDriverLabel}
           currentProjectLabel={currentProjectLabel}
+          currentProfileLabel={currentProfileLabel}
           fileInputRef={fileInputRef}
           onProjectChange={(id) => {
             setDraftProjectId(id);
@@ -552,6 +556,7 @@ export function ChatPage() {
             draftSessionReady={draftSessionReady}
             currentDriverLabel={currentDriverLabel}
             currentProjectLabel={currentProjectLabel}
+            currentProfileLabel={currentProfileLabel}
             showCommandPalette={showCommandPalette}
             availableCommands={availableCommands}
             commandFilter={commandFilter}
@@ -587,5 +592,3 @@ export function ChatPage() {
     />
   );
 }
-
-

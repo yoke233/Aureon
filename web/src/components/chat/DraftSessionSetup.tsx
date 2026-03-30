@@ -30,6 +30,7 @@ interface DraftSessionSetupProps {
   submitting: boolean;
   currentDriverLabel: string;
   currentProjectLabel: string;
+  currentProfileLabel: string;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onProjectChange: (id: number | null) => void;
   onProfileChange: (id: string) => void;
@@ -60,6 +61,7 @@ export function DraftSessionSetup(props: DraftSessionSetupProps) {
     submitting,
     currentDriverLabel,
     currentProjectLabel,
+    currentProfileLabel,
     fileInputRef,
     onProjectChange,
     onProfileChange,
@@ -160,7 +162,11 @@ export function DraftSessionSetup(props: DraftSessionSetupProps) {
         </div>
         <div className="space-y-3">
           <Textarea
-            placeholder={t("chat.inputPlaceholderNew", { driver: currentDriverLabel, project: currentProjectLabel })}
+            placeholder={t("chat.inputPlaceholderNew", {
+              profile: currentProfileLabel,
+              driver: currentDriverLabel,
+              project: currentProjectLabel,
+            })}
             className="min-h-[180px] resize-none bg-white/90"
             value={messageInput}
             disabled={submitting || !draftSessionReady}

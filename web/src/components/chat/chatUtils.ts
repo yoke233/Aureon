@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { ChatMessage, ChatSessionSummary, ChatSessionDetail, Event as ApiEvent } from "@/types/apiV2";
+import type { AgentProfile, ChatMessage, ChatSessionSummary, ChatSessionDetail, Event as ApiEvent } from "@/types/apiV2";
 import type {
   SessionRecord,
   ChatMessageView,
@@ -53,6 +53,27 @@ export const toDetailRecord = (session: ChatSessionDetail, t: TFunction): Sessio
 export const fallbackLabel = (value: string | null | undefined, fallback: string): string => {
   const trimmed = value?.trim();
   return trimmed ? trimmed : fallback;
+};
+
+export const resolveProfileLabel = (
+  profileName: string | null | undefined,
+  profileID: string | null | undefined,
+  fallback: string,
+): string => fallbackLabel(profileName, fallbackLabel(profileID, fallback));
+
+export const defaultDraftProfileID = (
+  profiles: AgentProfile[],
+  currentProfileID?: string,
+): string => {
+  const current = currentProfileID?.trim();
+  if (current && profiles.some((profile) => profile.id === current)) {
+    return current;
+  }
+  const ceo = profiles.find((profile) => profile.id === "ceo");
+  if (ceo) {
+    return ceo.id;
+  }
+  return profiles[0]?.id ?? "";
 };
 
 export const toProjectGroupKey = (projectId?: number | null): string => (

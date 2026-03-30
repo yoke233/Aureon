@@ -18,6 +18,7 @@ interface ChatInputBarProps {
   draftSessionReady: boolean;
   currentDriverLabel: string;
   currentProjectLabel: string;
+  currentProfileLabel: string;
   showCommandPalette: boolean;
   availableCommands: SlashCommand[];
   commandFilter: string;
@@ -48,6 +49,7 @@ export function ChatInputBar(props: ChatInputBarProps) {
     draftSessionReady,
     currentDriverLabel,
     currentProjectLabel,
+    currentProfileLabel,
     showCommandPalette,
     availableCommands,
     commandFilter,
@@ -143,8 +145,8 @@ export function ChatInputBar(props: ChatInputBarProps) {
             rows={1}
             placeholder={
               currentSession
-                ? t("chat.inputPlaceholderActive")
-                : t("chat.inputPlaceholderNew", { driver: currentDriverLabel, project: currentProjectLabel })
+                ? t("chat.inputPlaceholderActive", { profile: currentProfileLabel })
+                : t("chat.inputPlaceholderNew", { profile: currentProfileLabel, driver: currentDriverLabel, project: currentProjectLabel })
             }
             className="max-h-36 min-h-[44px] w-full flex-1 resize-none border-0 bg-transparent p-0 text-[16px] leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-0 disabled:opacity-50 md:min-h-[36px] md:text-sm"
             value={messageInput}
@@ -241,4 +243,3 @@ export function ChatInputBar(props: ChatInputBarProps) {
     </div>
   );
 }
-

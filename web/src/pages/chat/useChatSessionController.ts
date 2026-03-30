@@ -20,11 +20,13 @@ import type {
   SessionRecord,
 } from "@/components/chat/chatTypes";
 import {
+  defaultDraftProfileID,
   buildActivityHistory,
   driverLabelForId,
   fallbackLabel,
   formatUsagePercent,
   normalizeDriverKey,
+  resolveProfileLabel,
   toDetailRecord,
   toMessageView,
   toProjectGroupKey,
@@ -143,19 +145,17 @@ export function useChatSessionController({
       setDrivers(driverList);
       setLeadProfiles(profiles);
       setLLMConfigs(llmConfigResp.configs ?? []);
+      const selectedProfileID = defaultDraftProfileID(profiles);
       setDraftProfileId((current) => {
-        if (current && profiles.some((profile) => profile.id === current)) {
-          return current;
-        }
-        return profiles[0]?.id ?? "";
+        return defaultDraftProfileID(profiles, current || selectedProfileID);
       });
       setDraftDriverId((current) => {
         if (current && driverList.some((driver) => driver.id === current)) {
           return current;
         }
-        const firstProfile = profiles[0];
-        if (firstProfile?.driver_id && driverList.some((driver) => driver.id === firstProfile.driver_id)) {
-          return firstProfile.driver_id;
+        const selectedProfile = profiles.find((profile) => profile.id === selectedProfileID);
+        if (selectedProfile?.driver_id && driverList.some((driver) => driver.id === selectedProfile.driver_id)) {
+          return selectedProfile.driver_id;
         }
         return driverList[0]?.id ?? "";
       });
@@ -163,7 +163,7 @@ export function useChatSessionController({
         if (current && current !== "system") {
           return current;
         }
-        return profiles[0]?.llm_config_id || "system";
+        return profiles.find((profile) => profile.id === selectedProfileID)?.llm_config_id || "system";
       });
     } catch (loadError) {
       onError(getErrorMessage(loadError));
@@ -271,11 +271,21 @@ export function useChatSessionController({
     () => new Map(leadDriverOptions.map((option) => [option.driverId, option])),
     [leadDriverOptions],
   );
+  const profileNameMap = useMemo(
+    () => new Map(leadProfiles.map((profile) => [profile.id, profile.name])),
+    [leadProfiles],
+  );
 
   const currentProjectId = currentSession?.project_id ?? draftProjectId ?? null;
   const currentProjectLabel = fallbackLabel(
     currentSession?.project_name ?? (currentProjectId != null ? projectNameMap.get(currentProjectId) : undefined),
     t("chat.noProject"),
+  );
+  const currentProfileID = currentSession?.profile_id ?? draftProfileId;
+  const currentProfileLabel = resolveProfileLabel(
+    currentSession?.profile_name,
+    currentProfileID ? profileNameMap.get(currentProfileID) ?? currentProfileID : "",
+    t("chat.noProfile", { defaultValue: "当前 Agent" }),
   );
   const currentDriverId = currentSession?.driver_id ?? draftDriverId;
   const draftSessionReady = Boolean(draftProfileId && draftDriverId);
@@ -435,6 +445,7 @@ export function useChatSessionController({
     projectNameMap,
     leadDriverOptions,
     currentProjectLabel,
+    currentProfileLabel,
     draftSessionReady,
     currentDriverLabel,
     groupedSessions,

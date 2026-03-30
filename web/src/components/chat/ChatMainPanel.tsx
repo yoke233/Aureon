@@ -39,6 +39,7 @@ interface ChatMainPanelDraftSetupProps {
   submitting: boolean;
   currentDriverLabel: string;
   currentProjectLabel: string;
+  currentProfileLabel: string;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onProjectChange: (id: number | null) => void;
   onProfileChange: (id: string) => void;
@@ -93,6 +94,7 @@ export function ChatMainPanel({
   submitting,
   currentDriverLabel,
   currentProjectLabel,
+  currentProfileLabel,
   fileInputRef,
   onProjectChange,
   onProfileChange,
@@ -156,6 +158,7 @@ export function ChatMainPanel({
               submitting={submitting}
               currentDriverLabel={currentDriverLabel}
               currentProjectLabel={currentProjectLabel}
+              currentProfileLabel={currentProfileLabel}
               fileInputRef={fileInputRef}
               onProjectChange={onProjectChange}
               onProfileChange={onProfileChange}
@@ -201,4 +204,3 @@ export function ChatMainPanel({
     </MessageListViewport>
   );
 }
-

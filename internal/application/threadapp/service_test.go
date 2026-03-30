@@ -16,12 +16,26 @@ type runtimeStub struct {
 	err          error
 	calls        int
 	lastThreadID int64
+	invited      []string
 }
 
 func (r *runtimeStub) CleanupThread(_ context.Context, threadID int64) error {
 	r.calls++
 	r.lastThreadID = threadID
 	return r.err
+}
+
+func (r *runtimeStub) InviteAgent(_ context.Context, threadID int64, profileID string) (*core.ThreadMember, error) {
+	r.invited = append(r.invited, profileID)
+	return &core.ThreadMember{
+		ID:             int64(len(r.invited)),
+		ThreadID:       threadID,
+		Kind:           core.ThreadMemberKindAgent,
+		UserID:         profileID,
+		AgentProfileID: profileID,
+		Role:           core.ThreadMemberKindAgent,
+		Status:         core.ThreadAgentBooting,
+	}, r.err
 }
 
 type workspaceStub struct {
@@ -1120,6 +1134,46 @@ func TestServiceEnsureHumanParticipantsAddsMissingUsersOnly(t *testing.T) {
 	}
 	if members[1].UserID != "alice" || members[2].UserID != "bob" {
 		t.Fatalf("unexpected members order/content: %+v", members)
+	}
+}
+
+func TestServiceEnsureAgentParticipantsAddsMissingProfilesOnly(t *testing.T) {
+	store := newThreadAppTestStore(t)
+	svc := newSQLiteThreadAppService(store, newSQLiteTxAdapter(store, nil), nil)
+	ctx := context.Background()
+
+	threadID, err := store.CreateThread(ctx, &core.Thread{Title: "meeting-thread", OwnerID: "owner"})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	if _, err := store.AddThreadMember(ctx, &core.ThreadMember{
+		ThreadID:       threadID,
+		Kind:           core.ThreadMemberKindAgent,
+		UserID:         "lead",
+		AgentProfileID: "lead",
+		Role:           core.ThreadMemberKindAgent,
+		Status:         core.ThreadAgentActive,
+	}); err != nil {
+		t.Fatalf("add existing agent: %v", err)
+	}
+
+	added, err := svc.EnsureAgentParticipants(ctx, threadID, []string{" lead ", "reviewer", "", "reviewer"})
+	if err != nil {
+		t.Fatalf("EnsureAgentParticipants: %v", err)
+	}
+	if len(added) != 1 {
+		t.Fatalf("added len = %d, want 1", len(added))
+	}
+	if added[0].AgentProfileID != "reviewer" {
+		t.Fatalf("added profile = %q, want reviewer", added[0].AgentProfileID)
+	}
+
+	members, err := store.ListThreadMembers(ctx, threadID)
+	if err != nil {
+		t.Fatalf("list thread members: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("members len = %d, want 2", len(members))
 	}
 }
 

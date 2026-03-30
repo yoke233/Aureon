@@ -4,6 +4,7 @@ import "errors"
 
 const (
 	CodeDecomposeConflict = "DECOMPOSE_CONFLICT"
+	CodeMissingProfile    = "MISSING_PROFILE"
 	CodeMissingTitle      = "MISSING_TITLE"
 	CodeWorkItemNotFound  = "WORK_ITEM_NOT_FOUND"
 )

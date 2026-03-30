@@ -208,6 +208,110 @@ func TestServiceReassignAppendsCEOJournal(t *testing.T) {
 	}
 }
 
+func TestServiceReassignPropagatesPreferredProfileToPendingExecutableActions(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	ctx := context.Background()
+	workItemID, err := env.store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "propagate assignee",
+		Status:   core.WorkItemOpen,
+		Priority: core.PriorityMedium,
+		Metadata: map[string]any{
+			"ceo": map[string]any{"assigned_profile": "lead"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	pendingExecID, err := env.store.CreateAction(ctx, &core.Action{
+		WorkItemID: workItemID,
+		Name:       "pending-exec",
+		Type:       core.ActionExec,
+		Status:     core.ActionPending,
+		Position:   0,
+	})
+	if err != nil {
+		t.Fatalf("CreateAction(pending exec) error = %v", err)
+	}
+	readyCompositeID, err := env.store.CreateAction(ctx, &core.Action{
+		WorkItemID: workItemID,
+		Name:       "ready-composite",
+		Type:       core.ActionComposite,
+		Status:     core.ActionReady,
+		Position:   1,
+	})
+	if err != nil {
+		t.Fatalf("CreateAction(ready composite) error = %v", err)
+	}
+	runningExecID, err := env.store.CreateAction(ctx, &core.Action{
+		WorkItemID: workItemID,
+		Name:       "running-exec",
+		Type:       core.ActionExec,
+		Status:     core.ActionRunning,
+		Position:   2,
+		Config:     map[string]any{"preferred_profile_id": "worker"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAction(running exec) error = %v", err)
+	}
+	gateID, err := env.store.CreateAction(ctx, &core.Action{
+		WorkItemID: workItemID,
+		Name:       "gate",
+		Type:       core.ActionGate,
+		Status:     core.ActionPending,
+		Position:   3,
+	})
+	if err != nil {
+		t.Fatalf("CreateAction(gate) error = %v", err)
+	}
+
+	_, err = env.svc.ReassignTask(ctx, ReassignTaskInput{
+		WorkItemID:    workItemID,
+		NewProfile:    "architect",
+		Reason:        "改派给更合适的执行角色",
+		ActorProfile:  "ceo",
+		SourceSession: "chat-77",
+	})
+	if err != nil {
+		t.Fatalf("ReassignTask() error = %v", err)
+	}
+
+	pendingExec, err := env.store.GetAction(ctx, pendingExecID)
+	if err != nil {
+		t.Fatalf("GetAction(pending exec) error = %v", err)
+	}
+	if pendingExec.Config["preferred_profile_id"] != "architect" {
+		t.Fatalf("pending exec preferred_profile_id = %v, want architect", pendingExec.Config["preferred_profile_id"])
+	}
+
+	readyComposite, err := env.store.GetAction(ctx, readyCompositeID)
+	if err != nil {
+		t.Fatalf("GetAction(ready composite) error = %v", err)
+	}
+	if readyComposite.Config["preferred_profile_id"] != "architect" {
+		t.Fatalf("ready composite preferred_profile_id = %v, want architect", readyComposite.Config["preferred_profile_id"])
+	}
+
+	runningExec, err := env.store.GetAction(ctx, runningExecID)
+	if err != nil {
+		t.Fatalf("GetAction(running exec) error = %v", err)
+	}
+	if runningExec.Config["preferred_profile_id"] != "worker" {
+		t.Fatalf("running exec preferred_profile_id = %v, want worker", runningExec.Config["preferred_profile_id"])
+	}
+
+	gate, err := env.store.GetAction(ctx, gateID)
+	if err != nil {
+		t.Fatalf("GetAction(gate) error = %v", err)
+	}
+	if gate.Config != nil {
+		if _, exists := gate.Config["preferred_profile_id"]; exists {
+			t.Fatalf("gate preferred_profile_id = %v, want unset", gate.Config["preferred_profile_id"])
+		}
+	}
+}
+
 func TestServiceReassignPreservesExistingCEOJournalHistory(t *testing.T) {
 	t.Parallel()
 
@@ -258,6 +362,29 @@ func TestServiceReassignPreservesExistingCEOJournalHistory(t *testing.T) {
 	}
 	if first["action"] != "task.create" {
 		t.Fatalf("ceo_journal[0].action = %v, want task.create", first["action"])
+	}
+}
+
+func TestServiceReassignRejectsMissingProfile(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	ctx := context.Background()
+	workItemID, err := env.store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "missing profile",
+		Status:   core.WorkItemOpen,
+		Priority: core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+
+	_, err = env.svc.ReassignTask(ctx, ReassignTaskInput{
+		WorkItemID: workItemID,
+		NewProfile: "   ",
+	})
+	if CodeOf(err) != CodeMissingProfile {
+		t.Fatalf("CodeOf(err) = %q, want %q (err=%v)", CodeOf(err), CodeMissingProfile, err)
 	}
 }
 
@@ -430,6 +557,45 @@ func TestServiceEscalateThreadCreatesLinkedThreadWhenMissing(t *testing.T) {
 	journal, ok := workItem.Metadata["ceo_journal"].([]any)
 	if !ok || len(journal) != 1 {
 		t.Fatalf("ceo_journal = %#v, want single entry", workItem.Metadata["ceo_journal"])
+	}
+}
+
+func TestServiceEscalateThreadInvitesProfilesIntoThreadMembers(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	workItemID, err := env.store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "blocked task with profiles",
+		Status:   core.WorkItemBlocked,
+		Priority: core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+
+	result, err := env.svc.EscalateThread(ctx, EscalateThreadInput{
+		WorkItemID:     workItemID,
+		Reason:         "need lead review in thread",
+		ThreadTitle:    "CEO escalation",
+		ActorProfile:   "ceo",
+		SourceSession:  "chat-4",
+		InviteProfiles: []string{"lead"},
+	})
+	if err != nil {
+		t.Fatalf("EscalateThread() error = %v", err)
+	}
+
+	members, err := env.store.ListThreadMembers(ctx, result.Thread.ID)
+	if err != nil {
+		t.Fatalf("ListThreadMembers() error = %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("members len = %d, want 2", len(members))
+	}
+	if members[1].Kind != core.ThreadMemberKindAgent || members[1].AgentProfileID != "lead" {
+		t.Fatalf("unexpected invited agent member: %+v", members[1])
 	}
 }
 

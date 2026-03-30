@@ -360,6 +360,80 @@ func (s *Service) EnsureHumanParticipants(ctx context.Context, threadID int64, u
 	return added, nil
 }
 
+func (s *Service) EnsureAgentParticipants(ctx context.Context, threadID int64, profileIDs []string) ([]*core.ThreadMember, error) {
+	if _, err := s.store.GetThread(ctx, threadID); err != nil {
+		if errors.Is(err, core.ErrNotFound) {
+			return nil, newError(CodeThreadNotFound, "thread not found", err)
+		}
+		return nil, err
+	}
+
+	existingMembers, err := s.store.ListThreadMembers(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	existingProfiles := make(map[string]struct{}, len(existingMembers))
+	for _, member := range existingMembers {
+		if member == nil || member.Kind != core.ThreadMemberKindAgent {
+			continue
+		}
+		if member.Status == core.ThreadAgentLeft || member.Status == core.ThreadAgentFailed {
+			continue
+		}
+		profileID := strings.TrimSpace(member.AgentProfileID)
+		if profileID == "" {
+			profileID = strings.TrimSpace(member.UserID)
+		}
+		if profileID == "" {
+			continue
+		}
+		existingProfiles[profileID] = struct{}{}
+	}
+
+	added := make([]*core.ThreadMember, 0, len(profileIDs))
+	for _, profileID := range profileIDs {
+		profileID = strings.TrimSpace(profileID)
+		if profileID == "" {
+			continue
+		}
+		if _, exists := existingProfiles[profileID]; exists {
+			continue
+		}
+
+		var member *core.ThreadMember
+		if s.runtime != nil {
+			invited, err := s.runtime.InviteAgent(ctx, threadID, profileID)
+			if err != nil {
+				return nil, err
+			}
+			member = invited
+		} else {
+			member = &core.ThreadMember{
+				ThreadID:       threadID,
+				Kind:           core.ThreadMemberKindAgent,
+				UserID:         profileID,
+				AgentProfileID: profileID,
+				Role:           core.ThreadMemberKindAgent,
+				Status:         core.ThreadAgentActive,
+			}
+			id, err := s.store.AddThreadMember(ctx, member)
+			if err != nil {
+				return nil, err
+			}
+			member.ID = id
+		}
+		added = append(added, member)
+		existingProfiles[profileID] = struct{}{}
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	if err := s.syncThreadWorkspace(ctx, threadID); err != nil {
+		return nil, err
+	}
+	return added, nil
+}
+
 func (s *Service) UnlinkThreadWorkItem(ctx context.Context, threadID, workItemID int64) error {
 	if err := s.store.DeleteThreadWorkItemLink(ctx, threadID, workItemID); err != nil {
 		if errors.Is(err, core.ErrNotFound) {

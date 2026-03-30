@@ -20,6 +20,13 @@ func (r threadAppRuntime) CleanupThread(ctx context.Context, threadID int64) err
 	return r.handler.threadPool.CleanupThread(ctx, threadID)
 }
 
+func (r threadAppRuntime) InviteAgent(ctx context.Context, threadID int64, profileID string) (*core.ThreadMember, error) {
+	if r.handler == nil || r.handler.threadPool == nil {
+		return nil, fmt.Errorf("thread agent runtime is not configured")
+	}
+	return r.handler.threadPool.InviteAgent(ctx, threadID, profileID)
+}
+
 func (h *Handler) threadService() *threadapp.Service {
 	if h == nil {
 		return nil

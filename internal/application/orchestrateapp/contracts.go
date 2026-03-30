@@ -29,6 +29,7 @@ type ThreadCoordinator interface {
 	LinkThreadWorkItem(ctx context.Context, input threadapp.LinkThreadWorkItemInput) (*core.ThreadWorkItemLink, error)
 	FindActiveThreadByWorkItem(ctx context.Context, workItemID int64) (*core.Thread, error)
 	EnsureHumanParticipants(ctx context.Context, threadID int64, userIDs []string) ([]*core.ThreadMember, error)
+	EnsureAgentParticipants(ctx context.Context, threadID int64, profileIDs []string) ([]*core.ThreadMember, error)
 }
 
 type Config struct {

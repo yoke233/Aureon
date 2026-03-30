@@ -97,6 +97,7 @@ type Tx interface {
 // Runtime is the optional runtime port for cleaning up live thread sessions.
 type Runtime interface {
 	CleanupThread(ctx context.Context, threadID int64) error
+	InviteAgent(ctx context.Context, threadID int64, profileID string) (*core.ThreadMember, error)
 }
 
 type WorkspaceManager interface {

@@ -189,6 +189,12 @@ func (s *Service) ReassignTask(ctx context.Context, input ReassignTaskInput) (*R
 
 	oldProfile := assignedProfileFromMetadata(workItem.Metadata)
 	newProfile := strings.TrimSpace(input.NewProfile)
+	if newProfile == "" {
+		return nil, newError(CodeMissingProfile, "profile is required", nil)
+	}
+	if err := s.propagatePreferredProfile(ctx, workItem.ID, newProfile); err != nil {
+		return nil, err
+	}
 	updated := withAssignedProfile(workItem.Metadata, newProfile)
 	entry := map[string]any{
 		"ts":                     s.now().UTC().Format(time.RFC3339),
@@ -294,6 +300,9 @@ func (s *Service) EscalateThread(ctx context.Context, input EscalateThreadInput)
 			return nil, err
 		}
 		if thread != nil {
+			if _, err := s.threads.EnsureAgentParticipants(ctx, thread.ID, input.InviteProfiles); err != nil {
+				return nil, err
+			}
 			if _, err := s.threads.EnsureHumanParticipants(ctx, thread.ID, input.InviteHumans); err != nil {
 				return nil, err
 			}
@@ -331,6 +340,10 @@ func (s *Service) EscalateThread(ctx context.Context, input EscalateThreadInput)
 		IsPrimary:    true,
 	})
 	if err != nil {
+		_ = s.threads.DeleteThread(ctx, createdThread.Thread.ID)
+		return nil, err
+	}
+	if _, err := s.threads.EnsureAgentParticipants(ctx, createdThread.Thread.ID, input.InviteProfiles); err != nil {
 		_ = s.threads.DeleteThread(ctx, createdThread.Thread.ID)
 		return nil, err
 	}
@@ -486,6 +499,18 @@ func isExecutableAction(action *core.Action) bool {
 	return action.Type == core.ActionExec || action.Type == core.ActionComposite
 }
 
+func shouldPropagatePreferredProfile(action *core.Action) bool {
+	if !isExecutableAction(action) {
+		return false
+	}
+	switch action.Status {
+	case core.ActionPending, core.ActionReady, core.ActionBlocked, core.ActionFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 func isClosedStatus(status core.WorkItemStatus) bool {
 	switch status {
 	case core.WorkItemDone, core.WorkItemCancelled, core.WorkItemClosed:
@@ -504,6 +529,26 @@ func compactString(raw string, limit int) string {
 		return trimmed[:limit]
 	}
 	return trimmed[:limit-3] + "..."
+}
+
+func (s *Service) propagatePreferredProfile(ctx context.Context, workItemID int64, profile string) error {
+	actions, err := s.store.ListActionsByWorkItem(ctx, workItemID)
+	if err != nil {
+		return err
+	}
+	for _, action := range actions {
+		if !shouldPropagatePreferredProfile(action) {
+			continue
+		}
+		if action.Config == nil {
+			action.Config = map[string]any{}
+		}
+		action.Config["preferred_profile_id"] = profile
+		if err := s.store.UpdateAction(ctx, action); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func cloneMetadata(metadata map[string]any) map[string]any {

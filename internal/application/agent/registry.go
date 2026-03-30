@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	flowapp "github.com/yoke233/zhanggui/internal/application/flow"
@@ -104,8 +105,20 @@ func (r *ConfigRegistry) ResolveForAction(_ context.Context, action *core.Action
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	if action == nil {
+		return nil, core.ErrNoMatchingAgent
+	}
+	if preferred := preferredProfileID(action); preferred != "" {
+		if p, ok := r.profiles[preferred]; ok && p != nil {
+			return cloneProfile(p), nil
+		}
+	}
+
 	role := core.AgentRole(action.AgentRole)
 	for _, p := range r.profiles {
+		if p == nil {
+			continue
+		}
 		if role != "" && p.Role != role {
 			continue
 		}
@@ -136,6 +149,14 @@ func (r *ConfigRegistry) Resolve(ctx context.Context, action *core.Action) (stri
 		return "", err
 	}
 	return p.ID, nil
+}
+
+func preferredProfileID(action *core.Action) string {
+	if action == nil || action.Config == nil {
+		return ""
+	}
+	raw, _ := action.Config["preferred_profile_id"].(string)
+	return strings.TrimSpace(raw)
 }
 
 // ---------- validation ----------

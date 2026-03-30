@@ -305,8 +305,7 @@ func withAssignedProfile(metadata map[string]any, profile string) map[string]any
 
 func appendCEOJournal(metadata map[string]any, entry map[string]any) map[string]any {
 	out := cloneMetadata(metadata)
-	raw := out["ceo_journal"]
-	journal, _ := raw.([]any)
+	journal := cloneJournalEntries(out["ceo_journal"])
 	journal = append(journal, cloneAnyMap(entry))
 	out["ceo_journal"] = journal
 	return out
@@ -426,6 +425,31 @@ func cloneAnyMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func cloneJournalEntries(raw any) []any {
+	switch entries := raw.(type) {
+	case nil:
+		return nil
+	case []any:
+		out := make([]any, 0, len(entries))
+		for _, entry := range entries {
+			if nested, ok := entry.(map[string]any); ok {
+				out = append(out, cloneAnyMap(nested))
+				continue
+			}
+			out = append(out, entry)
+		}
+		return out
+	case []map[string]any:
+		out := make([]any, 0, len(entries))
+		for _, entry := range entries {
+			out = append(out, cloneAnyMap(entry))
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func cloneStrings(in []string) []string {

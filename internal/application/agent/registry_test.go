@@ -165,8 +165,23 @@ func TestConfigRegistry_ResolveForAction(t *testing.T) {
 			wantID: "worker-fe",
 		},
 		{
+			name:   "preferred profile override wins first",
+			action: &core.Action{AgentRole: "worker", RequiredCapabilities: []string{"backend"}, Config: map[string]any{"preferred_profile_id": "worker-fe"}},
+			wantID: "worker-fe",
+		},
+		{
+			name:   "preferred profile falls back when missing",
+			action: &core.Action{AgentRole: "worker", RequiredCapabilities: []string{"backend"}, Config: map[string]any{"preferred_profile_id": "worker-missing"}},
+			wantID: "worker-be",
+		},
+		{
 			name:    "no match",
 			action:  &core.Action{AgentRole: "worker", RequiredCapabilities: []string{"mobile"}},
+			wantErr: core.ErrNoMatchingAgent,
+		},
+		{
+			name:    "nil action",
+			action:  nil,
 			wantErr: core.ErrNoMatchingAgent,
 		},
 	}

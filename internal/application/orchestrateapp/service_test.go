@@ -80,6 +80,35 @@ func TestServiceCreateTaskReturnsExistingOpenWorkItemForSameDedupeKey(t *testing
 	}
 }
 
+func TestServiceCreateTaskReturnsExistingOpenWorkItemForSameSourceGoalRef(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+
+	first, err := env.svc.CreateTask(context.Background(), CreateTaskInput{
+		Title:         "CEO bootstrap",
+		SourceGoalRef: "goal:bootstrap",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask(first) error = %v", err)
+	}
+
+	second, err := env.svc.CreateTask(context.Background(), CreateTaskInput{
+		Title:         "CEO bootstrap duplicate",
+		SourceGoalRef: "goal:bootstrap",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask(second) error = %v", err)
+	}
+
+	if second.WorkItem.ID != first.WorkItem.ID {
+		t.Fatalf("CreateTask(second).WorkItem.ID = %d, want %d", second.WorkItem.ID, first.WorkItem.ID)
+	}
+	if second.Created {
+		t.Fatal("CreateTask(second).Created = true, want false")
+	}
+}
+
 func TestServiceFollowUpTaskReturnsAssignedProfileAndNextStep(t *testing.T) {
 	t.Parallel()
 
@@ -174,6 +203,59 @@ func TestServiceReassignAppendsCEOJournal(t *testing.T) {
 	journal, ok := workItem.Metadata["ceo_journal"].([]any)
 	if !ok || len(journal) != 1 {
 		t.Fatalf("ceo_journal = %#v, want single entry", workItem.Metadata["ceo_journal"])
+	}
+}
+
+func TestServiceReassignPreservesExistingCEOJournalHistory(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	workItemID, err := env.store.CreateWorkItem(context.Background(), &core.WorkItem{
+		Title:    "reassign me again",
+		Status:   core.WorkItemOpen,
+		Priority: core.PriorityMedium,
+		Metadata: map[string]any{
+			"ceo": map[string]any{"assigned_profile": "planner"},
+			"ceo_journal": []map[string]any{
+				{
+					"action": "task.create",
+					"after":  map[string]any{"assigned_profile": "planner"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+
+	_, err = env.svc.ReassignTask(context.Background(), ReassignTaskInput{
+		WorkItemID:    workItemID,
+		NewProfile:    "worker",
+		Reason:        "planner stalled",
+		ActorProfile:  "ceo",
+		SourceSession: "chat-42",
+	})
+	if err != nil {
+		t.Fatalf("ReassignTask() error = %v", err)
+	}
+
+	workItem, err := env.store.GetWorkItem(context.Background(), workItemID)
+	if err != nil {
+		t.Fatalf("GetWorkItem() error = %v", err)
+	}
+	journal, ok := workItem.Metadata["ceo_journal"].([]any)
+	if !ok {
+		t.Fatalf("ceo_journal type = %T, want []any", workItem.Metadata["ceo_journal"])
+	}
+	if len(journal) != 2 {
+		t.Fatalf("ceo_journal len = %d, want 2", len(journal))
+	}
+	first, ok := journal[0].(map[string]any)
+	if !ok {
+		t.Fatalf("ceo_journal[0] type = %T, want map[string]any", journal[0])
+	}
+	if first["action"] != "task.create" {
+		t.Fatalf("ceo_journal[0].action = %v, want task.create", first["action"])
 	}
 }
 

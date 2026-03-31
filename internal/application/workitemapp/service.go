@@ -17,6 +17,7 @@ type initiativeMembershipReader interface {
 type Config struct {
 	Store             Store
 	Tx                Tx
+	Registry          core.AgentRegistry
 	Scheduler         Scheduler
 	Runner            Runner
 	Bus               EventPublisher
@@ -27,6 +28,7 @@ type Config struct {
 type Service struct {
 	store         Store
 	tx            Tx
+	registry      core.AgentRegistry
 	scheduler     Scheduler
 	runner        Runner
 	bus           EventPublisher
@@ -38,6 +40,7 @@ func New(cfg Config) *Service {
 	return &Service{
 		store:         cfg.Store,
 		tx:            cfg.Tx,
+		registry:      cfg.Registry,
 		scheduler:     cfg.Scheduler,
 		runner:        cfg.Runner,
 		bus:           cfg.Bus,
@@ -85,6 +88,9 @@ func (s *Service) CreateWorkItem(ctx context.Context, input CreateWorkItemInput)
 		DependsOn:          cloneInt64s(input.DependsOn),
 		EscalationPath:     cloneStrings(input.EscalationPath),
 		Metadata:           cloneMetadata(input.Metadata),
+	}
+	if err := s.applyReportingChainDefaults(ctx, workItem); err != nil {
+		return nil, err
 	}
 
 	id, err := s.store.CreateWorkItem(ctx, workItem)
@@ -185,6 +191,9 @@ func (s *Service) UpdateWorkItem(ctx context.Context, input UpdateWorkItemInput)
 	}
 	if input.Metadata != nil {
 		workItem.Metadata = cloneMetadata(input.Metadata)
+	}
+	if err := s.applyReportingChainDefaults(ctx, workItem); err != nil {
+		return nil, err
 	}
 
 	if err := s.store.UpdateWorkItem(ctx, workItem); err != nil {
@@ -500,4 +509,52 @@ func cloneInt64s(in []int64) []int64 {
 	out := make([]int64, len(in))
 	copy(out, in)
 	return out
+}
+
+func (s *Service) applyReportingChainDefaults(ctx context.Context, workItem *core.WorkItem) error {
+	if s == nil || s.registry == nil || workItem == nil {
+		return nil
+	}
+
+	if workItem.ReviewerProfileID == "" && workItem.ExecutorProfileID != "" {
+		reviewer, err := DefaultReviewerProfileID(ctx, workItem.ExecutorProfileID, s.registry)
+		if err != nil {
+			return err
+		}
+		workItem.ReviewerProfileID = reviewer
+	}
+	if workItem.ActiveProfileID == "" {
+		workItem.ActiveProfileID = firstNonEmpty(workItem.ExecutorProfileID, workItem.ReviewerProfileID)
+	}
+	if len(workItem.EscalationPath) == 0 && workItem.ActiveProfileID != "" {
+		path, err := BuildEscalationPath(ctx, workItem.ActiveProfileID, s.registry)
+		if err != nil {
+			return err
+		}
+		workItem.EscalationPath = path
+	}
+	if workItem.SponsorProfileID == "" {
+		workItem.SponsorProfileID = resolveSponsorProfileID(workItem.EscalationPath, workItem.ReviewerProfileID)
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func resolveSponsorProfileID(escalationPath []string, reviewerProfileID string) string {
+	for i := len(escalationPath) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(escalationPath[i])
+		if candidate != "" && candidate != HumanEscalationTarget {
+			return candidate
+		}
+	}
+	return strings.TrimSpace(reviewerProfileID)
 }

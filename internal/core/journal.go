@@ -22,6 +22,8 @@ const (
 	JournalMergeEvent  JournalKind = "merge_event"
 	JournalError       JournalKind = "error"
 	JournalSystem      JournalKind = "system"
+	JournalAssignment  JournalKind = "assignment"
+	JournalBackfill    JournalKind = "backfill"
 )
 
 // JournalSource identifies who produced the entry.

@@ -14,15 +14,16 @@ func CoreProfileToRuntimeConfig(p *core.AgentProfile) config.RuntimeProfileConfi
 		actions[i] = string(a)
 	}
 	return config.RuntimeProfileConfig{
-		ID:             p.ID,
-		Name:           p.Name,
-		Driver:         p.DriverID,
-		LLMConfigID:    p.LLMConfigID,
-		Role:           string(p.Role),
-		Capabilities:   append([]string(nil), p.Capabilities...),
-		ActionsAllowed: actions,
-		PromptTemplate: p.PromptTemplate,
-		Skills:         append([]string(nil), p.Skills...),
+		ID:               p.ID,
+		Name:             p.Name,
+		ManagerProfileID: p.ManagerProfileID,
+		Driver:           p.DriverID,
+		LLMConfigID:      p.LLMConfigID,
+		Role:             string(p.Role),
+		Capabilities:     append([]string(nil), p.Capabilities...),
+		ActionsAllowed:   actions,
+		PromptTemplate:   p.PromptTemplate,
+		Skills:           append([]string(nil), p.Skills...),
 		Session: config.RuntimeSessionConfig{
 			Reuse:              p.Session.Reuse,
 			MaxTurns:           p.Session.MaxTurns,
@@ -82,16 +83,17 @@ func convertProfiles(driverCfgs []config.RuntimeDriverConfig, profileCfgs []conf
 			}
 		}
 		out[i] = &core.AgentProfile{
-			ID:             c.ID,
-			Name:           c.Name,
-			DriverID:       c.Driver,
-			LLMConfigID:    c.LLMConfigID,
-			Driver:         driverCfg,
-			Role:           core.AgentRole(c.Role),
-			Capabilities:   append([]string(nil), c.Capabilities...),
-			ActionsAllowed: actions,
-			PromptTemplate: c.PromptTemplate,
-			Skills:         append([]string(nil), c.Skills...),
+			ID:               c.ID,
+			Name:             c.Name,
+			ManagerProfileID: c.ManagerProfileID,
+			DriverID:         c.Driver,
+			LLMConfigID:      c.LLMConfigID,
+			Driver:           driverCfg,
+			Role:             core.AgentRole(c.Role),
+			Capabilities:     append([]string(nil), c.Capabilities...),
+			ActionsAllowed:   actions,
+			PromptTemplate:   c.PromptTemplate,
+			Skills:           append([]string(nil), c.Skills...),
 			Session: core.ProfileSession{
 				Reuse:              c.Session.Reuse,
 				MaxTurns:           c.Session.MaxTurns,

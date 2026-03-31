@@ -79,6 +79,7 @@ func TestProfileCRUD(t *testing.T) {
 	ctx := context.Background()
 
 	p := testProfile("worker-1", core.RoleWorker, "go", "backend")
+	p.ManagerProfileID = "lead-1"
 
 	// Create
 	if err := s.CreateProfile(ctx, p); err != nil {
@@ -97,6 +98,9 @@ func TestProfileCRUD(t *testing.T) {
 	}
 	if got.Role != core.RoleWorker {
 		t.Fatalf("expected worker, got %s", got.Role)
+	}
+	if got.ManagerProfileID != "lead-1" {
+		t.Fatalf("expected manager_profile_id lead-1, got %q", got.ManagerProfileID)
 	}
 	if len(got.Capabilities) != 2 || got.Capabilities[0] != "go" {
 		t.Fatalf("unexpected capabilities: %v", got.Capabilities)
@@ -144,6 +148,7 @@ func TestProfileCRUD(t *testing.T) {
 
 	// Update
 	p.Capabilities = []string{"go", "backend", "api"}
+	p.ManagerProfileID = "lead-2"
 	p.Session.MaxTurns = 20
 	p.Skills = []string{"strict-review", "writing-wave-plans"}
 	if err := s.UpdateProfile(ctx, p); err != nil {
@@ -155,6 +160,9 @@ func TestProfileCRUD(t *testing.T) {
 	}
 	if got.Session.MaxTurns != 20 {
 		t.Fatalf("expected max_turns=20, got %d", got.Session.MaxTurns)
+	}
+	if got.ManagerProfileID != "lead-2" {
+		t.Fatalf("expected manager_profile_id lead-2 after update, got %q", got.ManagerProfileID)
 	}
 	if len(got.Skills) != 2 {
 		t.Fatalf("expected 2 skills after update, got %d", len(got.Skills))
@@ -264,6 +272,7 @@ func TestUpsertProfile(t *testing.T) {
 	ctx := context.Background()
 
 	p := testProfile("worker", core.RoleWorker, "go")
+	p.ManagerProfileID = "ceo"
 	// First upsert = insert
 	if err := s.UpsertProfile(ctx, p); err != nil {
 		t.Fatalf("UpsertProfile (insert): %v", err)
@@ -272,12 +281,16 @@ func TestUpsertProfile(t *testing.T) {
 	if len(got.Capabilities) != 1 {
 		t.Fatalf("expected 1 cap, got %d", len(got.Capabilities))
 	}
+	if got.ManagerProfileID != "ceo" {
+		t.Fatalf("expected manager_profile_id ceo, got %q", got.ManagerProfileID)
+	}
 	if len(got.Skills) != 1 || got.Skills[0] != "strict-review" {
 		t.Fatalf("expected skills preserved, got %v", got.Skills)
 	}
 
 	// Second upsert = update
 	p.Capabilities = []string{"go", "backend"}
+	p.ManagerProfileID = "lead"
 	p.Skills = []string{"writing-wave-plans"}
 	if err := s.UpsertProfile(ctx, p); err != nil {
 		t.Fatalf("UpsertProfile (update): %v", err)
@@ -288,6 +301,9 @@ func TestUpsertProfile(t *testing.T) {
 	}
 	if len(got.Skills) != 1 || got.Skills[0] != "writing-wave-plans" {
 		t.Fatalf("expected skills updated after upsert, got %v", got.Skills)
+	}
+	if got.ManagerProfileID != "lead" {
+		t.Fatalf("expected manager_profile_id lead after upsert, got %q", got.ManagerProfileID)
 	}
 }
 

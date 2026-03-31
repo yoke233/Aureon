@@ -97,3 +97,53 @@ func TestValidateRuntimeAgentBindingsRejectsIncompatibleProvider(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want incompatible provider", err)
 	}
 }
+
+func TestValidateRuntimeAgentBindingsRejectsMissingManagerProfile(t *testing.T) {
+	cfg := &Config{}
+	cfg.Runtime.Agents.Drivers = []RuntimeDriverConfig{{
+		ID:            "claude-acp",
+		LaunchCommand: "npx",
+		LaunchArgs:    []string{"-y", "@zed-industries/claude-agent-acp"},
+	}}
+	cfg.Runtime.Agents.Profiles = []RuntimeProfileConfig{
+		{
+			ID:          "ceo",
+			Driver:      "claude-acp",
+			LLMConfigID: "system",
+			Role:        "lead",
+		},
+		{
+			ID:               "worker",
+			Driver:           "claude-acp",
+			LLMConfigID:      "system",
+			Role:             "worker",
+			ManagerProfileID: "missing",
+		},
+	}
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), `manager_profile_id "missing" not found`) {
+		t.Fatalf("Validate() error = %v, want missing manager_profile_id", err)
+	}
+}
+
+func TestValidateRuntimeAgentBindingsRejectsSelfManagerProfile(t *testing.T) {
+	cfg := &Config{}
+	cfg.Runtime.Agents.Drivers = []RuntimeDriverConfig{{
+		ID:            "claude-acp",
+		LaunchCommand: "npx",
+		LaunchArgs:    []string{"-y", "@zed-industries/claude-agent-acp"},
+	}}
+	cfg.Runtime.Agents.Profiles = []RuntimeProfileConfig{{
+		ID:               "ceo",
+		Driver:           "claude-acp",
+		LLMConfigID:      "system",
+		Role:             "lead",
+		ManagerProfileID: "ceo",
+	}}
+
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "cannot reference itself") {
+		t.Fatalf("Validate() error = %v, want self manager_profile_id rejection", err)
+	}
+}

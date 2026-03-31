@@ -27,14 +27,15 @@ func TestNewConfigRegistryFromConfig_LoadsProfiles(t *testing.T) {
 		},
 		Profiles: []config.RuntimeProfileConfig{
 			{
-				ID:             "worker-1",
-				Name:           "Worker One",
-				Driver:         "codex",
-				Role:           "worker",
-				Capabilities:   []string{"backend"},
-				ActionsAllowed: []string{"fs_write", "terminal"},
-				PromptTemplate: "implement",
-				Skills:         []string{"skill-a"},
+				ID:               "worker-1",
+				Name:             "Worker One",
+				ManagerProfileID: "lead-1",
+				Driver:           "codex",
+				Role:             "worker",
+				Capabilities:     []string{"backend"},
+				ActionsAllowed:   []string{"fs_write", "terminal"},
+				PromptTemplate:   "implement",
+				Skills:           []string{"skill-a"},
 				Session: config.RuntimeSessionConfig{
 					Reuse:    true,
 					MaxTurns: 7,
@@ -73,6 +74,9 @@ func TestNewConfigRegistryFromConfig_LoadsProfiles(t *testing.T) {
 	}
 	if got.Role != core.RoleWorker {
 		t.Fatalf("Role = %q, want worker", got.Role)
+	}
+	if got.ManagerProfileID != "lead-1" {
+		t.Fatalf("ManagerProfileID = %q, want lead-1", got.ManagerProfileID)
 	}
 	if len(got.ActionsAllowed) != 2 || got.ActionsAllowed[0] != core.AgentActionFSWrite || got.ActionsAllowed[1] != core.AgentActionTerminal {
 		t.Fatalf("ActionsAllowed = %#v", got.ActionsAllowed)

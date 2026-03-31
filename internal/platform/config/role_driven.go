@@ -184,6 +184,7 @@ func validateRuntimeAgentBindings(cfg *Config) error {
 	}
 
 	seenProfiles := make(map[string]struct{}, len(cfg.Runtime.Agents.Profiles))
+	profileIDs := make(map[string]struct{}, len(cfg.Runtime.Agents.Profiles))
 	for _, profile := range cfg.Runtime.Agents.Profiles {
 		profileID := strings.TrimSpace(profile.ID)
 		if profileID == "" {
@@ -193,6 +194,25 @@ func validateRuntimeAgentBindings(cfg *Config) error {
 			return fmt.Errorf("duplicate runtime.agents.profiles id %q", profileID)
 		}
 		seenProfiles[profileID] = struct{}{}
+		profileIDs[profileID] = struct{}{}
+	}
+
+	for _, profile := range cfg.Runtime.Agents.Profiles {
+		profileID := strings.TrimSpace(profile.ID)
+		managerID := strings.TrimSpace(profile.ManagerProfileID)
+		if managerID == "" {
+			continue
+		}
+		if managerID == profileID {
+			return fmt.Errorf("runtime.agents.profiles[%q].manager_profile_id cannot reference itself", profileID)
+		}
+		if _, ok := profileIDs[managerID]; !ok {
+			return fmt.Errorf("runtime.agents.profiles[%q].manager_profile_id %q not found in runtime.agents.profiles", profileID, managerID)
+		}
+	}
+
+	for _, profile := range cfg.Runtime.Agents.Profiles {
+		profileID := strings.TrimSpace(profile.ID)
 
 		driverID := strings.TrimSpace(profile.Driver)
 		if driverID == "" {

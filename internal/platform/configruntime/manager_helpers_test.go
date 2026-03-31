@@ -52,15 +52,16 @@ func TestBuildAgentsAndResolveDriverConfig(t *testing.T) {
 			},
 		}},
 		Profiles: []config.RuntimeProfileConfig{{
-			ID:             "worker",
-			Name:           "Worker",
-			Driver:         "codex",
-			LLMConfigID:    "openai-response-default",
-			Role:           "worker",
-			Capabilities:   []string{"backend"},
-			ActionsAllowed: []string{"read_context", "terminal"},
-			PromptTemplate: "worker",
-			Skills:         []string{"skill-a"},
+			ID:               "worker",
+			Name:             "Worker",
+			ManagerProfileID: "lead",
+			Driver:           "codex",
+			LLMConfigID:      "openai-response-default",
+			Role:             "worker",
+			Capabilities:     []string{"backend"},
+			ActionsAllowed:   []string{"read_context", "terminal"},
+			PromptTemplate:   "worker",
+			Skills:           []string{"skill-a"},
 			Session: config.RuntimeSessionConfig{
 				Reuse:              true,
 				MaxTurns:           3,
@@ -92,6 +93,9 @@ func TestBuildAgentsAndResolveDriverConfig(t *testing.T) {
 	if profiles[0].DriverID != "codex" || profiles[0].LLMConfigID != "openai-response-default" {
 		t.Fatalf("BuildAgents() profile refs = %#v", profiles[0])
 	}
+	if profiles[0].ManagerProfileID != "lead" {
+		t.Fatalf("BuildAgents() manager_profile_id = %q, want lead", profiles[0].ManagerProfileID)
+	}
 	if profiles[0].Driver.Env["AGENTSDK_PROVIDER"] != "openai_response" || profiles[0].Driver.Env["OPENAI_API_KEY"] != "test-key" {
 		t.Fatalf("BuildAgents() llm env = %#v", profiles[0].Driver.Env)
 	}
@@ -100,6 +104,9 @@ func TestBuildAgentsAndResolveDriverConfig(t *testing.T) {
 	profiles[0].Driver.Env["MODE"] = "prod"
 	if cfg.Runtime.Agents.Profiles[0].Capabilities[0] != "backend" {
 		t.Fatalf("BuildAgents should deep copy profile capabilities")
+	}
+	if cfg.Runtime.Agents.Profiles[0].ManagerProfileID != "lead" {
+		t.Fatalf("BuildAgents should preserve manager_profile_id on source config")
 	}
 	if cfg.Runtime.Agents.Drivers[0].LaunchArgs[0] != "exec" || cfg.Runtime.Agents.Drivers[0].Env["MODE"] != "test" {
 		t.Fatalf("BuildAgents should deep copy driver config")

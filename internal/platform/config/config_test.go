@@ -65,6 +65,9 @@ func TestLoadDefaults_RuntimeAgents(t *testing.T) {
 	if !ok {
 		t.Fatal("expected lead profile")
 	}
+	if lead.ManagerProfileID != "ceo" {
+		t.Fatalf("expected lead.manager_profile_id=ceo, got %q", lead.ManagerProfileID)
+	}
 	if lead.Driver != "claude-acp" {
 		t.Fatalf("expected lead.driver=claude-acp, got %q", lead.Driver)
 	}
@@ -105,6 +108,9 @@ func TestLoadDefaults_RuntimeAgents(t *testing.T) {
 	if !ok {
 		t.Fatal("expected worker profile")
 	}
+	if worker.ManagerProfileID != "lead" {
+		t.Fatalf("expected worker.manager_profile_id=lead, got %q", worker.ManagerProfileID)
+	}
 	if worker.Driver != "agentsdk-go" {
 		t.Fatalf("expected worker.driver=agentsdk-go, got %q", worker.Driver)
 	}
@@ -121,8 +127,62 @@ func TestLoadDefaults_RuntimeAgents(t *testing.T) {
 	if !ok {
 		t.Fatal("expected support profile")
 	}
+	if support.ManagerProfileID != "lead" {
+		t.Fatalf("expected support.manager_profile_id=lead, got %q", support.ManagerProfileID)
+	}
 	if support.Driver != "agentsdk-go" {
 		t.Fatalf("expected support.driver=agentsdk-go, got %q", support.Driver)
+	}
+}
+
+func TestValidateRuntimeProfilesRejectsMissingManager(t *testing.T) {
+	cfg := Defaults()
+	cfg.Runtime.Agents.Profiles = []RuntimeProfileConfig{
+		{
+			ID:          "ceo",
+			Name:        "CEO",
+			Driver:      "claude-acp",
+			LLMConfigID: "system",
+			Role:        "lead",
+		},
+		{
+			ID:               "lead",
+			Name:             "Lead",
+			Driver:           "claude-acp",
+			LLMConfigID:      "system",
+			Role:             "lead",
+			ManagerProfileID: "missing",
+		},
+	}
+
+	err := Validate(&cfg)
+	if err == nil {
+		t.Fatal("expected missing manager validation error")
+	}
+	if !strings.Contains(err.Error(), "manager_profile_id") {
+		t.Fatalf("expected manager_profile_id error, got %v", err)
+	}
+}
+
+func TestValidateRuntimeProfilesRejectsSelfManager(t *testing.T) {
+	cfg := Defaults()
+	cfg.Runtime.Agents.Profiles = []RuntimeProfileConfig{
+		{
+			ID:               "ceo",
+			Name:             "CEO",
+			Driver:           "claude-acp",
+			LLMConfigID:      "system",
+			Role:             "lead",
+			ManagerProfileID: "ceo",
+		},
+	}
+
+	err := Validate(&cfg)
+	if err == nil {
+		t.Fatal("expected self-manager validation error")
+	}
+	if !strings.Contains(err.Error(), "cannot reference itself") {
+		t.Fatalf("expected self-manager error, got %v", err)
 	}
 }
 

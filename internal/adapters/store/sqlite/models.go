@@ -152,6 +152,7 @@ func (EventModel) TableName() string { return "event_log" }
 type AgentProfileModel struct {
 	ID               string                        `gorm:"column:id;primaryKey"`
 	Name             string                        `gorm:"column:name;not null"`
+	ManagerProfileID string                        `gorm:"column:manager_profile_id;not null;default:''"`
 	DriverID         string                        `gorm:"column:driver_id;not null;default:''"`
 	LLMConfigID      string                        `gorm:"column:llm_config_id;not null;default:''"`
 	DriverConfig     JSONField[core.DriverConfig]  `gorm:"column:driver_config;type:text"`
@@ -1117,6 +1118,9 @@ func agentProfileModelFromCore(p *core.AgentProfile) *AgentProfileModel {
 	return &AgentProfileModel{
 		ID:               p.ID,
 		Name:             p.Name,
+		ManagerProfileID: p.ManagerProfileID,
+		DriverID:         p.DriverID,
+		LLMConfigID:      p.LLMConfigID,
 		DriverConfig:     JSONField[core.DriverConfig]{Data: p.Driver},
 		Role:             string(p.Role),
 		Capabilities:     JSONField[[]string]{Data: p.Capabilities},
@@ -1136,14 +1140,17 @@ func (m *AgentProfileModel) toCore() *core.AgentProfile {
 		return nil
 	}
 	return &core.AgentProfile{
-		ID:             m.ID,
-		Name:           m.Name,
-		Driver:         m.DriverConfig.Data,
-		Role:           core.AgentRole(m.Role),
-		Capabilities:   m.Capabilities.Data,
-		ActionsAllowed: m.ActionsAllowed.Data,
-		PromptTemplate: m.PromptTemplate,
-		Skills:         m.Skills.Data,
+		ID:               m.ID,
+		Name:             m.Name,
+		ManagerProfileID: m.ManagerProfileID,
+		DriverID:         m.DriverID,
+		LLMConfigID:      m.LLMConfigID,
+		Driver:           m.DriverConfig.Data,
+		Role:             core.AgentRole(m.Role),
+		Capabilities:     m.Capabilities.Data,
+		ActionsAllowed:   m.ActionsAllowed.Data,
+		PromptTemplate:   m.PromptTemplate,
+		Skills:           m.Skills.Data,
 		Session: core.ProfileSession{
 			Reuse:    m.SessionReuse,
 			MaxTurns: m.SessionMaxTurns,

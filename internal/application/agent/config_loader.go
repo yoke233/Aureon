@@ -41,14 +41,17 @@ func convertProfilesFromConfig(driverCfgs []config.RuntimeDriverConfig, profileC
 			}
 		}
 		out[i] = &core.AgentProfile{
-			ID:             c.ID,
-			Name:           c.Name,
-			Driver:         driverCfg,
-			Role:           core.AgentRole(c.Role),
-			Capabilities:   c.Capabilities,
-			ActionsAllowed: actions,
-			PromptTemplate: c.PromptTemplate,
-			Skills:         c.Skills,
+			ID:               c.ID,
+			Name:             c.Name,
+			ManagerProfileID: c.ManagerProfileID,
+			DriverID:         c.Driver,
+			LLMConfigID:      c.LLMConfigID,
+			Driver:           driverCfg,
+			Role:             core.AgentRole(c.Role),
+			Capabilities:     c.Capabilities,
+			ActionsAllowed:   actions,
+			PromptTemplate:   c.PromptTemplate,
+			Skills:           c.Skills,
 			Session: core.ProfileSession{
 				Reuse:    c.Session.Reuse,
 				MaxTurns: c.Session.MaxTurns,

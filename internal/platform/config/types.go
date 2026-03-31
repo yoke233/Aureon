@@ -247,17 +247,18 @@ type RuntimeDriverConfig struct {
 
 // RuntimeProfileConfig defines an agent profile (role instance) for the runtime engine.
 type RuntimeProfileConfig struct {
-	ID             string               `toml:"id"              yaml:"id" json:"id"`
-	Name           string               `toml:"name"            yaml:"name" json:"name"`
-	Driver         string               `toml:"driver"          yaml:"driver" json:"driver"`
-	LLMConfigID    string               `toml:"llm_config_id"   yaml:"llm_config_id" json:"llm_config_id"`
-	Role           string               `toml:"role"            yaml:"role" json:"role"`
-	Capabilities   []string             `toml:"capabilities"    yaml:"capabilities" json:"capabilities"`
-	ActionsAllowed []string             `toml:"actions_allowed" yaml:"actions_allowed" json:"actions_allowed"`
-	PromptTemplate string               `toml:"prompt_template" yaml:"prompt_template" json:"prompt_template"`
-	Skills         []string             `toml:"skills"          yaml:"skills" json:"skills"`
-	Session        RuntimeSessionConfig `toml:"session"         yaml:"session" json:"session"`
-	MCP            MCPConfig            `toml:"mcp"             yaml:"mcp" json:"mcp"`
+	ID               string               `toml:"id"                 yaml:"id" json:"id"`
+	Name             string               `toml:"name"               yaml:"name" json:"name"`
+	ManagerProfileID string               `toml:"manager_profile_id" yaml:"manager_profile_id" json:"manager_profile_id"`
+	Driver           string               `toml:"driver"             yaml:"driver" json:"driver"`
+	LLMConfigID      string               `toml:"llm_config_id"      yaml:"llm_config_id" json:"llm_config_id"`
+	Role             string               `toml:"role"               yaml:"role" json:"role"`
+	Capabilities     []string             `toml:"capabilities"       yaml:"capabilities" json:"capabilities"`
+	ActionsAllowed   []string             `toml:"actions_allowed"    yaml:"actions_allowed" json:"actions_allowed"`
+	PromptTemplate   string               `toml:"prompt_template"    yaml:"prompt_template" json:"prompt_template"`
+	Skills           []string             `toml:"skills"             yaml:"skills" json:"skills"`
+	Session          RuntimeSessionConfig `toml:"session"            yaml:"session" json:"session"`
+	MCP              MCPConfig            `toml:"mcp"                yaml:"mcp" json:"mcp"`
 }
 
 // RuntimeSessionConfig configures session management for a runtime profile.

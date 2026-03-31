@@ -28,6 +28,9 @@ func TestSeedRegistrySeedsOnlyCEOOnEmptyStore(t *testing.T) {
 	if profiles[0].ID != "ceo" {
 		t.Fatalf("profiles[0].ID = %q, want ceo", profiles[0].ID)
 	}
+	if profiles[0].ManagerProfileID != "" {
+		t.Fatalf("profiles[0].ManagerProfileID = %q, want empty", profiles[0].ManagerProfileID)
+	}
 }
 
 func TestSeedRegistryDoesNotOverwriteExistingProfiles(t *testing.T) {
@@ -98,6 +101,13 @@ func bootstrapRegistrySeedConfig() *config.Config {
 						MaxTurns: 16,
 						IdleTTL:  config.Duration{Duration: 30 * time.Minute},
 					},
+				}, {
+					ID:               "lead",
+					Name:             "Lead Agent",
+					Driver:           "codex-cli",
+					LLMConfigID:      "system",
+					Role:             string(core.RoleLead),
+					ManagerProfileID: "ceo",
 				}},
 			},
 		},

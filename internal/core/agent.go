@@ -44,16 +44,17 @@ type DriverConfig struct {
 // AgentProfile defines an agent's identity, role, capabilities, and constraints.
 // Driver configuration is embedded directly via the Driver field.
 type AgentProfile struct {
-	ID             string        `json:"id"`
-	Name           string        `json:"name,omitempty"`
-	DriverID       string        `json:"driver_id,omitempty"`
-	LLMConfigID    string        `json:"llm_config_id,omitempty"`
-	Driver         DriverConfig  `json:"driver"`
-	Role           AgentRole     `json:"role"`
-	Capabilities   []string      `json:"capabilities,omitempty"`    // capability tags (backend, qa, review, ...)
-	ActionsAllowed []AgentAction `json:"actions_allowed,omitempty"` // permitted actions
-	PromptTemplate string        `json:"prompt_template,omitempty"`
-	Skills         []string      `json:"skills,omitempty"` // skill folder names to enable for this profile
+	ID               string        `json:"id"`
+	Name             string        `json:"name,omitempty"`
+	ManagerProfileID string        `json:"manager_profile_id,omitempty"`
+	DriverID         string        `json:"driver_id,omitempty"`
+	LLMConfigID      string        `json:"llm_config_id,omitempty"`
+	Driver           DriverConfig  `json:"driver"`
+	Role             AgentRole     `json:"role"`
+	Capabilities     []string      `json:"capabilities,omitempty"`    // capability tags (backend, qa, review, ...)
+	ActionsAllowed   []AgentAction `json:"actions_allowed,omitempty"` // permitted actions
+	PromptTemplate   string        `json:"prompt_template,omitempty"`
+	Skills           []string      `json:"skills,omitempty"` // skill folder names to enable for this profile
 
 	Session ProfileSession `json:"session,omitempty"`
 	MCP     ProfileMCP     `json:"mcp,omitempty"`

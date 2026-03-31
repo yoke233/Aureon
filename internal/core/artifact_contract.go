@@ -138,6 +138,38 @@ func RunResultToDeliverable(run *Run) *Deliverable {
 	}
 }
 
+func ThreadMessageToDeliverable(message *ThreadMessage) *Deliverable {
+	if message == nil || message.ThreadID <= 0 || !HasArtifactResultMetadata(message.Metadata) {
+		return nil
+	}
+
+	payload := map[string]any{
+		"message_id": message.ID,
+	}
+	if strings.TrimSpace(message.Content) != "" {
+		payload[DeliverablePayloadKeyMarkdown] = message.Content
+	}
+	if len(message.Metadata) > 0 {
+		payload[DeliverablePayloadKeyMetadata] = cloneAnyMap(message.Metadata)
+	}
+	if artifact := NormalizeArtifactMetadata(message.Metadata); artifact != nil {
+		payload[DeliverablePayloadKeyArtifact] = artifact
+	}
+
+	threadID := message.ThreadID
+	return &Deliverable{
+		ThreadID:     &threadID,
+		Kind:         inferDeliverableKind(message.Metadata),
+		Title:        artifactString(message.Metadata, ResultMetaArtifactTitle),
+		Summary:      inferDeliverableSummary(message.Metadata, message.Content),
+		Payload:      payload,
+		ProducerType: DeliverableProducerThread,
+		ProducerID:   message.ThreadID,
+		Status:       DeliverableFinal,
+		CreatedAt:    message.CreatedAt,
+	}
+}
+
 func inferDeliverableKind(metadata map[string]any) DeliverableKind {
 	switch strings.ToLower(strings.TrimSpace(artifactString(metadata, ResultMetaArtifactType))) {
 	case "code_change", "branch", "diff", "patch":

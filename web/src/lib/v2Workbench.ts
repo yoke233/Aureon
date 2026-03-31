@@ -47,7 +47,10 @@ export const formatWorkItemDuration = (workItem: Pick<WorkItem, "created_at" | "
   }
   const updated = new Date(workItem.updated_at);
   const end =
-    workItem.status === "done" || workItem.status === "failed" || workItem.status === "cancelled"
+    workItem.status === "done"
+    || workItem.status === "completed"
+    || workItem.status === "failed"
+    || workItem.status === "cancelled"
       ? updated
       : new Date();
   const diffMs = Math.max(0, end.getTime() - created.getTime());
@@ -60,7 +63,14 @@ export const formatWorkItemDuration = (workItem: Pick<WorkItem, "created_at" | "
 };
 
 export const isActiveWorkItemStatus = (status: string): boolean =>
-  status === "queued" || status === "running" || status === "blocked" || status === "pending";
+  status === "queued"
+  || status === "pending_execution"
+  || status === "running"
+  || status === "in_execution"
+  || status === "pending_review"
+  || status === "blocked"
+  || status === "escalated"
+  || status === "pending";
 
 export const normalizeActionTypeLabel = (type: Action["type"]): string => {
   switch (type) {

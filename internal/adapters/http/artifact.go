@@ -35,6 +35,56 @@ func runToDeliverableResponse(run *core.Run, assets []*core.Resource) map[string
 	return resp
 }
 
+func deliverableToResponse(deliverable *core.Deliverable, run *core.Run, assets []*core.Resource) map[string]any {
+	resp := map[string]any{
+		"id":            deliverable.ID,
+		"kind":          deliverable.Kind,
+		"title":         deliverable.Title,
+		"summary":       deliverable.Summary,
+		"payload":       deliverable.Payload,
+		"producer_type": deliverable.ProducerType,
+		"producer_id":   deliverable.ProducerID,
+		"status":        deliverable.Status,
+		"created_at":    deliverable.CreatedAt,
+		"deliverable": map[string]any{
+			"id":            deliverable.ID,
+			"kind":          deliverable.Kind,
+			"title":         deliverable.Title,
+			"summary":       deliverable.Summary,
+			"payload":       deliverable.Payload,
+			"producer_type": deliverable.ProducerType,
+			"producer_id":   deliverable.ProducerID,
+			"status":        deliverable.Status,
+			"created_at":    deliverable.CreatedAt,
+		},
+	}
+	if deliverable.WorkItemID != nil {
+		resp["work_item_id"] = *deliverable.WorkItemID
+	} else if run != nil {
+		resp["work_item_id"] = run.WorkItemID
+	}
+	if deliverable.ThreadID != nil {
+		resp["thread_id"] = *deliverable.ThreadID
+	}
+	if run != nil {
+		resp["run_id"] = run.ID
+		resp["action_id"] = run.ActionID
+	}
+	if markdown := core.DeliverablePayloadMarkdown(deliverable.Payload); markdown != "" {
+		resp["result_markdown"] = markdown
+	}
+	if metadata := core.DeliverablePayloadMetadata(deliverable.Payload); len(metadata) > 0 {
+		resp["metadata"] = metadata
+	}
+	if artifact := core.NormalizeDeliverableArtifact(deliverable.Payload); artifact != nil {
+		resp["artifact"] = artifact
+	}
+	if len(assets) > 0 {
+		resp["assets"] = assets
+	}
+	return resp
+}
+
 func (h *Handler) getDeliverable(w http.ResponseWriter, r *http.Request) {
 	id, ok := urlParamInt64(r, "artifactID")
 	if !ok {
@@ -42,7 +92,35 @@ func (h *Handler) getDeliverable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Artifact IDs now map to Run IDs (result data is inline on the Run).
+	deliverable, err := h.store.GetDeliverable(r.Context(), id)
+	switch {
+	case err == nil:
+		var (
+			run    *core.Run
+			assets []*core.Resource
+		)
+		if deliverable.ProducerType == core.DeliverableProducerRun {
+			run, err = h.store.GetRun(r.Context(), deliverable.ProducerID)
+			if err != nil && err != core.ErrNotFound {
+				writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+				return
+			}
+			if run != nil {
+				assets, err = h.store.ListResourcesByRun(r.Context(), run.ID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+					return
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, deliverableToResponse(deliverable, run, assets))
+		return
+	case err != nil && err != core.ErrNotFound:
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+
+	// Backward-compatible fallback: treat artifact IDs as Run IDs when no stored deliverable exists.
 	run, err := h.store.GetRun(r.Context(), id)
 	if err == core.ErrNotFound {
 		writeError(w, http.StatusNotFound, "artifact not found", "NOT_FOUND")
@@ -59,6 +137,16 @@ func (h *Handler) getDeliverable(w http.ResponseWriter, r *http.Request) {
 	assets, err := h.store.ListResourcesByRun(r.Context(), run.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+
+	deliverables, err := h.store.ListDeliverablesByProducer(r.Context(), core.DeliverableProducerRun, run.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	if len(deliverables) > 0 {
+		writeJSON(w, http.StatusOK, deliverableToResponse(deliverables[0], run, assets))
 		return
 	}
 	writeJSON(w, http.StatusOK, runToDeliverableResponse(run, assets))
@@ -85,6 +173,16 @@ func (h *Handler) getLatestDeliverable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
 		return
 	}
+
+	deliverables, err := h.store.ListDeliverablesByProducer(r.Context(), core.DeliverableProducerRun, run.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	if len(deliverables) > 0 {
+		writeJSON(w, http.StatusOK, deliverableToResponse(deliverables[0], run, assets))
+		return
+	}
 	writeJSON(w, http.StatusOK, runToDeliverableResponse(run, assets))
 }
 
@@ -105,14 +203,29 @@ func (h *Handler) listDeliverablesByRun(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Return the run's inline result as a single-element array for backward compat.
-	if !run.HasResult() {
-		writeJSON(w, http.StatusOK, []any{})
-		return
-	}
 	assets, err := h.store.ListResourcesByRun(r.Context(), run.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+
+	deliverables, err := h.store.ListDeliverablesByProducer(r.Context(), core.DeliverableProducerRun, run.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "STORE_ERROR")
+		return
+	}
+	if len(deliverables) > 0 {
+		items := make([]map[string]any, 0, len(deliverables))
+		for _, deliverable := range deliverables {
+			items = append(items, deliverableToResponse(deliverable, run, assets))
+		}
+		writeJSON(w, http.StatusOK, items)
+		return
+	}
+
+	// Return the run's inline result as a single-element array for backward compat.
+	if !run.HasResult() {
+		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
 	writeJSON(w, http.StatusOK, []map[string]any{runToDeliverableResponse(run, assets)})

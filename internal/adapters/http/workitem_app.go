@@ -73,6 +73,8 @@ func writeWorkItemAppError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusNotFound, "work item not found", "NOT_FOUND")
 	case workitemapp.CodeProjectNotFound:
 		writeError(w, http.StatusNotFound, "project not found", "PROJECT_NOT_FOUND")
+	case workitemapp.CodeDeliverableNotFound:
+		writeError(w, http.StatusNotFound, "deliverable not found", "DELIVERABLE_NOT_FOUND")
 	case workitemapp.CodeResourceSpaceNotFound:
 		writeError(w, http.StatusNotFound, "resource space not found", "RESOURCE_SPACE_NOT_FOUND")
 	case workitemapp.CodeWorkItemDependencyNotFound:

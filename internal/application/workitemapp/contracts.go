@@ -51,6 +51,7 @@ type Store interface {
 	WorkItemWriter
 	ActionReader
 	AggregateDeletionStore
+	core.DeliverableStore
 }
 
 type TxStore interface {

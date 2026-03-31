@@ -20,6 +20,7 @@ type Store interface {
 	core.ThreadStore
 	core.ActionStore
 	core.RunStore
+	core.DeliverableStore
 	core.AgentContextStore
 	core.EventStore
 	core.AnalyticsStore

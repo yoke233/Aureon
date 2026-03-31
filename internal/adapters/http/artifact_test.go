@@ -190,3 +190,102 @@ func TestArtifactRoutesExposeMetadataOnlyResults(t *testing.T) {
 		t.Fatalf("expected one artifact, got %d", len(items))
 	}
 }
+
+func TestArtifactRoutesPreferStoredDeliverables(t *testing.T) {
+	env := setupIntegration(t, nil)
+	ctx := context.Background()
+
+	workItemID, err := env.store.CreateWorkItem(ctx, &core.WorkItem{Title: "stored-deliverable", Status: core.WorkItemOpen})
+	if err != nil {
+		t.Fatalf("create work item: %v", err)
+	}
+	actionID, err := env.store.CreateAction(ctx, &core.Action{WorkItemID: workItemID, Name: "review", Type: core.ActionExec, Status: core.ActionDone})
+	if err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	runID, err := env.store.CreateRun(ctx, &core.Run{
+		ActionID:       actionID,
+		WorkItemID:     workItemID,
+		Status:         core.RunSucceeded,
+		Attempt:        1,
+		ResultMarkdown: "# inline result",
+		ResultMetadata: map[string]any{core.ResultMetaSummary: "inline summary"},
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	deliverableID, err := env.store.CreateDeliverable(ctx, &core.Deliverable{
+		WorkItemID:   &workItemID,
+		Kind:         core.DeliverableDecision,
+		Title:        "Stored Review Decision",
+		Summary:      "prefer stored deliverable",
+		Payload:      map[string]any{core.DeliverablePayloadKeyMarkdown: "# stored result"},
+		ProducerType: core.DeliverableProducerRun,
+		ProducerID:   runID,
+		Status:       core.DeliverableFinal,
+	})
+	if err != nil {
+		t.Fatalf("create deliverable: %v", err)
+	}
+
+	resp, err := http.Get(fmt.Sprintf("%s/artifacts/%d", env.server.URL, deliverableID))
+	if err != nil {
+		t.Fatalf("get artifact by deliverable id: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /artifacts/{deliverableID} status = %d", resp.StatusCode)
+	}
+	var single map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&single); err != nil {
+		t.Fatalf("decode single artifact: %v", err)
+	}
+	if got := single["id"]; got != float64(deliverableID) {
+		t.Fatalf("id = %v, want %d", got, deliverableID)
+	}
+	if got := single["run_id"]; got != float64(runID) {
+		t.Fatalf("run_id = %v, want %d", got, runID)
+	}
+	deliverable, ok := single["deliverable"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected deliverable block, got %+v", single["deliverable"])
+	}
+	if got := deliverable["title"]; got != "Stored Review Decision" {
+		t.Fatalf("deliverable title = %v", got)
+	}
+
+	resp, err = http.Get(fmt.Sprintf("%s/actions/%d/artifact/latest", env.server.URL, actionID))
+	if err != nil {
+		t.Fatalf("get latest artifact: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /actions/{actionID}/artifact/latest status = %d", resp.StatusCode)
+	}
+	var latest map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&latest); err != nil {
+		t.Fatalf("decode latest artifact: %v", err)
+	}
+	if got := latest["id"]; got != float64(deliverableID) {
+		t.Fatalf("latest id = %v, want %d", got, deliverableID)
+	}
+
+	resp, err = http.Get(fmt.Sprintf("%s/runs/%d/artifacts", env.server.URL, runID))
+	if err != nil {
+		t.Fatalf("list run artifacts: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /runs/{runID}/artifacts status = %d", resp.StatusCode)
+	}
+	var items []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		t.Fatalf("decode run artifacts: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one stored deliverable, got %d", len(items))
+	}
+	if got := items[0]["id"]; got != float64(deliverableID) {
+		t.Fatalf("list id = %v, want %d", got, deliverableID)
+	}
+}

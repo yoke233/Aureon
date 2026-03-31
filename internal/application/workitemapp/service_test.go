@@ -346,6 +346,125 @@ func TestServiceCreateWorkItemPersistsActiveProfileAndFinalDeliverable(t *testin
 	}
 }
 
+func TestServiceAdoptDeliverableSetsFinalDeliverableID(t *testing.T) {
+	store := newWorkItemAppTestStore(t)
+	svc := newSQLiteWorkItemService(store, newSQLiteTxAdapter(store, nil), nil)
+	ctx := context.Background()
+
+	workItemID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "Adopt deliverable",
+		Status:   core.WorkItemOpen,
+		Priority: core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create work item: %v", err)
+	}
+
+	threadID, err := store.CreateThread(ctx, &core.Thread{
+		Title:  "artifact-thread",
+		Status: core.ThreadActive,
+	})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	deliverableID, err := store.CreateDeliverable(ctx, &core.Deliverable{
+		ThreadID:     &threadID,
+		Kind:         core.DeliverableDocument,
+		Title:        "Login Flow Design",
+		Summary:      "thread deliverable",
+		ProducerType: core.DeliverableProducerThread,
+		ProducerID:   threadID,
+		Status:       core.DeliverableFinal,
+	})
+	if err != nil {
+		t.Fatalf("create deliverable: %v", err)
+	}
+
+	item, err := svc.AdoptDeliverable(ctx, workItemID, deliverableID)
+	if err != nil {
+		t.Fatalf("AdoptDeliverable: %v", err)
+	}
+	if item.FinalDeliverableID == nil || *item.FinalDeliverableID != deliverableID {
+		t.Fatalf("FinalDeliverableID = %v, want %d", item.FinalDeliverableID, deliverableID)
+	}
+
+	persisted, err := store.GetWorkItem(ctx, workItemID)
+	if err != nil {
+		t.Fatalf("GetWorkItem: %v", err)
+	}
+	if persisted.FinalDeliverableID == nil || *persisted.FinalDeliverableID != deliverableID {
+		t.Fatalf("persisted FinalDeliverableID = %v, want %d", persisted.FinalDeliverableID, deliverableID)
+	}
+}
+
+func TestServiceListDeliverablesIncludesAdoptedFinalDeliverable(t *testing.T) {
+	store := newWorkItemAppTestStore(t)
+	svc := newSQLiteWorkItemService(store, newSQLiteTxAdapter(store, nil), nil)
+	ctx := context.Background()
+
+	workItemID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "List deliverables",
+		Status:   core.WorkItemOpen,
+		Priority: core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create work item: %v", err)
+	}
+
+	threadID, err := store.CreateThread(ctx, &core.Thread{
+		Title:  "deliverable-thread",
+		Status: core.ThreadActive,
+	})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	adoptedID, err := store.CreateDeliverable(ctx, &core.Deliverable{
+		ThreadID:     &threadID,
+		Kind:         core.DeliverableDocument,
+		Title:        "Adopted Design",
+		Summary:      "from thread",
+		ProducerType: core.DeliverableProducerThread,
+		ProducerID:   threadID,
+		Status:       core.DeliverableFinal,
+	})
+	if err != nil {
+		t.Fatalf("create adopted deliverable: %v", err)
+	}
+
+	ownID, err := store.CreateDeliverable(ctx, &core.Deliverable{
+		WorkItemID:   &workItemID,
+		Kind:         core.DeliverableCodeChange,
+		Title:        "Implementation Patch",
+		Summary:      "from work item",
+		ProducerType: core.DeliverableProducerWorkItem,
+		ProducerID:   workItemID,
+		Status:       core.DeliverableFinal,
+	})
+	if err != nil {
+		t.Fatalf("create own deliverable: %v", err)
+	}
+
+	if _, err := svc.AdoptDeliverable(ctx, workItemID, adoptedID); err != nil {
+		t.Fatalf("AdoptDeliverable: %v", err)
+	}
+
+	items, err := svc.ListDeliverables(ctx, workItemID)
+	if err != nil {
+		t.Fatalf("ListDeliverables: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("ListDeliverables len = %d, want 2", len(items))
+	}
+	if items[0].ID != adoptedID {
+		t.Fatalf("first deliverable id = %d, want adopted %d", items[0].ID, adoptedID)
+	}
+	if items[1].ID != ownID {
+		t.Fatalf("second deliverable id = %d, want own %d", items[1].ID, ownID)
+	}
+}
+
 func TestServiceUpdateWorkItemAllowsCrossProjectDependenciesInsideSameInitiative(t *testing.T) {
 	store := newWorkItemAppTestStore(t)
 	ctx := context.Background()

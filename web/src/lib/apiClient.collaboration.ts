@@ -5,6 +5,7 @@ import type {
   ChatSessionDetail,
   ChatSessionSummary,
   ChatStatusResponse,
+  Deliverable,
   CreateThreadMessageRequest,
   CreateThreadProposalRequest,
   CreateThreadRequest,
@@ -52,6 +53,7 @@ export const buildCollaborationApi = ({
   | "getThread"
   | "updateThread"
   | "deleteThread"
+  | "listThreadDeliverables"
   | "listThreadMessages"
   | "createThreadMessage"
   | "listThreadParticipants"
@@ -158,6 +160,10 @@ export const buildCollaborationApi = ({
     request<Thread, UpdateThreadRequest>({ path: `/threads/${threadId}`, method: "PUT", body }),
   deleteThread: (threadId) =>
     request<void>({ path: `/threads/${threadId}`, method: "DELETE" }),
+  listThreadDeliverables: (threadId) =>
+    request<Deliverable[]>({
+      path: `/threads/${threadId}/deliverables`,
+    }).then((items) => (Array.isArray(items) ? items : [])),
   listThreadMessages: (threadId, params) =>
     request<ThreadMessage[]>({
       path: `/threads/${threadId}/messages`,

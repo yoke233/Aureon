@@ -347,6 +347,9 @@ export function AgentsPage() {
                           <div className="space-y-1">
                             <div className="font-medium text-slate-900">{profile.name || profile.id}</div>
                             <div className="text-xs text-slate-500">{profile.id}</div>
+                            {profile.manager_profile_id ? (
+                              <div className="text-xs text-slate-400">上级：{profile.manager_profile_id}</div>
+                            ) : null}
                           </div>
                         </TableCell>
                         <TableCell className="px-3 py-3">
@@ -695,12 +698,13 @@ export function AgentsPage() {
           </Card>
         </div>
       </div>
-      <CreateProfileDialog
-        open={profileDialogOpen}
-        profile={editingProfile}
-        drivers={drivers}
-        llmConfigs={configs}
-        availableSkills={availableSkills}
+        <CreateProfileDialog
+          open={profileDialogOpen}
+          profile={editingProfile}
+          profiles={profiles}
+          drivers={drivers}
+          llmConfigs={configs}
+          availableSkills={availableSkills}
         onClose={() => {
           setProfileDialogOpen(false);
           setEditingProfile(null);

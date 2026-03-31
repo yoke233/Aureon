@@ -26,6 +26,7 @@ export interface AgentProfileMCP {
 export interface AgentProfile {
   id: string;
   name?: string;
+  manager_profile_id?: string;
   driver_id?: string;
   llm_config_id?: string;
   driver?: DriverConfig;
@@ -110,4 +111,3 @@ export interface SchedulerStats {
   message?: string;
   stats?: Record<string, unknown>;
 }
-

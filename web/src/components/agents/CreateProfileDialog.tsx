@@ -80,6 +80,7 @@ function parseDurationToNanoseconds(input: string): number | null {
 interface Props {
   open: boolean;
   profile?: AgentProfile | null;
+  profiles: AgentProfile[];
   drivers: DriverConfig[];
   llmConfigs: LLMConfigItem[];
   availableSkills: SkillInfo[];
@@ -162,6 +163,7 @@ function inferLLMMode(profile: AgentProfile | null | undefined, llmConfigs: LLMC
 export function CreateProfileDialog({
   open,
   profile,
+  profiles,
   drivers,
   llmConfigs,
   availableSkills,
@@ -174,6 +176,7 @@ export function CreateProfileDialog({
   const [id, setID] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState("worker");
+  const [managerProfileID, setManagerProfileID] = useState("");
   const [driverId, setDriverId] = useState("");
   const [llmMode, setLLMMode] = useState<ProfileLLMMode>("system");
   const [llmConfigID, setLLMConfigID] = useState("");
@@ -196,6 +199,7 @@ export function CreateProfileDialog({
     setID(profile?.id ?? "");
     setName(profile?.name ?? profile?.id ?? "");
     setRole(profile?.role ?? "worker");
+    setManagerProfileID(profile?.manager_profile_id ?? "");
     setDriverId(initialDriverId);
     setLLMMode(inferLLMMode(profile, llmConfigs));
     setLLMConfigID(isSystemLLMConfig(profile?.llm_config_id) ? "" : (profile?.llm_config_id ?? ""));
@@ -227,6 +231,11 @@ export function CreateProfileDialog({
   const compatibleConfigs = useMemo(
     () => llmConfigs.filter((item) => item.type === llmMode),
     [llmConfigs, llmMode],
+  );
+
+  const managerOptions = useMemo(
+    () => profiles.filter((item) => item.id !== id),
+    [id, profiles],
   );
 
   useEffect(() => {
@@ -279,6 +288,7 @@ export function CreateProfileDialog({
       await onSubmit({
         id: id.trim(),
         name: name.trim(),
+        manager_profile_id: managerProfileID.trim() || undefined,
         driver_id: driverId,
         llm_config_id: llmMode === "system" ? "system" : llmConfigID || undefined,
         driver: selectedDriverConfig,
@@ -324,6 +334,15 @@ export function CreateProfileDialog({
               <SelectItem value="worker">worker</SelectItem>
               <SelectItem value="gate">gate</SelectItem>
               <SelectItem value="support">support</SelectItem>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">上级 Profile</label>
+            <Select value={managerProfileID || "__none__"} onValueChange={(value) => setManagerProfileID(value === "__none__" ? "" : value)}>
+              <SelectItem value="__none__">无</SelectItem>
+              {managerOptions.map((item) => (
+                <SelectItem key={item.id} value={item.id}>{item.name || item.id}</SelectItem>
+              ))}
             </Select>
           </div>
           <div className="space-y-1.5">

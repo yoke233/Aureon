@@ -391,6 +391,25 @@ func TestThreadMessageArtifactMetadataRoundTrip(t *testing.T) {
 	if msgs[0].Metadata[core.ResultMetaSummary] != "thread-level design note for login flow" {
 		t.Fatalf("summary = %v", msgs[0].Metadata[core.ResultMetaSummary])
 	}
+
+	resp, err = get(ts, fmt.Sprintf("/threads/%d/deliverables", thread.ID))
+	if err != nil {
+		t.Fatalf("list thread deliverables: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var items []core.Deliverable
+	decodeJSON(resp, &items)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 deliverable, got %d", len(items))
+	}
+	if items[0].ProducerType != core.DeliverableProducerThread {
+		t.Fatalf("producer_type = %v", items[0].ProducerType)
+	}
+	if items[0].Title != "Login Flow Design" {
+		t.Fatalf("title = %v", items[0].Title)
+	}
 }
 
 func TestThreadMessageReplyTo(t *testing.T) {

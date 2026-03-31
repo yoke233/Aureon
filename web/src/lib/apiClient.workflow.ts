@@ -9,6 +9,7 @@ import type {
   CreateWorkItemFromTemplateResponse,
   CreateWorkItemRequest,
   DAGTemplate,
+  Deliverable,
   Event,
   GenerateActionsRequest,
   Resource,
@@ -40,6 +41,8 @@ export const buildWorkflowApi = ({
   | "updateWorkItem"
   | "archiveWorkItem"
   | "bootstrapPRWorkItem"
+  | "listWorkItemDeliverables"
+  | "adoptWorkItemFinalDeliverable"
   | "listActions"
   | "createAction"
   | "generateActions"
@@ -116,6 +119,16 @@ export const buildWorkflowApi = ({
       path: `/work-items/${workItemId}/bootstrap-pr`,
       method: "POST",
       body,
+    }),
+  listWorkItemDeliverables: (workItemId) =>
+    request<Deliverable[]>({
+      path: `/work-items/${workItemId}/deliverables`,
+    }).then((items) => (Array.isArray(items) ? items : [])),
+  adoptWorkItemFinalDeliverable: (workItemId, deliverableId) =>
+    request<WorkItem, { deliverable_id: number }>({
+      path: `/work-items/${workItemId}/final-deliverable`,
+      method: "POST",
+      body: { deliverable_id: deliverableId },
     }),
   listActions: (workItemId) =>
     request<Action[]>({

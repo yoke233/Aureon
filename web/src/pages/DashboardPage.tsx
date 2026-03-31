@@ -91,9 +91,18 @@ export function DashboardPage() {
   }, [apiClient, selectedProjectId]);
 
   const activeWorkItems = useMemo(() => workItems.filter((workItem) => isActiveWorkItemStatus(workItem.status)), [workItems]);
-  const doneWorkItems = useMemo(() => workItems.filter((workItem) => workItem.status === "done"), [workItems]);
+  const doneWorkItems = useMemo(
+    () => workItems.filter((workItem) => workItem.status === "done" || workItem.status === "completed"),
+    [workItems],
+  );
   const queuedWorkItems = useMemo(
-    () => workItems.filter((workItem) => workItem.status === "queued" || workItem.status === "running").slice(0, 4),
+    () =>
+      workItems.filter((workItem) =>
+        workItem.status === "queued"
+        || workItem.status === "pending_execution"
+        || workItem.status === "running"
+        || workItem.status === "in_execution",
+      ).slice(0, 4),
     [workItems],
   );
 
@@ -123,7 +132,7 @@ export function DashboardPage() {
       },
       {
         title: t("dashboard.queuedTasks"),
-        value: workItems.filter((workItem) => workItem.status === "queued").length,
+        value: workItems.filter((workItem) => workItem.status === "queued" || workItem.status === "pending_execution").length,
         change: schedulerStats?.enabled ? t("dashboard.schedulerEnabled") : schedulerStats?.message ?? t("dashboard.schedulerDisabled"),
         changeType: "neutral",
         icon: <Clock className="h-4 w-4 text-muted-foreground" />,

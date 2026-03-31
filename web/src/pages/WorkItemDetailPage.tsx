@@ -48,12 +48,18 @@ type SourceTypeDisplay = {
 
 const statusConfig: Record<string, { label: string; text: string; bg: string }> = {
   open: { label: "待评估", text: "text-blue-600", bg: "bg-blue-50" },
+  pending_execution: { label: "待执行", text: "text-blue-600", bg: "bg-blue-50" },
   accepted: { label: "已确认", text: "text-amber-600", bg: "bg-amber-50" },
   queued: { label: "排队中", text: "text-zinc-600", bg: "bg-zinc-100" },
   running: { label: "运行中", text: "text-blue-600", bg: "bg-blue-50" },
+  in_execution: { label: "执行中", text: "text-blue-600", bg: "bg-blue-50" },
+  pending_review: { label: "待审核", text: "text-amber-600", bg: "bg-amber-50" },
   blocked: { label: "阻塞", text: "text-amber-600", bg: "bg-amber-50" },
+  escalated: { label: "待上级处理", text: "text-amber-700", bg: "bg-amber-100" },
   failed: { label: "失败", text: "text-red-600", bg: "bg-red-50" },
+  needs_rework: { label: "待返工", text: "text-red-600", bg: "bg-red-50" },
   done: { label: "已完成", text: "text-emerald-600", bg: "bg-emerald-50" },
+  completed: { label: "已完成", text: "text-emerald-600", bg: "bg-emerald-50" },
   cancelled: { label: "已取消", text: "text-zinc-500", bg: "bg-zinc-100" },
   closed: { label: "已关闭", text: "text-zinc-500", bg: "bg-zinc-100" },
 };
@@ -664,7 +670,7 @@ function EditWorkItemDialog({
           <div className={FIELD_CLS}>
             <label className={LABEL_CLS}>{t("common.status")}</label>
             <Select value={form.status ?? ""} onValueChange={(v) => onChange({ status: v as WorkItemStatus })}>
-              {(["open", "accepted", "running", "blocked", "done", "closed", "cancelled"] as WorkItemStatus[]).map((status) => (
+              {(["open", "pending_execution", "in_execution", "pending_review", "needs_rework", "escalated", "completed", "cancelled"] as WorkItemStatus[]).map((status) => (
                 <SelectItem key={status} value={status}>{statusConfig[status]?.label ?? status}</SelectItem>
               ))}
             </Select>

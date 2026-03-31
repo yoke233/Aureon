@@ -28,6 +28,7 @@ import type {
   CreateThreadFromRequirementRequest,
   CreateThreadFromRequirementResponse,
   CreateWorkItemRequest,
+  Deliverable,
   UpdateWorkItemRequest,
   WorkItem,
   CreateActionRequest,
@@ -183,6 +184,8 @@ export interface ApiClient {
   updateWorkItem(workItemId: number, body: UpdateWorkItemRequest): Promise<WorkItem>;
   archiveWorkItem(workItemId: number): Promise<void>;
   bootstrapPRWorkItem(workItemId: number, body?: BootstrapPRWorkItemRequest): Promise<BootstrapPRWorkItemResponse>;
+  listWorkItemDeliverables(workItemId: number): Promise<Deliverable[]>;
+  adoptWorkItemFinalDeliverable(workItemId: number, deliverableId: number): Promise<WorkItem>;
 
   listActions(workItemId: number): Promise<Action[]>;
   createAction(workItemId: number, body: CreateActionRequest): Promise<Action>;
@@ -259,6 +262,7 @@ export interface ApiClient {
   getThread(threadId: number): Promise<Thread>;
   updateThread(threadId: number, body: UpdateThreadRequest): Promise<Thread>;
   deleteThread(threadId: number): Promise<void>;
+  listThreadDeliverables(threadId: number): Promise<Deliverable[]>;
   listThreadMessages(threadId: number, params?: { limit?: number; offset?: number }): Promise<ThreadMessage[]>;
   createThreadMessage(threadId: number, body: CreateThreadMessageRequest): Promise<ThreadMessage>;
   listThreadParticipants(threadId: number): Promise<ThreadMember[]>;

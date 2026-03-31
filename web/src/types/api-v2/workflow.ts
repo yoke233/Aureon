@@ -1,6 +1,12 @@
 import type { Thread, ThreadMessage } from "./collaboration";
 
 export type WorkItemStatus =
+  | "pending_execution"
+  | "in_execution"
+  | "pending_review"
+  | "needs_rework"
+  | "escalated"
+  | "completed"
   | "open"
   | "accepted"
   | "queued"

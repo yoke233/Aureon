@@ -342,11 +342,9 @@ func (h *Handler) createThreadMessageAndRoute(ctx context.Context, input threadM
 		Metadata:         metadata,
 	}
 
-	id, err := h.store.CreateThreadMessage(ctx, message)
-	if err != nil {
+	if err := h.createThreadMessageArtifacts(ctx, message); err != nil {
 		return nil, nil, err
 	}
-	message.ID = id
 
 	eventData := map[string]any{
 		"thread_id":  message.ThreadID,
@@ -391,6 +389,32 @@ func (h *Handler) createThreadMessageAndRoute(ctx context.Context, input threadM
 	}
 
 	return thread, message, nil
+}
+
+func (h *Handler) createThreadMessageArtifacts(ctx context.Context, message *core.ThreadMessage) error {
+	create := func(store interface {
+		CreateThreadMessage(context.Context, *core.ThreadMessage) (int64, error)
+		CreateDeliverable(context.Context, *core.Deliverable) (int64, error)
+	}) error {
+		id, err := store.CreateThreadMessage(ctx, message)
+		if err != nil {
+			return err
+		}
+		message.ID = id
+		if deliverable := core.ThreadMessageToDeliverable(message); deliverable != nil {
+			if _, err := store.CreateDeliverable(ctx, deliverable); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if txStore, ok := h.store.(core.TransactionalStore); ok {
+		return txStore.InTx(ctx, func(store core.Store) error {
+			return create(store)
+		})
+	}
+	return create(h.store)
 }
 
 func cloneAnyMap(in map[string]any) map[string]any {

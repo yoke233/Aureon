@@ -4,6 +4,7 @@ import "errors"
 
 const (
 	CodeBootstrapPRFailed          = "BOOTSTRAP_PR_FAILED"
+	CodeDeliverableNotFound        = "DELIVERABLE_NOT_FOUND"
 	CodeInvalidResourceSpace       = "INVALID_RESOURCE_SPACE"
 	CodeInvalidWorkItemDependency  = "INVALID_WORK_ITEM_DEPENDENCY"
 	CodeInvalidState               = "INVALID_STATE"

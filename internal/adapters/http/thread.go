@@ -77,6 +77,7 @@ func registerThreadRoutes(r chi.Router, h *Handler) {
 
 	r.Post("/threads/{threadID}/messages", h.createThreadMessage)
 	r.Get("/threads/{threadID}/messages", h.listThreadMessages)
+	r.Get("/threads/{threadID}/deliverables", h.listThreadDeliverables)
 	r.Get("/threads/{threadID}/events", h.listThreadEvents)
 
 	r.Post("/threads/{threadID}/participants", h.addThreadParticipant)

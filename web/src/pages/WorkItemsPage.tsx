@@ -27,10 +27,10 @@ interface KanbanColumn {
 }
 
 const KANBAN_COLUMNS: KanbanColumn[] = [
-  { key: "open", statuses: ["open"], color: "bg-blue-500", bgHover: "hover:bg-blue-50" },
-  { key: "accepted", statuses: ["accepted", "queued"], color: "bg-amber-500", bgHover: "hover:bg-amber-50" },
-  { key: "in_progress", statuses: ["running", "blocked", "failed"], color: "bg-violet-500", bgHover: "hover:bg-violet-50" },
-  { key: "done", statuses: ["done"], color: "bg-emerald-500", bgHover: "hover:bg-emerald-50" },
+  { key: "open", statuses: ["open", "pending_execution"], color: "bg-blue-500", bgHover: "hover:bg-blue-50" },
+  { key: "accepted", statuses: ["accepted", "queued", "pending_review"], color: "bg-amber-500", bgHover: "hover:bg-amber-50" },
+  { key: "in_progress", statuses: ["running", "in_execution", "blocked", "escalated", "failed", "needs_rework"], color: "bg-violet-500", bgHover: "hover:bg-violet-50" },
+  { key: "done", statuses: ["done", "completed"], color: "bg-emerald-500", bgHover: "hover:bg-emerald-50" },
   { key: "closed", statuses: ["closed", "cancelled"], color: "bg-zinc-400", bgHover: "hover:bg-zinc-50" },
 ];
 

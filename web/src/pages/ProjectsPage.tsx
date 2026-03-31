@@ -43,14 +43,28 @@ export function ProjectsPage() {
               }),
               apiClient.listProjectResources(project.id),
             ]);
-            const finished = workItems.filter((workItem) => workItem.status === "done" || workItem.status === "failed" || workItem.status === "cancelled");
-            const succeeded = finished.filter((workItem) => workItem.status === "done");
+            const finished = workItems.filter((workItem) =>
+              workItem.status === "done"
+              || workItem.status === "completed"
+              || workItem.status === "failed"
+              || workItem.status === "needs_rework"
+              || workItem.status === "cancelled",
+            );
+            const succeeded = finished.filter((workItem) => workItem.status === "done" || workItem.status === "completed");
             const successRate = finished.length > 0 ? Math.round((succeeded.length / finished.length) * 100) : null;
             return [
               project.id,
               {
                 workItemCount: workItems.length,
-                activeWorkItemCount: workItems.filter((workItem) => workItem.status === "queued" || workItem.status === "running" || workItem.status === "blocked").length,
+                activeWorkItemCount: workItems.filter((workItem) =>
+                  workItem.status === "queued"
+                  || workItem.status === "pending_execution"
+                  || workItem.status === "running"
+                  || workItem.status === "in_execution"
+                  || workItem.status === "pending_review"
+                  || workItem.status === "blocked"
+                  || workItem.status === "escalated",
+                ).length,
                 successRate,
                 resources: resources.map((resource) => resource.kind),
                 hasGit: resources.some((resource) => resource.kind.trim().toLowerCase() === "git"),

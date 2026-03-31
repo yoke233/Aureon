@@ -314,6 +314,52 @@ describe("apiClient", () => {
     expect(JSON.parse(String(init.body))).toEqual({ title: "demo", base_branch: "master" });
   });
 
+  it("listWorkItemDeliverables 会命中 /work-items/{id}/deliverables", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({ baseUrl: "http://localhost:8080/api" });
+    await client.listWorkItemDeliverables(12);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/work-items/12/deliverables");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("GET");
+  });
+
+  it("adoptWorkItemFinalDeliverable 会命中 /work-items/{id}/final-deliverable 并 POST JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        id: 12,
+        title: "demo",
+        body: "",
+        priority: "medium",
+        status: "completed",
+        final_deliverable_id: 88,
+        created_at: "2026-03-31T00:00:00Z",
+        updated_at: "2026-03-31T00:00:00Z",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({ baseUrl: "http://localhost:8080/api" });
+    await client.adoptWorkItemFinalDeliverable(12, 88);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/work-items/12/final-deliverable");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ deliverable_id: 88 });
+  });
+
   it("createWorkItemFromTemplate 会命中 /templates/{id}/create-work-item 并 POST JSON body", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -416,6 +462,24 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "http://localhost:8080/api/threads?status=active&limit=10",
     );
+  });
+
+  it("listThreadDeliverables 会命中 /threads/{id}/deliverables", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({ baseUrl: "http://localhost:8080/api" });
+    await client.listThreadDeliverables(5);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/threads/5/deliverables");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("GET");
   });
 
   it("createThread 会命中 /threads 并 POST JSON body", async () => {

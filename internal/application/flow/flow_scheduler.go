@@ -124,7 +124,11 @@ func (s *WorkItemScheduler) Submit(ctx context.Context, workItemID int64) error 
 		return err
 	}
 	if !ready {
-		if err := s.store.UpdateWorkItemStatus(ctx, workItemID, core.WorkItemAccepted); err != nil && !errors.Is(err, core.ErrNotFound) {
+		targetStatus := core.WorkItemPendingExecution
+		if workItem.Status == core.WorkItemOpen || workItem.Status == core.WorkItemAccepted {
+			targetStatus = core.WorkItemAccepted
+		}
+		if err := s.store.UpdateWorkItemStatus(ctx, workItemID, targetStatus); err != nil && !errors.Is(err, core.ErrNotFound) {
 			return fmt.Errorf("hold work item %d until dependencies resolve: %w", workItemID, err)
 		}
 		return nil
@@ -292,7 +296,7 @@ func (s *WorkItemScheduler) dependenciesSatisfied(ctx context.Context, workItem 
 		if err != nil {
 			return false, fmt.Errorf("get dependency work item %d: %w", depID, err)
 		}
-		if dep.Status != core.WorkItemDone {
+		if dep.Status != core.WorkItemDone && dep.Status != core.WorkItemCompleted {
 			return false, nil
 		}
 	}

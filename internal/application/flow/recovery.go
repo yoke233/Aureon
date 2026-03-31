@@ -14,12 +14,19 @@ import (
 //
 // Call this once during bootstrap, after the scheduler has been started.
 func RecoverInterruptedWorkItems(ctx context.Context, store Store, scheduler *WorkItemScheduler) (int, error) {
-	return recoverWorkItemsByStatus(ctx, store, scheduler, []core.WorkItemStatus{core.WorkItemQueued, core.WorkItemRunning})
+	return recoverWorkItemsByStatus(ctx, store, scheduler, []core.WorkItemStatus{
+		core.WorkItemQueued,
+		core.WorkItemRunning,
+		core.WorkItemInExecution,
+	})
 }
 
 // RecoverQueuedWorkItems re-enqueues work items that were queued before the process stopped.
 func RecoverQueuedWorkItems(ctx context.Context, store Store, scheduler *WorkItemScheduler) (int, error) {
-	return recoverWorkItemsByStatus(ctx, store, scheduler, []core.WorkItemStatus{core.WorkItemQueued})
+	return recoverWorkItemsByStatus(ctx, store, scheduler, []core.WorkItemStatus{
+		core.WorkItemQueued,
+		core.WorkItemPendingExecution,
+	})
 }
 
 // RecoverInterruptedIssues is an alias for backward compatibility.
@@ -44,6 +51,7 @@ func RecoverQueuedFlows(ctx context.Context, store Store, scheduler *WorkItemSch
 
 func recoverWorkItemsByStatus(ctx context.Context, store Store, scheduler *WorkItemScheduler, statuses []core.WorkItemStatus) (int, error) {
 	recovered := 0
+	seen := map[int64]struct{}{}
 
 	for _, status := range statuses {
 		workItems, err := store.ListWorkItems(ctx, core.WorkItemFilter{Status: &status, Limit: 1000})
@@ -52,6 +60,13 @@ func recoverWorkItemsByStatus(ctx context.Context, store Store, scheduler *WorkI
 		}
 
 		for _, wi := range workItems {
+			if wi == nil {
+				continue
+			}
+			if _, exists := seen[wi.ID]; exists {
+				continue
+			}
+			seen[wi.ID] = struct{}{}
 			if err := recoverWorkItem(ctx, store, scheduler, wi); err != nil {
 				slog.Error("recovery: failed to recover work item", "work_item_id", wi.ID, "status", wi.Status, "error", err)
 				continue
@@ -106,9 +121,9 @@ func recoverWorkItem(ctx context.Context, store Store, scheduler *WorkItemSchedu
 		}
 	}
 
-	// Reset work item status to open so it can be submitted.
-	if err := store.UpdateWorkItemStatus(ctx, workItem.ID, core.WorkItemOpen); err != nil {
-		return fmt.Errorf("reset work item %d to open: %w", workItem.ID, err)
+	// Reset work item status to pending_execution so it can be submitted again.
+	if err := store.UpdateWorkItemStatus(ctx, workItem.ID, core.WorkItemPendingExecution); err != nil {
+		return fmt.Errorf("reset work item %d to pending_execution: %w", workItem.ID, err)
 	}
 
 	// Submit to scheduler queue.

@@ -225,7 +225,7 @@ func (s *Service) SetArchived(ctx context.Context, workItemID int64, archived bo
 	}
 	if archived {
 		switch workItem.Status {
-		case core.WorkItemQueued, core.WorkItemRunning, core.WorkItemBlocked:
+		case core.WorkItemQueued, core.WorkItemInExecution, core.WorkItemPendingReview, core.WorkItemEscalated:
 			return nil, newError(CodeInvalidState, "active work item cannot be archived", core.ErrInvalidTransition)
 		}
 	}

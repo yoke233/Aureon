@@ -109,6 +109,8 @@ func (e *WorkItemEngine) ProcessGate(ctx context.Context, action *core.Action, r
 		}
 	}
 
+	_ = e.setWorkItemStatus(ctx, action.WorkItemID, core.WorkItemNeedsRework, workItemExecutorProfile(ctx, e, action.WorkItemID))
+
 	// Gate itself → pending (will be re-promoted after upstream completes).
 	return e.transitionAction(ctx, action, core.ActionPending)
 }

@@ -225,3 +225,49 @@ func TestRecoverInterruptedWorkItems_MultipleWorkItems(t *testing.T) {
 
 	waitFor(t, func() bool { return executed.Load() >= 3 }, 5*time.Second)
 }
+
+func TestRecoveryRequeuesNewStatuses(t *testing.T) {
+	store := newTestStore(t)
+	bus := NewMemBus()
+	ctx := context.Background()
+
+	workItemID := createTestWorkItem(t, store, "in-execution-work-item")
+	actionID := createTestAction(t, store, workItemID, "action-1", core.ActionExec, 0)
+	store.UpdateWorkItemStatus(ctx, workItemID, core.WorkItemInExecution)
+	store.UpdateActionStatus(ctx, actionID, core.ActionReady)
+	store.UpdateActionStatus(ctx, actionID, core.ActionRunning)
+
+	var executed atomic.Int32
+	eng := New(store, bus, func(ctx context.Context, action *core.Action, run *core.Run) error {
+		executed.Add(1)
+		return nil
+	})
+	sched := NewWorkItemScheduler(eng, store, bus, WorkItemSchedulerConfig{MaxConcurrentWorkItems: 1})
+	schedCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sched.Start(schedCtx)
+
+	n, err := RecoverInterruptedWorkItems(ctx, store, sched)
+	if err != nil {
+		t.Fatalf("RecoverInterruptedWorkItems() error = %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("recovered = %d, want 1", n)
+	}
+
+	waitFor(t, func() bool {
+		wi, _ := store.GetWorkItem(ctx, workItemID)
+		return wi.Status == core.WorkItemCompleted
+	}, 3*time.Second)
+
+	workItem, err := store.GetWorkItem(ctx, workItemID)
+	if err != nil {
+		t.Fatalf("GetWorkItem() error = %v", err)
+	}
+	if workItem.Status != core.WorkItemCompleted {
+		t.Fatalf("Status = %s, want %s", workItem.Status, core.WorkItemCompleted)
+	}
+	if executed.Load() != 1 {
+		t.Fatalf("executed = %d, want 1", executed.Load())
+	}
+}

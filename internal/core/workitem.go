@@ -12,47 +12,69 @@ import (
 type WorkItemStatus string
 
 const (
-	WorkItemOpen      WorkItemStatus = "open"
-	WorkItemAccepted  WorkItemStatus = "accepted"
-	WorkItemQueued    WorkItemStatus = "queued"
-	WorkItemRunning   WorkItemStatus = "running"
-	WorkItemBlocked   WorkItemStatus = "blocked"
-	WorkItemFailed    WorkItemStatus = "failed"
-	WorkItemDone      WorkItemStatus = "done"
-	WorkItemCancelled WorkItemStatus = "cancelled"
-	WorkItemClosed    WorkItemStatus = "closed"
+	WorkItemPendingExecution WorkItemStatus = "pending_execution"
+	WorkItemInExecution      WorkItemStatus = "in_execution"
+	WorkItemPendingReview    WorkItemStatus = "pending_review"
+	WorkItemNeedsRework      WorkItemStatus = "needs_rework"
+	WorkItemEscalated        WorkItemStatus = "escalated"
+	WorkItemCompleted        WorkItemStatus = "completed"
+	WorkItemCancelled        WorkItemStatus = "cancelled"
+
+	// Legacy statuses kept for migration/backfill compatibility.
+	WorkItemOpen     WorkItemStatus = "open"
+	WorkItemAccepted WorkItemStatus = "accepted"
+	WorkItemQueued   WorkItemStatus = "queued"
+	WorkItemRunning  WorkItemStatus = WorkItemInExecution
+	WorkItemBlocked  WorkItemStatus = WorkItemEscalated
+	WorkItemFailed   WorkItemStatus = WorkItemNeedsRework
+	WorkItemDone     WorkItemStatus = WorkItemCompleted
+	WorkItemClosed   WorkItemStatus = WorkItemCompleted
 )
 
 func (s WorkItemStatus) Valid() bool {
-	switch s {
-	case WorkItemOpen, WorkItemAccepted, WorkItemQueued, WorkItemRunning,
-		WorkItemBlocked, WorkItemFailed, WorkItemDone, WorkItemCancelled, WorkItemClosed:
-		return true
-	default:
-		return false
-	}
+	return isLegacyWorkItemStatus(s) || isCanonicalWorkItemStatus(s)
 }
 
 func ParseWorkItemStatus(raw string) (WorkItemStatus, error) {
-	s := WorkItemStatus(strings.TrimSpace(raw))
+	s := normalizeWorkItemStatusAlias(strings.TrimSpace(raw))
 	if !s.Valid() {
 		return "", fmt.Errorf("invalid work item status %q", raw)
 	}
 	return s, nil
 }
 
+func normalizeWorkItemStatusAlias(raw string) WorkItemStatus {
+	switch WorkItemStatus(raw) {
+	case "running":
+		return WorkItemRunning
+	case "blocked":
+		return WorkItemBlocked
+	case "failed":
+		return WorkItemFailed
+	case "done":
+		return WorkItemDone
+	case "closed":
+		return WorkItemClosed
+	default:
+		return WorkItemStatus(raw)
+	}
+}
+
 // CanTransitionWorkItemStatus returns true if transitioning from `from` to `to` is allowed.
 // Same-status is always permitted (idempotent update).
 var workItemTransitions = map[WorkItemStatus][]WorkItemStatus{
-	WorkItemOpen:      {WorkItemAccepted, WorkItemCancelled, WorkItemClosed},
-	WorkItemAccepted:  {WorkItemQueued, WorkItemCancelled, WorkItemClosed},
-	WorkItemQueued:    {WorkItemRunning, WorkItemBlocked, WorkItemCancelled},
-	WorkItemRunning:   {WorkItemDone, WorkItemFailed, WorkItemBlocked, WorkItemCancelled},
-	WorkItemBlocked:   {WorkItemQueued, WorkItemRunning, WorkItemCancelled},
-	WorkItemFailed:    {WorkItemQueued, WorkItemCancelled, WorkItemClosed},
-	WorkItemDone:      {WorkItemClosed},
-	WorkItemCancelled: {WorkItemClosed},
-	WorkItemClosed:    {},
+	WorkItemPendingExecution: {WorkItemInExecution, WorkItemEscalated, WorkItemCancelled},
+	WorkItemInExecution:      {WorkItemPendingReview, WorkItemEscalated, WorkItemNeedsRework, WorkItemCompleted, WorkItemCancelled},
+	WorkItemPendingReview:    {WorkItemNeedsRework, WorkItemCompleted, WorkItemEscalated, WorkItemCancelled},
+	WorkItemNeedsRework:      {WorkItemPendingExecution, WorkItemInExecution, WorkItemEscalated, WorkItemCancelled},
+	WorkItemEscalated:        {WorkItemPendingExecution, WorkItemInExecution, WorkItemPendingReview, WorkItemCancelled},
+	WorkItemCompleted:        {},
+	WorkItemCancelled:        {},
+
+	// Legacy transitions allowed while the cutover is in progress.
+	WorkItemOpen:     {WorkItemAccepted, WorkItemQueued, WorkItemPendingExecution, WorkItemInExecution, WorkItemCancelled, WorkItemClosed},
+	WorkItemAccepted: {WorkItemQueued, WorkItemPendingExecution, WorkItemInExecution, WorkItemCancelled, WorkItemClosed},
+	WorkItemQueued:   {WorkItemInExecution, WorkItemCancelled},
 }
 
 func CanTransitionWorkItemStatus(from, to WorkItemStatus) bool {
@@ -65,6 +87,25 @@ func CanTransitionWorkItemStatus(from, to WorkItemStatus) bool {
 		}
 	}
 	return false
+}
+
+func isCanonicalWorkItemStatus(status WorkItemStatus) bool {
+	switch status {
+	case WorkItemPendingExecution, WorkItemInExecution, WorkItemPendingReview,
+		WorkItemNeedsRework, WorkItemEscalated, WorkItemCompleted, WorkItemCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func isLegacyWorkItemStatus(status WorkItemStatus) bool {
+	switch status {
+	case WorkItemOpen, WorkItemAccepted, WorkItemQueued:
+		return true
+	default:
+		return false
+	}
 }
 
 // WorkItemPriority represents the urgency of a WorkItem.

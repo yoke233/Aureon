@@ -102,10 +102,10 @@ func (s *Store) CountActionSignals(ctx context.Context, actionID int64, types ..
 func (s *Store) ListPendingHumanActions(ctx context.Context, workItemID int64) ([]*core.Action, error) {
 	var models []ActionModel
 	err := s.orm.WithContext(ctx).
-		Where("work_item_id = ? AND status IN ?", workItemID, []string{
+		Where("work_item_id = ? AND (status IN ? OR (type = ? AND status = ?))", workItemID, []string{
 			string(core.ActionBlocked),
 			string(core.ActionWaitingGate),
-		}).
+		}, string(core.ActionGate), string(core.ActionReady)).
 		Order("position ASC").
 		Find(&models).Error
 	if err != nil {
@@ -121,10 +121,10 @@ func (s *Store) ListPendingHumanActions(ctx context.Context, workItemID int64) (
 func (s *Store) ListAllPendingHumanActions(ctx context.Context) ([]*core.Action, error) {
 	var models []ActionModel
 	err := s.orm.WithContext(ctx).
-		Where("status IN ?", []string{
+		Where("(status IN ? OR (type = ? AND status = ?))", []string{
 			string(core.ActionBlocked),
 			string(core.ActionWaitingGate),
-		}).
+		}, string(core.ActionGate), string(core.ActionReady)).
 		Order("work_item_id ASC, position ASC").
 		Find(&models).Error
 	if err != nil {

@@ -182,8 +182,8 @@ func pollWorkItemStatus(t *testing.T, ts *httptest.Server, issueID int64, target
 		if f.Status == target {
 			return f
 		}
-		// Also stop polling if issue reached a terminal state that isn't target.
-		if f.Status == core.WorkItemDone || f.Status == core.WorkItemFailed || f.Status == core.WorkItemCancelled {
+		// Stop polling only for truly terminal states.
+		if f.Status == core.WorkItemDone || f.Status == core.WorkItemCancelled {
 			if f.Status != target {
 				t.Fatalf("issue %d reached terminal %s, wanted %s", issueID, f.Status, target)
 			}
@@ -1151,9 +1151,9 @@ func TestIntegration_GateReworkLimitBlocked(t *testing.T) {
 	requireStatus(t, resp, http.StatusCreated)
 	stepGate := decode[core.Action](t, resp)
 
-	// Run — should end in failed (engine returns "stuck" when gate is blocked).
+	// Run — rework limit blocks the gate and escalates the work item.
 	postJSON(ts, fmt.Sprintf("/work-items/%d/run", issue.ID), nil)
-	pollWorkItemStatus(t, ts, issue.ID, core.WorkItemFailed, 10*time.Second)
+	pollWorkItemStatus(t, ts, issue.ID, core.WorkItemEscalated, 10*time.Second)
 
 	// Gate step should be blocked.
 	resp, _ = getJSON(ts, fmt.Sprintf("/actions/%d", stepGate.ID))

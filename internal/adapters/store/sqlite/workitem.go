@@ -192,12 +192,22 @@ func (s *Store) UpdateWorkItemMetadata(ctx context.Context, id int64, metadata m
 }
 
 func (s *Store) PrepareWorkItemRun(ctx context.Context, id int64, queuedStatus core.WorkItemStatus) error {
-	if queuedStatus != core.WorkItemQueued && queuedStatus != core.WorkItemRunning {
+	if queuedStatus != core.WorkItemQueued &&
+		queuedStatus != core.WorkItemRunning &&
+		queuedStatus != core.WorkItemPendingExecution &&
+		queuedStatus != core.WorkItemInExecution {
 		return core.ErrInvalidTransition
 	}
 
+	allowedStatuses := []string{
+		string(core.WorkItemOpen),
+		string(core.WorkItemAccepted),
+		string(core.WorkItemPendingExecution),
+		string(core.WorkItemNeedsRework),
+		string(core.WorkItemEscalated),
+	}
 	result := s.orm.WithContext(ctx).Model(&WorkItemModel{}).
-		Where("id = ? AND status IN ? AND archived_at IS NULL", id, []string{string(core.WorkItemOpen), string(core.WorkItemAccepted)}).
+		Where("id = ? AND status IN ? AND archived_at IS NULL", id, allowedStatuses).
 		Updates(map[string]any{
 			"status":     string(queuedStatus),
 			"updated_at": time.Now().UTC(),
@@ -223,6 +233,9 @@ func (s *Store) SetWorkItemArchived(ctx context.Context, id int64, archived bool
 			string(core.WorkItemQueued),
 			string(core.WorkItemRunning),
 			string(core.WorkItemBlocked),
+			string(core.WorkItemInExecution),
+			string(core.WorkItemPendingReview),
+			string(core.WorkItemEscalated),
 		})
 	} else {
 		query = query.Where("archived_at IS NOT NULL")

@@ -687,4 +687,65 @@ func TestCompositeRetry(t *testing.T) {
 	}
 }
 
+func TestEnginePromotesReviewerToActiveProfileAfterExecution(t *testing.T) {
+	store, bus := setup(t)
+	ctx := context.Background()
+
+	gateStarted := make(chan struct{})
+	gateContinue := make(chan struct{})
+	executor := func(_ context.Context, action *core.Action, run *core.Run) error {
+		if action.Type == core.ActionGate {
+			select {
+			case <-gateStarted:
+			default:
+				close(gateStarted)
+			}
+			<-gateContinue
+		}
+		return nil
+	}
+
+	eng := New(store, bus, executor, WithConcurrency(1))
+	workItemID, _ := store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:             "review-handoff",
+		Status:            core.WorkItemOpen,
+		ExecutorProfileID: "lead",
+		ReviewerProfileID: "ceo",
+		ActiveProfileID:   "lead",
+		EscalationPath:    []string{"ceo", "human"},
+	})
+	store.CreateAction(ctx, &core.Action{WorkItemID: workItemID, Name: "impl", Type: core.ActionExec, Status: core.ActionPending, Position: 0})
+	store.CreateAction(ctx, &core.Action{WorkItemID: workItemID, Name: "review", Type: core.ActionGate, Status: core.ActionPending, Position: 1})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- eng.Run(ctx, workItemID)
+	}()
+
+	waitFor(t, func() bool {
+		select {
+		case <-gateStarted:
+			return true
+		default:
+			return false
+		}
+	}, 3*time.Second)
+
+	workItem, err := store.GetWorkItem(ctx, workItemID)
+	if err != nil {
+		t.Fatalf("GetWorkItem() error = %v", err)
+	}
+	if workItem.Status != core.WorkItemPendingReview {
+		t.Fatalf("Status = %s, want %s", workItem.Status, core.WorkItemPendingReview)
+	}
+	if workItem.ActiveProfileID != "ceo" {
+		t.Fatalf("ActiveProfileID = %q, want ceo", workItem.ActiveProfileID)
+	}
+
+	close(gateContinue)
+	if err := <-done; err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------

@@ -4,11 +4,16 @@ import "github.com/yoke233/zhanggui/internal/core"
 
 // validWorkItemTransitions defines legal WorkItem status transitions.
 var validWorkItemTransitions = map[core.WorkItemStatus][]core.WorkItemStatus{
-	core.WorkItemOpen:     {core.WorkItemAccepted, core.WorkItemQueued, core.WorkItemRunning, core.WorkItemCancelled},
-	core.WorkItemAccepted: {core.WorkItemQueued, core.WorkItemRunning, core.WorkItemCancelled},
-	core.WorkItemQueued:   {core.WorkItemRunning, core.WorkItemCancelled},
-	core.WorkItemRunning:  {core.WorkItemBlocked, core.WorkItemFailed, core.WorkItemDone, core.WorkItemCancelled},
-	core.WorkItemBlocked:  {core.WorkItemRunning, core.WorkItemFailed, core.WorkItemCancelled},
+	core.WorkItemPendingExecution: {core.WorkItemInExecution, core.WorkItemEscalated, core.WorkItemCancelled},
+	core.WorkItemInExecution:      {core.WorkItemPendingReview, core.WorkItemNeedsRework, core.WorkItemEscalated, core.WorkItemCompleted, core.WorkItemCancelled},
+	core.WorkItemPendingReview:    {core.WorkItemNeedsRework, core.WorkItemEscalated, core.WorkItemCompleted, core.WorkItemCancelled},
+	core.WorkItemNeedsRework:      {core.WorkItemPendingExecution, core.WorkItemInExecution, core.WorkItemEscalated, core.WorkItemCancelled},
+	core.WorkItemEscalated:        {core.WorkItemPendingExecution, core.WorkItemInExecution, core.WorkItemPendingReview, core.WorkItemCancelled},
+
+	// Legacy transitions kept so partially migrated callers keep working.
+	core.WorkItemOpen:     {core.WorkItemAccepted, core.WorkItemQueued, core.WorkItemPendingExecution, core.WorkItemInExecution, core.WorkItemCancelled},
+	core.WorkItemAccepted: {core.WorkItemQueued, core.WorkItemPendingExecution, core.WorkItemInExecution, core.WorkItemCancelled},
+	core.WorkItemQueued:   {core.WorkItemInExecution, core.WorkItemCancelled},
 }
 
 // validActionTransitions defines legal Action status transitions.

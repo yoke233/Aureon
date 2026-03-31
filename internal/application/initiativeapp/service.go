@@ -460,7 +460,7 @@ func computeInitiativeProgress(workItems []*core.WorkItem) core.InitiativeProgre
 			progress.Running++
 		case core.WorkItemBlocked:
 			progress.Blocked++
-		case core.WorkItemDone, core.WorkItemClosed:
+		case core.WorkItemCompleted:
 			progress.Done++
 		case core.WorkItemFailed:
 			progress.Failed++

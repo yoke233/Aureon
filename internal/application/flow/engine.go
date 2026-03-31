@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,8 +144,8 @@ func (e *WorkItemEngine) Run(ctx context.Context, workItemID int64) error {
 	if err != nil {
 		return fmt.Errorf("get work item: %w", err)
 	}
-	if workItem.Status != core.WorkItemOpen && workItem.Status != core.WorkItemAccepted && workItem.Status != core.WorkItemQueued {
-		return fmt.Errorf("work item %d is %s, expected open, accepted, or queued", workItemID, workItem.Status)
+	if !runnableWorkItemStatus(workItem.Status) {
+		return fmt.Errorf("work item %d is %s, expected runnable state", workItemID, workItem.Status)
 	}
 
 	actions, err := e.workflow.store.ListActionsByWorkItem(ctx, workItemID)
@@ -208,7 +209,7 @@ func (e *WorkItemEngine) Run(ctx context.Context, workItemID int64) error {
 	}
 
 	// Transition work item to running.
-	if err := e.workflow.store.UpdateWorkItemStatus(ctx, workItemID, core.WorkItemRunning); err != nil {
+	if err := e.setWorkItemStatus(ctx, workItemID, core.WorkItemInExecution, ""); err != nil {
 		return fmt.Errorf("start work item: %w", err)
 	}
 	e.workflow.bus.Publish(ctx, core.Event{
@@ -230,7 +231,7 @@ func (e *WorkItemEngine) Run(ctx context.Context, workItemID int64) error {
 
 	// Scheduling loop.
 	if err := e.scheduleLoop(ctx, workItemID); err != nil {
-		_ = e.workflow.store.UpdateWorkItemStatus(ctx, workItemID, core.WorkItemFailed)
+		_ = e.setTerminalFailureState(ctx, workItemID)
 		e.workflow.bus.Publish(ctx, core.Event{
 			Type:       core.EventWorkItemFailed,
 			WorkItemID: workItemID,
@@ -240,7 +241,7 @@ func (e *WorkItemEngine) Run(ctx context.Context, workItemID int64) error {
 		return err
 	}
 
-	_ = e.workflow.store.UpdateWorkItemStatus(ctx, workItemID, core.WorkItemDone)
+	_ = e.setWorkItemStatus(ctx, workItemID, core.WorkItemCompleted, "")
 	e.workflow.bus.Publish(ctx, core.Event{
 		Type:       core.EventWorkItemCompleted,
 		WorkItemID: workItemID,
@@ -258,7 +259,7 @@ func (e *WorkItemEngine) Cancel(ctx context.Context, workItemID int64) error {
 	if !ValidWorkItemTransition(workItem.Status, core.WorkItemCancelled) {
 		return core.ErrInvalidTransition
 	}
-	if err := e.workflow.store.UpdateWorkItemStatus(ctx, workItemID, core.WorkItemCancelled); err != nil {
+	if err := e.setWorkItemStatus(ctx, workItemID, core.WorkItemCancelled, ""); err != nil {
 		return err
 	}
 	e.workflow.bus.Publish(ctx, core.Event{
@@ -517,5 +518,119 @@ func (e *WorkItemEngine) transitionAction(ctx context.Context, action *core.Acti
 		ActionID:   action.ID,
 		Timestamp:  time.Now().UTC(),
 	})
+	e.syncWorkItemStateForAction(ctx, action, to)
 	return nil
+}
+
+func runnableWorkItemStatus(status core.WorkItemStatus) bool {
+	switch status {
+	case core.WorkItemOpen, core.WorkItemAccepted, core.WorkItemQueued,
+		core.WorkItemPendingExecution, core.WorkItemInExecution, core.WorkItemNeedsRework:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *WorkItemEngine) syncWorkItemStateForAction(ctx context.Context, action *core.Action, status core.ActionStatus) {
+	if e == nil || action == nil {
+		return
+	}
+	workItem, err := e.workflow.store.GetWorkItem(ctx, action.WorkItemID)
+	if err != nil || workItem == nil {
+		return
+	}
+	switch {
+	case action.Type == core.ActionGate && status == core.ActionReady:
+		_ = e.setWorkItemStatus(ctx, workItem.ID, core.WorkItemPendingReview, workItem.ReviewerProfileID)
+	case action.Type == core.ActionGate && status == core.ActionRunning:
+		_ = e.setWorkItemStatus(ctx, workItem.ID, core.WorkItemPendingReview, workItem.ReviewerProfileID)
+	case status == core.ActionRunning:
+		_ = e.setWorkItemStatus(ctx, workItem.ID, core.WorkItemInExecution, workItem.ExecutorProfileID)
+	case status == core.ActionBlocked:
+		_ = e.setWorkItemStatus(ctx, workItem.ID, core.WorkItemEscalated, nextEscalationProfile(workItem))
+	case status == core.ActionFailed:
+		_ = e.setWorkItemStatus(ctx, workItem.ID, core.WorkItemNeedsRework, workItem.ExecutorProfileID)
+	}
+}
+
+func (e *WorkItemEngine) setTerminalFailureState(ctx context.Context, workItemID int64) error {
+	actions, err := e.workflow.store.ListActionsByWorkItem(ctx, workItemID)
+	if err != nil {
+		return err
+	}
+	status := core.WorkItemNeedsRework
+	activeProfile := ""
+	workItem, workItemErr := e.workflow.store.GetWorkItem(ctx, workItemID)
+	if workItemErr == nil && workItem != nil {
+		activeProfile = workItem.ExecutorProfileID
+	}
+	for _, action := range actions {
+		if action == nil {
+			continue
+		}
+		if action.Status == core.ActionBlocked || action.Status == core.ActionWaitingGate {
+			status = core.WorkItemEscalated
+			if workItem != nil {
+				activeProfile = nextEscalationProfile(workItem)
+			}
+			break
+		}
+	}
+	return e.setWorkItemStatus(ctx, workItemID, status, activeProfile)
+}
+
+func (e *WorkItemEngine) setWorkItemStatus(ctx context.Context, workItemID int64, status core.WorkItemStatus, activeProfileID string) error {
+	workItem, err := e.workflow.store.GetWorkItem(ctx, workItemID)
+	if err != nil {
+		return err
+	}
+	if workItem.Status == status && (strings.TrimSpace(activeProfileID) == "" || workItem.ActiveProfileID == strings.TrimSpace(activeProfileID)) {
+		return nil
+	}
+	workItem.Status = status
+	if profileID := strings.TrimSpace(activeProfileID); profileID != "" {
+		workItem.ActiveProfileID = profileID
+	}
+	return e.workflow.store.UpdateWorkItem(ctx, workItem)
+}
+
+func nextEscalationProfile(workItem *core.WorkItem) string {
+	if workItem == nil {
+		return ""
+	}
+	current := strings.TrimSpace(workItem.ActiveProfileID)
+	if current == "" {
+		current = strings.TrimSpace(workItem.ExecutorProfileID)
+	}
+	for i, candidate := range workItem.EscalationPath {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if current == "" || candidate == current {
+			if current == "" {
+				return candidate
+			}
+			if i+1 < len(workItem.EscalationPath) {
+				return strings.TrimSpace(workItem.EscalationPath[i+1])
+			}
+			return candidate
+		}
+	}
+	if len(workItem.EscalationPath) > 0 {
+		return strings.TrimSpace(workItem.EscalationPath[0])
+	}
+	return strings.TrimSpace(workItem.ReviewerProfileID)
+}
+
+func workItemExecutorProfile(ctx context.Context, e *WorkItemEngine, workItemID int64) string {
+	if e == nil {
+		return ""
+	}
+	workItem, err := e.workflow.store.GetWorkItem(ctx, workItemID)
+	if err != nil || workItem == nil {
+		return ""
+	}
+	return strings.TrimSpace(workItem.ExecutorProfileID)
 }

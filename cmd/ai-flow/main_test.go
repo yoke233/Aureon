@@ -283,3 +283,32 @@ func TestOrchestrateCommandForwardsTaskCreateFlags(t *testing.T) {
 		t.Fatalf("orchestrate args = %#v, want %#v", gotArgs, want)
 	}
 }
+
+func TestProfileCommandForwardsArgs(t *testing.T) {
+	t.Parallel()
+
+	var gotArgs []string
+	cmd := newRootCmd(commandDeps{
+		out:            &bytes.Buffer{},
+		err:            &bytes.Buffer{},
+		version:        versionString,
+		runServer:      func([]string) error { return nil },
+		runExecutor:    func([]string) error { return nil },
+		runQualityGate: func([]string) error { return nil },
+		runMCPServe:    func([]string) error { return nil },
+		runOrchestrate: func([]string) error { return nil },
+		runProfile: func(args []string) error {
+			gotArgs = append([]string(nil), args...)
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"profile", "create", "--from", "ceo", "--id", "worker-2", "--role", "worker"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	want := []string{"create", "--from", "ceo", "--id", "worker-2", "--role", "worker"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("profile args = %#v, want %#v", gotArgs, want)
+	}
+}

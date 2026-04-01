@@ -22,6 +22,7 @@ type commandDeps struct {
 	runMCPServe    func([]string) error
 	runOrchestrate func([]string) error
 	runRuntime     func([]string) error
+	runProfile     func([]string) error
 }
 
 func defaultCommandDeps() commandDeps {
@@ -35,6 +36,7 @@ func defaultCommandDeps() commandDeps {
 		runMCPServe:    appcmd.RunMCPServe,
 		runOrchestrate: appcmd.RunOrchestrate,
 		runRuntime:     appcmd.RunRuntime,
+		runProfile:     appcmd.RunProfile,
 	}
 }
 
@@ -68,6 +70,7 @@ func newRootCmd(deps commandDeps) *cobra.Command {
 		newMCPServeCmd(deps),
 		newOrchestrateCmd(deps),
 		newRuntimeCmd(deps),
+		newProfileCmd(deps),
 	)
 	return rootCmd
 }
@@ -213,5 +216,17 @@ func newRuntimeEnsureExecutionProfilesCmd(deps commandDeps) *cobra.Command {
 	cmd.Flags().StringVar(&managerProfile, "manager-profile", "ceo", "Manager profile ID for ensured profiles")
 	cmd.Flags().StringVar(&workerID, "worker-id", "worker", "Execution worker profile ID")
 	cmd.Flags().StringVar(&reviewerID, "reviewer-id", "reviewer", "Review gate profile ID")
+	return cmd
+}
+
+func newProfileCmd(deps commandDeps) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "profile",
+		Short:              "Manage runtime profiles via sqlite + runtime config",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return deps.runProfile(args)
+		},
+	}
 	return cmd
 }

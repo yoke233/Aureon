@@ -195,8 +195,8 @@ func TestACPActionExecutor_UsesFallbackWorkDirWhenDefaultMissing(t *testing.T) {
 func TestResolveACPActionTimeout(t *testing.T) {
 	t.Parallel()
 
-	if got := resolveACPActionTimeout(nil); got != 120*time.Second {
-		t.Fatalf("resolveACPActionTimeout(nil) = %s, want 120s", got)
+	if got := resolveACPActionTimeout(nil); got != 0 {
+		t.Fatalf("resolveACPActionTimeout(nil) = %s, want 0", got)
 	}
 
 	action := &core.Action{Timeout: 45 * time.Second}

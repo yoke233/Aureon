@@ -46,7 +46,11 @@ type ACPExecutorConfig struct {
 // starts the run, watches for completion, then stores the result.
 func NewACPActionExecutor(cfg ACPExecutorConfig) flowapp.ActionExecutor {
 	return func(ctx context.Context, action *core.Action, run *core.Run) error {
-		execCtx, cancel := context.WithTimeout(ctx, resolveACPActionTimeout(action))
+		execCtx := ctx
+		cancel := func() {}
+		if timeout := resolveACPActionTimeout(action); timeout > 0 {
+			execCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
 		defer cancel()
 
 		if cfg.SessionManager == nil {
@@ -344,7 +348,7 @@ func resolveACPActionTimeout(action *core.Action) time.Duration {
 	if action != nil && action.Timeout > 0 {
 		return action.Timeout
 	}
-	return 120 * time.Second
+	return 0
 }
 
 // resolveActionAgent resolves the agent profile for an action.

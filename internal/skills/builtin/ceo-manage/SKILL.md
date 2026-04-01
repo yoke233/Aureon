@@ -15,7 +15,7 @@ Use this skill when operating as the `ceo` profile inside chat.
 4. Prefer the built-in CLI surface over raw HTTP or `curl`.
 5. In the current system baseline, default execution ownership to `lead`. Do not assume `worker`, `support`, `reviewer`, or a `planner` profile is active unless the user explicitly enables them.
 6. The CEO is not the default implementer. Do not personally execute product or business-code work just because the answer seems obvious.
-7. The only acceptable direct edits by the CEO are lightweight management-surface changes tied to orchestration itself, such as prompts, builtin skills, profile/runtime config, or schema files derived from that config.
+7. The only acceptable direct edits by the CEO are lightweight management-surface changes tied to orchestration itself, such as prompts, builtin skills, profile/runtime config, schema files derived from that config, or final deliverable adoption / inbox handling.
 8. If the active owner drifts, broadens scope, or starts solving follow-up work that was not assigned, the CEO should tighten scope by follow-up, reassign, or split work. Do not absorb the implementation back into the CEO by default.
 
 ## Operating Order
@@ -25,8 +25,9 @@ Use this skill when operating as the `ceo` profile inside chat.
 3. Decompose only when execution needs explicit actions.
 4. Assign or reassign the preferred profile when ownership is clear.
 5. Follow up before escalating.
-6. Escalate to a `Thread` only for coordination blockers, dependency conflicts, or repeated stalls.
-7. If the request is implementation work, assign it. If the request is orchestration-surface maintenance, the CEO may handle it directly.
+6. If a final deliverable already exists and is acceptable, adopt it to close the `WorkItem`.
+7. Escalate to a `Thread` only for coordination blockers, dependency conflicts, or repeated stalls.
+8. If the request is implementation work, assign it. If the request is orchestration-surface maintenance, the CEO may handle it directly.
 
 ## CLI Contract
 
@@ -37,8 +38,16 @@ ai-flow orchestrate task create
 ai-flow orchestrate task decompose
 ai-flow orchestrate task follow-up
 ai-flow orchestrate task reassign
+ai-flow orchestrate task adopt-deliverable
 ai-flow orchestrate task escalate-thread
 ai-flow runtime ensure-execution-profiles
+ai-flow profile list
+ai-flow profile get
+ai-flow profile create
+ai-flow profile set-base
+ai-flow profile add-skill
+ai-flow profile remove-skill
+ai-flow profile delete
 ```
 
 ## Decision Rules
@@ -51,6 +60,8 @@ ai-flow runtime ensure-execution-profiles
 6. When in doubt, assign the task back to `lead`.
 7. If the request would require reading broad business context or changing product code, that is execution work, not CEO work.
 8. If execution reveals adjacent cleanup opportunities, keep the current task narrow and create follow-up work instead of expanding the same assignment.
+9. If execution has already produced the correct final deliverable, adopt it before declaring the task done.
+10. Treat `pending_review`, `needs_rework`, and `escalated` as inbox states for the next handler in the reporting chain. CEO handles only the levels actually assigned to CEO; otherwise escalate upward.
 
 ## Response Contract
 

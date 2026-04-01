@@ -16,6 +16,7 @@ import (
 type Service struct {
 	store           Store
 	workItemCreator WorkItemCreator
+	deliverables    DeliverableAdopter
 	planner         Planner
 	threads         ThreadCoordinator
 	registry        core.AgentRegistry
@@ -53,8 +54,11 @@ type FollowUpTaskResult struct {
 	Status              core.WorkItemStatus
 	Blocked             bool
 	LatestRunSummary    string
+	LatestSummarySource string
 	RecommendedNextStep string
 	ActiveProfileID     string
+	FinalDeliverableID  *int64
+	HasFinalDeliverable bool
 }
 
 type ReassignTaskInput struct {
@@ -100,10 +104,25 @@ type EscalateThreadResult struct {
 	Created    bool
 }
 
+type AdoptDeliverableInput struct {
+	WorkItemID    int64
+	DeliverableID int64
+	ActorProfile  string
+	SourceSession string
+}
+
+type AdoptDeliverableResult struct {
+	WorkItemID         int64
+	DeliverableID      int64
+	Status             core.WorkItemStatus
+	FinalDeliverableID *int64
+}
+
 func New(cfg Config) *Service {
 	return &Service{
 		store:           cfg.Store,
 		workItemCreator: cfg.WorkItemCreator,
+		deliverables:    cfg.Deliverables,
 		planner:         cfg.Planner,
 		threads:         cfg.Threads,
 		registry:        cfg.Registry,
@@ -171,10 +190,12 @@ func (s *Service) FollowUpTask(ctx context.Context, input FollowUpTaskInput) (*F
 
 	activeProfile := firstNonEmpty(workItem.ActiveProfileID, workItem.ExecutorProfileID)
 	latestSummary := ""
+	latestSummarySource := ""
 	if workItem.FinalDeliverableID != nil {
 		deliverable, deliverableErr := s.store.GetDeliverable(ctx, *workItem.FinalDeliverableID)
 		if deliverableErr == nil {
 			latestSummary = summarizeDeliverable(deliverable)
+			latestSummarySource = "final_deliverable"
 		}
 	}
 	for _, action := range actions {
@@ -187,6 +208,7 @@ func (s *Service) FollowUpTask(ctx context.Context, input FollowUpTaskInput) (*F
 		run, err := s.store.GetLatestRunWithResult(ctx, action.ID)
 		if err == nil && run != nil && strings.TrimSpace(run.ResultMarkdown) != "" {
 			latestSummary = compactString(run.ResultMarkdown, 160)
+			latestSummarySource = "run_fallback"
 		}
 	}
 
@@ -198,8 +220,42 @@ func (s *Service) FollowUpTask(ctx context.Context, input FollowUpTaskInput) (*F
 		Status:              workItem.Status,
 		Blocked:             blocked,
 		LatestRunSummary:    latestSummary,
+		LatestSummarySource: latestSummarySource,
 		RecommendedNextStep: nextStep,
 		ActiveProfileID:     activeProfile,
+		FinalDeliverableID:  workItem.FinalDeliverableID,
+		HasFinalDeliverable: workItem.FinalDeliverableID != nil,
+	}, nil
+}
+
+func (s *Service) AdoptDeliverable(ctx context.Context, input AdoptDeliverableInput) (*AdoptDeliverableResult, error) {
+	if s == nil || s.deliverables == nil {
+		return nil, fmt.Errorf("deliverable adoption is not configured")
+	}
+	workItem, err := s.deliverables.AdoptDeliverable(ctx, input.WorkItemID, input.DeliverableID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.store.AppendJournal(ctx, &core.JournalEntry{
+		WorkItemID: workItem.ID,
+		Kind:       core.JournalSystem,
+		Source:     journalSourceForActor(input.ActorProfile),
+		Summary:    "adopted final deliverable",
+		Payload: map[string]any{
+			"deliverable_id":         input.DeliverableID,
+			"source_chat_session_id": strings.TrimSpace(input.SourceSession),
+			"status":                 string(workItem.Status),
+		},
+		Actor:     strings.TrimSpace(input.ActorProfile),
+		CreatedAt: s.now().UTC(),
+	}); err != nil {
+		return nil, err
+	}
+	return &AdoptDeliverableResult{
+		WorkItemID:         workItem.ID,
+		DeliverableID:      input.DeliverableID,
+		Status:             workItem.Status,
+		FinalDeliverableID: workItem.FinalDeliverableID,
 	}, nil
 }
 

@@ -309,6 +309,7 @@ func (h *Handler) registerWorkItemRoutes(r chi.Router, basePath string) {
 	r.Post(basePath, h.createWorkItem)
 	r.Get(basePath, h.listWorkItems)
 	r.Get(basePath+"/cron", h.listCronWorkItems)
+	r.Get(basePath+"/pending", h.listPendingWorkItems)
 	r.Get(basePath+"/{workItemID}", h.getWorkItem)
 	r.Get(basePath+"/{workItemID}/deliverables", h.listWorkItemDeliverables)
 	r.Put(basePath+"/{workItemID}", h.updateWorkItem)

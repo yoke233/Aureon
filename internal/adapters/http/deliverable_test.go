@@ -40,6 +40,16 @@ func TestWorkItemDeliverableAdoptionEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create deliverable: %v", err)
 	}
+	gateActionID, err := h.store.CreateAction(ctx, &core.Action{
+		WorkItemID: workItemID,
+		Name:       "gate review",
+		Type:       core.ActionGate,
+		Status:     core.ActionReady,
+		Position:   1,
+	})
+	if err != nil {
+		t.Fatalf("create gate action: %v", err)
+	}
 
 	resp, err := post(ts, fmt.Sprintf("/work-items/%d/final-deliverable", workItemID), map[string]any{
 		"deliverable_id": deliverableID,
@@ -56,6 +66,32 @@ func TestWorkItemDeliverableAdoptionEndpoints(t *testing.T) {
 	}
 	if updated.FinalDeliverableID == nil || *updated.FinalDeliverableID != deliverableID {
 		t.Fatalf("FinalDeliverableID = %v, want %d", updated.FinalDeliverableID, deliverableID)
+	}
+	if updated.Status != core.WorkItemCompleted {
+		t.Fatalf("Status = %q, want %q", updated.Status, core.WorkItemCompleted)
+	}
+
+	gateAction, err := h.store.GetAction(ctx, gateActionID)
+	if err != nil {
+		t.Fatalf("get gate action: %v", err)
+	}
+	if gateAction.Status != core.ActionCancelled {
+		t.Fatalf("gate action status = %q, want %q", gateAction.Status, core.ActionCancelled)
+	}
+
+	resp, err = get(ts, "/work-items/pending?profile_id=human")
+	if err != nil {
+		t.Fatalf("get pending work items: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /work-items/pending status = %d", resp.StatusCode)
+	}
+	var pending []pendingWorkItemItem
+	if err := decodeJSON(resp, &pending); err != nil {
+		t.Fatalf("decode pending work items: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending items = %+v, want empty", pending)
 	}
 
 	resp, err = get(ts, fmt.Sprintf("/work-items/%d/deliverables", workItemID))

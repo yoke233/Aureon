@@ -13,6 +13,10 @@ type WorkItemCreator interface {
 	CreateWorkItem(ctx context.Context, input workitemapp.CreateWorkItemInput) (*core.WorkItem, error)
 }
 
+type DeliverableAdopter interface {
+	AdoptDeliverable(ctx context.Context, workItemID, deliverableID int64) (*core.WorkItem, error)
+}
+
 type Store interface {
 	core.WorkItemStore
 	core.ActionStore
@@ -37,6 +41,7 @@ type ThreadCoordinator interface {
 type Config struct {
 	Store           Store
 	WorkItemCreator WorkItemCreator
+	Deliverables    DeliverableAdopter
 	Planner         Planner
 	Threads         ThreadCoordinator
 	Registry        core.AgentRegistry

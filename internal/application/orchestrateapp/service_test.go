@@ -50,6 +50,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	svc := New(Config{
 		Store:           store,
 		WorkItemCreator: workItems,
+		Deliverables:    workItems,
 		Planner: &fakePlanner{dag: &planning.GeneratedDAG{
 			Actions: []planning.GeneratedAction{
 				{Name: "implement", Type: "exec", AgentRole: "lead"},
@@ -82,6 +83,7 @@ func newCEOOnlyEnv(t *testing.T) *testEnv {
 	svc := New(Config{
 		Store:           store,
 		WorkItemCreator: workItems,
+		Deliverables:    workItems,
 		Threads:         threadapp.New(threadapp.Config{Store: store}),
 		Registry:        store,
 	})
@@ -347,6 +349,86 @@ func TestServiceFollowUpTaskUsesActiveProfileAndFinalDeliverable(t *testing.T) {
 	}
 	if result.LatestRunSummary != "Deliverable summary should win" {
 		t.Fatalf("LatestRunSummary = %q, want deliverable summary", result.LatestRunSummary)
+	}
+	if result.LatestSummarySource != "final_deliverable" {
+		t.Fatalf("LatestSummarySource = %q, want final_deliverable", result.LatestSummarySource)
+	}
+	if !result.HasFinalDeliverable {
+		t.Fatal("HasFinalDeliverable = false, want true")
+	}
+	if result.FinalDeliverableID == nil || *result.FinalDeliverableID != deliverableID {
+		t.Fatalf("FinalDeliverableID = %v, want %d", result.FinalDeliverableID, deliverableID)
+	}
+}
+
+func TestServiceAdoptDeliverableWritesJournalAndCompletesWorkItem(t *testing.T) {
+	t.Parallel()
+
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	workItemID, err := env.store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "adopt deliverable",
+		Status:   core.WorkItemPendingReview,
+		Priority: core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkItem() error = %v", err)
+	}
+	deliverableID, err := env.store.CreateDeliverable(ctx, &core.Deliverable{
+		WorkItemID:   &workItemID,
+		Kind:         core.DeliverableDocument,
+		Title:        "Final review",
+		Summary:      "approved deliverable",
+		ProducerType: core.DeliverableProducerWorkItem,
+		ProducerID:   workItemID,
+		Status:       core.DeliverableFinal,
+	})
+	if err != nil {
+		t.Fatalf("CreateDeliverable() error = %v", err)
+	}
+
+	result, err := env.svc.AdoptDeliverable(ctx, AdoptDeliverableInput{
+		WorkItemID:    workItemID,
+		DeliverableID: deliverableID,
+		ActorProfile:  "ceo",
+		SourceSession: "chat-100",
+	})
+	if err != nil {
+		t.Fatalf("AdoptDeliverable() error = %v", err)
+	}
+	if result.Status != core.WorkItemCompleted {
+		t.Fatalf("Status = %q, want %q", result.Status, core.WorkItemCompleted)
+	}
+	if result.FinalDeliverableID == nil || *result.FinalDeliverableID != deliverableID {
+		t.Fatalf("FinalDeliverableID = %v, want %d", result.FinalDeliverableID, deliverableID)
+	}
+
+	entries, err := env.store.ListJournal(ctx, core.JournalFilter{
+		WorkItemID: &workItemID,
+		Kinds:      []core.JournalKind{core.JournalSystem},
+	})
+	if err != nil {
+		t.Fatalf("ListJournal() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("journal len = %d, want 1", len(entries))
+	}
+	if got := payloadInt64(entries[0].Payload["deliverable_id"]); got != deliverableID {
+		t.Fatalf("deliverable_id payload = %v, want %d", entries[0].Payload["deliverable_id"], deliverableID)
+	}
+}
+
+func payloadInt64(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	default:
+		return 0
 	}
 }
 

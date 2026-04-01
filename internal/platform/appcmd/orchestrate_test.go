@@ -18,6 +18,7 @@ import (
 type fakeOrchestrateService struct {
 	createTaskInput     orchestrateapp.CreateTaskInput
 	followUpTaskInput   orchestrateapp.FollowUpTaskInput
+	adoptDeliverable    orchestrateapp.AdoptDeliverableInput
 	reassignTaskInput   orchestrateapp.ReassignTaskInput
 	decomposeTaskInput  orchestrateapp.DecomposeTaskInput
 	escalateThreadInput orchestrateapp.EscalateThreadInput
@@ -40,6 +41,16 @@ func (f *fakeOrchestrateService) FollowUpTask(_ context.Context, input orchestra
 		ActiveProfileID:     "lead",
 		RecommendedNextStep: "reassign_or_escalate",
 		LatestRunSummary:    "waiting on integration fix",
+	}, nil
+}
+
+func (f *fakeOrchestrateService) AdoptDeliverable(_ context.Context, input orchestrateapp.AdoptDeliverableInput) (*orchestrateapp.AdoptDeliverableResult, error) {
+	f.adoptDeliverable = input
+	return &orchestrateapp.AdoptDeliverableResult{
+		WorkItemID:         input.WorkItemID,
+		DeliverableID:      input.DeliverableID,
+		Status:             core.WorkItemCompleted,
+		FinalDeliverableID: &input.DeliverableID,
 	}, nil
 }
 

@@ -52,6 +52,14 @@ type schedulerStub struct {
 	submit func(context.Context, int64) error
 }
 
+type eventRecorder struct {
+	events []core.Event
+}
+
+func (r *eventRecorder) Publish(_ context.Context, event core.Event) {
+	r.events = append(r.events, event)
+}
+
 func (r *runnerStub) Run(ctx context.Context, workItemID int64) error {
 	if r.run != nil {
 		return r.run(ctx, workItemID)
@@ -401,6 +409,9 @@ func TestServiceAdoptDeliverableSetsFinalDeliverableID(t *testing.T) {
 	if item.FinalDeliverableID == nil || *item.FinalDeliverableID != deliverableID {
 		t.Fatalf("FinalDeliverableID = %v, want %d", item.FinalDeliverableID, deliverableID)
 	}
+	if item.Status != core.WorkItemCompleted {
+		t.Fatalf("Status = %q, want %q", item.Status, core.WorkItemCompleted)
+	}
 
 	persisted, err := store.GetWorkItem(ctx, workItemID)
 	if err != nil {
@@ -408,6 +419,140 @@ func TestServiceAdoptDeliverableSetsFinalDeliverableID(t *testing.T) {
 	}
 	if persisted.FinalDeliverableID == nil || *persisted.FinalDeliverableID != deliverableID {
 		t.Fatalf("persisted FinalDeliverableID = %v, want %d", persisted.FinalDeliverableID, deliverableID)
+	}
+	if persisted.Status != core.WorkItemCompleted {
+		t.Fatalf("persisted Status = %q, want %q", persisted.Status, core.WorkItemCompleted)
+	}
+}
+
+func TestServiceAdoptDeliverableCancelsOpenActionsAndPublishesCompleted(t *testing.T) {
+	store := newWorkItemAppTestStore(t)
+	recorder := &eventRecorder{}
+	svc := New(Config{Store: store, Tx: newSQLiteTxAdapter(store, nil), Bus: recorder})
+	ctx := context.Background()
+
+	workItemID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "Adopt deliverable closure",
+		Status:   core.WorkItemPendingReview,
+		Priority: core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create work item: %v", err)
+	}
+	statuses := []core.ActionStatus{core.ActionPending, core.ActionReady, core.ActionWaitingGate, core.ActionBlocked, core.ActionFailed, core.ActionDone}
+	actionIDs := make([]int64, 0, len(statuses))
+	for index, status := range statuses {
+		actionID, createErr := store.CreateAction(ctx, &core.Action{
+			WorkItemID: workItemID,
+			Name:       fmt.Sprintf("action-%d", index),
+			Type:       core.ActionExec,
+			Status:     status,
+			Position:   index,
+		})
+		if createErr != nil {
+			t.Fatalf("create action %d: %v", index, createErr)
+		}
+		actionIDs = append(actionIDs, actionID)
+	}
+
+	threadID, err := store.CreateThread(ctx, &core.Thread{Title: "closure-thread", Status: core.ThreadActive})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	deliverableID, err := store.CreateDeliverable(ctx, &core.Deliverable{
+		ThreadID:     &threadID,
+		Kind:         core.DeliverableDocument,
+		Title:        "Final Result",
+		Summary:      "approved output",
+		ProducerType: core.DeliverableProducerThread,
+		ProducerID:   threadID,
+		Status:       core.DeliverableFinal,
+	})
+	if err != nil {
+		t.Fatalf("create deliverable: %v", err)
+	}
+
+	item, err := svc.AdoptDeliverable(ctx, workItemID, deliverableID)
+	if err != nil {
+		t.Fatalf("AdoptDeliverable: %v", err)
+	}
+	if item.Status != core.WorkItemCompleted {
+		t.Fatalf("Status = %q, want %q", item.Status, core.WorkItemCompleted)
+	}
+
+	wantStatuses := []core.ActionStatus{core.ActionCancelled, core.ActionCancelled, core.ActionCancelled, core.ActionCancelled, core.ActionCancelled, core.ActionDone}
+	for i, actionID := range actionIDs {
+		action, getErr := store.GetAction(ctx, actionID)
+		if getErr != nil {
+			t.Fatalf("GetAction(%d): %v", actionID, getErr)
+		}
+		if action.Status != wantStatuses[i] {
+			t.Fatalf("action %d status = %q, want %q", actionID, action.Status, wantStatuses[i])
+		}
+	}
+	if len(recorder.events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(recorder.events))
+	}
+	if recorder.events[0].Type != core.EventWorkItemCompleted {
+		t.Fatalf("event type = %q, want %q", recorder.events[0].Type, core.EventWorkItemCompleted)
+	}
+}
+
+func TestServiceAdoptDeliverableRejectsRunningActions(t *testing.T) {
+	store := newWorkItemAppTestStore(t)
+	svc := newSQLiteWorkItemService(store, newSQLiteTxAdapter(store, nil), nil)
+	ctx := context.Background()
+
+	workItemID, err := store.CreateWorkItem(ctx, &core.WorkItem{
+		Title:    "Adopt deliverable conflict",
+		Status:   core.WorkItemInExecution,
+		Priority: core.PriorityMedium,
+	})
+	if err != nil {
+		t.Fatalf("create work item: %v", err)
+	}
+	if _, err := store.CreateAction(ctx, &core.Action{
+		WorkItemID: workItemID,
+		Name:       "running-action",
+		Type:       core.ActionExec,
+		Status:     core.ActionRunning,
+		Position:   0,
+	}); err != nil {
+		t.Fatalf("create action: %v", err)
+	}
+	threadID, err := store.CreateThread(ctx, &core.Thread{Title: "conflict-thread", Status: core.ThreadActive})
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	deliverableID, err := store.CreateDeliverable(ctx, &core.Deliverable{
+		ThreadID:     &threadID,
+		Kind:         core.DeliverableDocument,
+		Title:        "Running result",
+		ProducerType: core.DeliverableProducerThread,
+		ProducerID:   threadID,
+		Status:       core.DeliverableFinal,
+	})
+	if err != nil {
+		t.Fatalf("create deliverable: %v", err)
+	}
+
+	_, err = svc.AdoptDeliverable(ctx, workItemID, deliverableID)
+	if err == nil {
+		t.Fatal("expected adopt deliverable to fail while action is running")
+	}
+	if CodeOf(err) != CodeInvalidState {
+		t.Fatalf("CodeOf(err) = %q, want %q", CodeOf(err), CodeInvalidState)
+	}
+
+	workItem, getErr := store.GetWorkItem(ctx, workItemID)
+	if getErr != nil {
+		t.Fatalf("GetWorkItem: %v", getErr)
+	}
+	if workItem.Status != core.WorkItemInExecution {
+		t.Fatalf("work item status = %q, want %q", workItem.Status, core.WorkItemInExecution)
+	}
+	if workItem.FinalDeliverableID != nil {
+		t.Fatalf("FinalDeliverableID = %v, want nil", workItem.FinalDeliverableID)
 	}
 }
 

@@ -34,6 +34,7 @@ type orchestrateCLIOptions struct {
 	SourceSession     string
 	ProjectID         *int64
 	WorkItemID        int64
+	DeliverableID     int64
 	Objective         string
 	OverwriteExisting bool
 	Profile           string
@@ -49,6 +50,7 @@ type orchestrateCLIOptions struct {
 type orchestrateService interface {
 	CreateTask(ctx context.Context, input orchestrateapp.CreateTaskInput) (*orchestrateapp.CreateTaskResult, error)
 	FollowUpTask(ctx context.Context, input orchestrateapp.FollowUpTaskInput) (*orchestrateapp.FollowUpTaskResult, error)
+	AdoptDeliverable(ctx context.Context, input orchestrateapp.AdoptDeliverableInput) (*orchestrateapp.AdoptDeliverableResult, error)
 	ReassignTask(ctx context.Context, input orchestrateapp.ReassignTaskInput) (*orchestrateapp.ReassignTaskResult, error)
 	DecomposeTask(ctx context.Context, input orchestrateapp.DecomposeTaskInput) (*orchestrateapp.DecomposeTaskResult, error)
 	EscalateThread(ctx context.Context, input orchestrateapp.EscalateThreadInput) (*orchestrateapp.EscalateThreadResult, error)
@@ -72,10 +74,14 @@ type orchestrateResult struct {
 	RecommendedNextStep string              `json:"recommended_next_step,omitempty"`
 	ActionCount         int                 `json:"action_count,omitempty"`
 	LatestRunSummary    string              `json:"latest_run_summary,omitempty"`
+	LatestSummarySource string              `json:"latest_summary_source,omitempty"`
 	Profile             string              `json:"profile,omitempty"`
 	Reason              string              `json:"reason,omitempty"`
 	OldProfile          string              `json:"old_profile,omitempty"`
 	NewProfile          string              `json:"new_profile,omitempty"`
+	DeliverableID       int64               `json:"deliverable_id,omitempty"`
+	FinalDeliverableID  *int64              `json:"final_deliverable_id,omitempty"`
+	HasFinalDeliverable bool                `json:"has_final_deliverable,omitempty"`
 }
 
 var newOrchestrateRuntime = defaultNewOrchestrateRuntime
@@ -107,7 +113,7 @@ func runOrchestrateToWriter(out io.Writer, svc orchestrateService, args []string
 
 func parseOrchestrateArgs(args []string) (orchestrateCLIOptions, error) {
 	if len(args) < 2 || strings.TrimSpace(args[0]) != "task" {
-		return orchestrateCLIOptions{}, fmt.Errorf("usage: ai-flow orchestrate task <create|follow-up|assign-profile|reassign|decompose|escalate-thread> [flags]")
+		return orchestrateCLIOptions{}, fmt.Errorf("usage: ai-flow orchestrate task <create|follow-up|adopt-deliverable|assign-profile|reassign|decompose|escalate-thread> [flags]")
 	}
 
 	opts := orchestrateCLIOptions{JSON: true}
@@ -116,6 +122,8 @@ func parseOrchestrateArgs(args []string) (orchestrateCLIOptions, error) {
 		opts.Action = "task.create"
 	case "follow-up":
 		opts.Action = "task.follow-up"
+	case "adopt-deliverable":
+		opts.Action = "task.adopt-deliverable"
 	case "assign-profile":
 		opts.Action = "task.assign-profile"
 	case "reassign":
@@ -125,7 +133,7 @@ func parseOrchestrateArgs(args []string) (orchestrateCLIOptions, error) {
 	case "escalate-thread":
 		opts.Action = "task.escalate-thread"
 	default:
-		return orchestrateCLIOptions{}, fmt.Errorf("usage: ai-flow orchestrate task <create|follow-up|assign-profile|reassign|decompose|escalate-thread> [flags]")
+		return orchestrateCLIOptions{}, fmt.Errorf("usage: ai-flow orchestrate task <create|follow-up|adopt-deliverable|assign-profile|reassign|decompose|escalate-thread> [flags]")
 	}
 
 	for i := 2; i < len(args); i++ {
@@ -228,6 +236,23 @@ func parseOrchestrateArgs(args []string) (orchestrateCLIOptions, error) {
 				return orchestrateCLIOptions{}, err
 			}
 			opts.WorkItemID = workItemID
+		case arg == "--deliverable-id":
+			value, next, err := nextArgValue(args, i, "--deliverable-id")
+			if err != nil {
+				return orchestrateCLIOptions{}, err
+			}
+			deliverableID, err := parsePositiveInt64(value, "--deliverable-id")
+			if err != nil {
+				return orchestrateCLIOptions{}, err
+			}
+			opts.DeliverableID = deliverableID
+			i = next
+		case strings.HasPrefix(arg, "--deliverable-id="):
+			deliverableID, err := parsePositiveInt64(strings.TrimPrefix(arg, "--deliverable-id="), "--deliverable-id")
+			if err != nil {
+				return orchestrateCLIOptions{}, err
+			}
+			opts.DeliverableID = deliverableID
 		case arg == "--objective":
 			value, next, err := nextArgValue(args, i, "--objective")
 			if err != nil {
@@ -314,6 +339,8 @@ func executeOrchestrateAction(ctx context.Context, out io.Writer, svc orchestrat
 		result, err = executeCreateTask(ctx, svc, opts)
 	case "task.follow-up":
 		result, err = executeFollowUpTask(ctx, svc, opts)
+	case "task.adopt-deliverable":
+		result, err = executeAdoptDeliverable(ctx, svc, opts)
 	case "task.assign-profile", "task.reassign":
 		result, err = executeReassignTask(ctx, svc, opts)
 	case "task.decompose":
@@ -374,6 +401,31 @@ func executeFollowUpTask(ctx context.Context, svc orchestrateService, opts orche
 		ActiveProfile:       resp.ActiveProfileID,
 		RecommendedNextStep: resp.RecommendedNextStep,
 		LatestRunSummary:    resp.LatestRunSummary,
+		LatestSummarySource: resp.LatestSummarySource,
+		FinalDeliverableID:  resp.FinalDeliverableID,
+		HasFinalDeliverable: resp.HasFinalDeliverable,
+	}, nil
+}
+
+func executeAdoptDeliverable(ctx context.Context, svc orchestrateService, opts orchestrateCLIOptions) (orchestrateResult, error) {
+	resp, err := svc.AdoptDeliverable(ctx, orchestrateapp.AdoptDeliverableInput{
+		WorkItemID:    opts.WorkItemID,
+		DeliverableID: opts.DeliverableID,
+		ActorProfile:  opts.ActorProfile,
+		SourceSession: opts.SourceSession,
+	})
+	if err != nil {
+		return orchestrateResult{}, err
+	}
+	return orchestrateResult{
+		OK:                  true,
+		Action:              opts.Action,
+		Summary:             "adopted final deliverable",
+		WorkItemID:          resp.WorkItemID,
+		DeliverableID:       resp.DeliverableID,
+		Status:              resp.Status,
+		FinalDeliverableID:  resp.FinalDeliverableID,
+		HasFinalDeliverable: resp.FinalDeliverableID != nil,
 	}, nil
 }
 
@@ -481,6 +533,7 @@ func defaultNewOrchestrateRuntime() (*orchestrateRuntime, error) {
 	service := orchestrateapp.New(orchestrateapp.Config{
 		Store:           store,
 		WorkItemCreator: workItems,
+		Deliverables:    workItems,
 		Planner:         plannerSvc,
 		Threads:         threads,
 		Registry:        store,

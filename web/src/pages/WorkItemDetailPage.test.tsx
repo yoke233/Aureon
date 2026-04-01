@@ -49,6 +49,7 @@ describe("WorkItemDetailPage", () => {
         updated_at: "2026-03-13T00:00:00Z",
       }),
       listActions: vi.fn().mockResolvedValue([]),
+      listWorkItemDeliverables: vi.fn().mockResolvedValue([]),
       listThreadsByWorkItem: vi.fn().mockResolvedValue([
         {
           id: 1,

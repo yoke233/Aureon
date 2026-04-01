@@ -1,5 +1,6 @@
 import type {
   Action,
+  ActionSignal,
   CancelWorkItemResponse,
   BootstrapPRWorkItemRequest,
   BootstrapPRWorkItemResponse,
@@ -8,15 +9,19 @@ import type {
   CreateWorkItemFromTemplateRequest,
   CreateWorkItemFromTemplateResponse,
   CreateWorkItemRequest,
+  DecideActionRequest,
   DAGTemplate,
   Deliverable,
   Event,
   GenerateActionsRequest,
+  PendingWorkItem,
   Resource,
   Run,
   RunWorkItemResponse,
   SaveWorkItemAsTemplateRequest,
   SetupCronRequest,
+  UnblockActionRequest,
+  UnblockActionResponse,
   UpdateActionRequest,
   UpdateDAGTemplateRequest,
   UpdateWorkItemRequest,
@@ -41,6 +46,7 @@ export const buildWorkflowApi = ({
   | "updateWorkItem"
   | "archiveWorkItem"
   | "bootstrapPRWorkItem"
+  | "listPendingWorkItems"
   | "listWorkItemDeliverables"
   | "adoptWorkItemFinalDeliverable"
   | "listActions"
@@ -48,6 +54,8 @@ export const buildWorkflowApi = ({
   | "generateActions"
   | "generateTitle"
   | "getAction"
+  | "decideAction"
+  | "unblockAction"
   | "updateAction"
   | "deleteAction"
   | "listRuns"
@@ -120,6 +128,13 @@ export const buildWorkflowApi = ({
       method: "POST",
       body,
     }),
+  listPendingWorkItems: (profileId) =>
+    request<PendingWorkItem[]>({
+      path: "/work-items/pending",
+      query: {
+        profile_id: profileId,
+      },
+    }).then((items) => (Array.isArray(items) ? items : [])),
   listWorkItemDeliverables: (workItemId) =>
     request<Deliverable[]>({
       path: `/work-items/${workItemId}/deliverables`,
@@ -155,6 +170,18 @@ export const buildWorkflowApi = ({
   getAction: (actionId) =>
     request<Action>({
       path: `/actions/${actionId}`,
+    }),
+  decideAction: (actionId, body) =>
+    request<ActionSignal, DecideActionRequest>({
+      path: `/actions/${actionId}/decision`,
+      method: "POST",
+      body,
+    }),
+  unblockAction: (actionId, body) =>
+    request<UnblockActionResponse, UnblockActionRequest>({
+      path: `/actions/${actionId}/unblock`,
+      method: "POST",
+      body,
     }),
   updateAction: (actionId, body) =>
     request<Action, UpdateActionRequest>({

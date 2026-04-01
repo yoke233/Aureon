@@ -28,8 +28,10 @@ import type {
   CreateThreadFromRequirementRequest,
   CreateThreadFromRequirementResponse,
   CreateWorkItemRequest,
+  DecideActionRequest,
   Deliverable,
   UpdateWorkItemRequest,
+  PendingWorkItem,
   WorkItem,
   CreateActionRequest,
   GenerateActionsRequest,
@@ -44,6 +46,9 @@ import type {
   SkillDetail,
   SkillInfo,
   Action,
+  ActionSignal,
+  UnblockActionRequest,
+  UnblockActionResponse,
   UpdateActionRequest,
   UpdateProjectRequest,
   DAGTemplate,
@@ -127,7 +132,7 @@ export interface RequestOptions<TBody = unknown> {
   omitAuth?: boolean;
 }
 
-export interface ApiClientOptions extends HttpTransportOptions {}
+export type ApiClientOptions = HttpTransportOptions;
 
 export interface ApiClient {
   request<TResponse, TBody = unknown>(
@@ -184,6 +189,7 @@ export interface ApiClient {
   updateWorkItem(workItemId: number, body: UpdateWorkItemRequest): Promise<WorkItem>;
   archiveWorkItem(workItemId: number): Promise<void>;
   bootstrapPRWorkItem(workItemId: number, body?: BootstrapPRWorkItemRequest): Promise<BootstrapPRWorkItemResponse>;
+  listPendingWorkItems(profileId?: string): Promise<PendingWorkItem[]>;
   listWorkItemDeliverables(workItemId: number): Promise<Deliverable[]>;
   adoptWorkItemFinalDeliverable(workItemId: number, deliverableId: number): Promise<WorkItem>;
 
@@ -192,6 +198,8 @@ export interface ApiClient {
   generateActions(workItemId: number, body: GenerateActionsRequest): Promise<Action[]>;
   generateTitle(body: { description: string }): Promise<{ title: string }>;
   getAction(actionId: number): Promise<Action>;
+  decideAction(actionId: number, body: DecideActionRequest): Promise<ActionSignal>;
+  unblockAction(actionId: number, body: UnblockActionRequest): Promise<UnblockActionResponse>;
   updateAction(actionId: number, body: UpdateActionRequest): Promise<Action>;
   deleteAction(actionId: number): Promise<void>;
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -35,6 +35,7 @@ import type {
   WorkItemPriority,
   WorkItemStatus,
   Action,
+  Deliverable,
   ThreadWorkItemLink,
   Thread,
   UpdateWorkItemRequest,
@@ -175,8 +176,10 @@ export function WorkItemDetailPage() {
   const numericWorkItemId = Number.parseInt(workItemIdParam ?? "", 10);
   const [workItem, setWorkItem] = useState<WorkItem | null>(null);
   const [actions, setActions] = useState<Action[]>([]);
+  const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [loading, setLoading] = useState(false);
   const [runningAction, setRunningAction] = useState<"idle" | "run" | "cancel">("idle");
+  const [adoptingDeliverableId, setAdoptingDeliverableId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [threadLinks, setThreadLinks] = useState<ThreadWorkItemLink[]>([]);
   const [linkedThreads, setLinkedThreads] = useState<Record<number, Thread>>({});
@@ -186,7 +189,11 @@ export function WorkItemDetailPage() {
   const [saving, setSaving] = useState(false);
 
   const fetchWorkItemData = useCallback(async (id: number) => {
-    return Promise.all([apiClient.getWorkItem(id), apiClient.listActions(id)]);
+    return Promise.all([
+      apiClient.getWorkItem(id),
+      apiClient.listActions(id),
+      apiClient.listWorkItemDeliverables(id),
+    ]);
   }, [apiClient]);
 
   useEffect(() => {
@@ -198,10 +205,11 @@ export function WorkItemDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const [workItemResponse, actionsResponse] = await fetchWorkItemData(numericWorkItemId);
+        const [workItemResponse, actionsResponse, deliverablesResponse] = await fetchWorkItemData(numericWorkItemId);
         if (!cancelled) {
           setWorkItem(workItemResponse);
           setActions(actionsResponse);
+          setDeliverables(deliverablesResponse);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -291,6 +299,10 @@ export function WorkItemDetailPage() {
 
   const statusStyle = statusConfig[workItem?.status ?? "open"] ?? statusConfig.open;
   const priorityStyle = priorityConfig[workItem?.priority ?? "medium"] ?? priorityConfig.medium;
+  const finalDeliverable = useMemo(
+    () => deliverables.find((item) => item.id === workItem?.final_deliverable_id) ?? null,
+    [deliverables, workItem?.final_deliverable_id],
+  );
 
   const openEdit = () => {
     if (!workItem) {
@@ -335,12 +347,32 @@ export function WorkItemDetailPage() {
       } else {
         await apiClient.cancelWorkItem(workItem.id);
       }
-      const refreshedWorkItem = await apiClient.getWorkItem(workItem.id);
+      const [refreshedWorkItem, refreshedActions, refreshedDeliverables] = await fetchWorkItemData(workItem.id);
       setWorkItem(refreshedWorkItem);
+      setActions(refreshedActions);
+      setDeliverables(refreshedDeliverables);
     } catch (actionError) {
       setError(getErrorMessage(actionError));
     } finally {
       setRunningAction("idle");
+    }
+  };
+
+  const adoptDeliverable = async (deliverableId: number) => {
+    if (!workItem) {
+      return;
+    }
+    setAdoptingDeliverableId(deliverableId);
+    setError(null);
+    try {
+      const updatedWorkItem = await apiClient.adoptWorkItemFinalDeliverable(workItem.id, deliverableId);
+      const refreshedDeliverables = await apiClient.listWorkItemDeliverables(workItem.id);
+      setWorkItem(updatedWorkItem);
+      setDeliverables(refreshedDeliverables);
+    } catch (adoptError) {
+      setError(getErrorMessage(adoptError));
+    } finally {
+      setAdoptingDeliverableId(null);
     }
   };
 
@@ -552,6 +584,89 @@ export function WorkItemDetailPage() {
                   </div>
                 ) : (
                   <span className="text-xs italic text-muted-foreground">{t("workItemDetail.noThreads")}</span>
+                )}
+              </div>
+
+              <hr className="border-border" />
+
+              <div className="space-y-2.5">
+                <h4 className="text-[13px] text-muted-foreground">最终结果</h4>
+                {finalDeliverable ? (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="truncate text-xs font-semibold text-foreground">
+                        {finalDeliverable.title || `Deliverable #${finalDeliverable.id}`}
+                      </div>
+                      <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        final
+                      </span>
+                    </div>
+                    {finalDeliverable.summary ? (
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{finalDeliverable.summary}</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <span className="text-xs italic text-muted-foreground">尚未采纳最终结果</span>
+                )}
+              </div>
+
+              <hr className="border-border" />
+
+              <div className="space-y-2.5">
+                <h4 className="text-[13px] text-muted-foreground">Deliverables</h4>
+                {deliverables.length > 0 ? (
+                  <div className="space-y-2">
+                    {deliverables.map((deliverable) => {
+                      const isFinal = workItem?.final_deliverable_id === deliverable.id;
+                      return (
+                        <div
+                          key={deliverable.id}
+                          className={cn(
+                            "rounded-lg border p-3",
+                            isFinal ? "border-emerald-200 bg-emerald-50/50" : "border-border",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-xs font-semibold text-foreground">
+                                {deliverable.title || `Deliverable #${deliverable.id}`}
+                              </div>
+                              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                <span>{deliverable.kind}</span>
+                                <span className="rounded bg-muted px-1.5 py-px font-medium">
+                                  {deliverable.status}
+                                </span>
+                              </div>
+                            </div>
+                            {isFinal ? (
+                              <span className="rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
+                                当前最终结果
+                              </span>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-[11px]"
+                                disabled={adoptingDeliverableId !== null}
+                                onClick={() => void adoptDeliverable(deliverable.id)}
+                              >
+                                {adoptingDeliverableId === deliverable.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  "采纳"
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                          {deliverable.summary ? (
+                            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{deliverable.summary}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="text-xs italic text-muted-foreground">暂无 deliverable</span>
                 )}
               </div>
 

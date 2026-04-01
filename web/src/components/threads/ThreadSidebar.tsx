@@ -636,8 +636,7 @@ function proposalStatusTone(status: string): string {
   }
 }
 
-function ProposalSection({
-}: {}) {
+function ProposalSection() {
   const { t } = useTranslation();
   const {
     proposals,
@@ -1035,8 +1034,7 @@ function readWorkItemSourceType(workItem: WorkItem | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function TasksSection({
-}: {}) {
+function TasksSection() {
   const { t } = useTranslation();
   const {
     workItemLinks,

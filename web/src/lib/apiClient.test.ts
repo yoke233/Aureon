@@ -314,6 +314,24 @@ describe("apiClient", () => {
     expect(JSON.parse(String(init.body))).toEqual({ title: "demo", base_branch: "master" });
   });
 
+  it("listPendingWorkItems 会命中 /work-items/pending 并携带 profile_id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({ baseUrl: "http://localhost:8080/api" });
+    await client.listPendingWorkItems("ceo");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/work-items/pending?profile_id=ceo");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("GET");
+  });
+
   it("listWorkItemDeliverables 会命中 /work-items/{id}/deliverables", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), {
@@ -358,6 +376,73 @@ describe("apiClient", () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({ deliverable_id: 88 });
+  });
+
+  it("decideAction 会命中 /actions/{id}/decision 并 POST JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        id: 9,
+        action_id: 12,
+        work_item_id: 5,
+        type: "approve",
+        source: "human",
+        created_at: "2026-04-01T00:00:00Z",
+      }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({ baseUrl: "http://localhost:8080/api" });
+    await client.decideAction(12, { decision: "approve", reason: "looks good" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/actions/12/decision");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ decision: "approve", reason: "looks good" });
+  });
+
+  it("unblockAction 会命中 /actions/{id}/unblock 并 POST JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        status: "unblocked",
+        signal: {
+          id: 10,
+          action_id: 12,
+          work_item_id: 5,
+          type: "unblock",
+          source: "human",
+          created_at: "2026-04-01T00:00:00Z",
+        },
+        action: {
+          id: 12,
+          work_item_id: 5,
+          name: "gate",
+          type: "gate",
+          status: "pending",
+          position: 1,
+          max_retries: 0,
+          retry_count: 0,
+          created_at: "2026-04-01T00:00:00Z",
+          updated_at: "2026-04-01T00:00:00Z",
+        },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createApiClient({ baseUrl: "http://localhost:8080/api" });
+    await client.unblockAction(12, { reason: "retry now" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:8080/api/actions/12/unblock");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ reason: "retry now" });
   });
 
   it("createWorkItemFromTemplate 会命中 /templates/{id}/create-work-item 并 POST JSON body", async () => {

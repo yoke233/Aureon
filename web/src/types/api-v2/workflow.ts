@@ -130,6 +130,61 @@ export interface Action {
   updated_at: string;
 }
 
+export type SignalType =
+  | "complete"
+  | "need_help"
+  | "blocked"
+  | "progress"
+  | "approve"
+  | "reject"
+  | "unblock"
+  | "override"
+  | "feedback"
+  | "context"
+  | "instruction"
+  | string;
+
+export interface ActionSignal {
+  id: number;
+  action_id: number;
+  work_item_id: number;
+  run_id?: number;
+  type: SignalType;
+  source: "agent" | "human" | "system" | string;
+  summary?: string;
+  content?: string;
+  source_action_id?: number;
+  payload?: Record<string, unknown>;
+  actor?: string;
+  created_at: string;
+}
+
+export interface PendingWorkItem {
+  work_item: WorkItem;
+  reason: "pending_review" | "needs_rework" | "escalated" | string;
+  next_handler: string;
+  latest_summary?: string;
+  pending_action?: Action;
+  latest_context?: ActionSignal;
+}
+
+export interface DecideActionRequest {
+  decision: "approve" | "reject" | "complete" | "need_help";
+  reason: string;
+  reject_targets?: number[];
+}
+
+export interface UnblockActionRequest {
+  reason: string;
+  instructions?: string;
+}
+
+export interface UnblockActionResponse {
+  status: string;
+  signal: ActionSignal;
+  action: Action;
+}
+
 export type RunStatus =
   | "created"
   | "running"

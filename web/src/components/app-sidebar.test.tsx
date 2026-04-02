@@ -84,6 +84,22 @@ describe("AppSidebar", () => {
     expect(localStorage.getItem("sidebar-collapsed")).toBe("true");
   });
 
+  it("桌面端侧栏保持固定宽度，不参与主区挤压", () => {
+    mockUseWorkbench.mockReturnValue({
+      projects: [
+        { id: 1, name: "Alpha" },
+      ],
+      selectedProjectId: 1,
+      setSelectedProjectId: vi.fn(),
+      logout: vi.fn(),
+    });
+
+    const { container } = renderSidebar("/");
+    const aside = container.querySelector("aside");
+
+    expect(aside?.className).toContain("shrink-0");
+  });
+
   it("移动端抽屉不会复用桌面折叠态", () => {
     mockUseWorkbench.mockReturnValue({
       projects: [
@@ -102,4 +118,3 @@ describe("AppSidebar", () => {
     expect(screen.queryByTitle(/Expand sidebar|展开侧栏/)).toBeNull();
   });
 });
-

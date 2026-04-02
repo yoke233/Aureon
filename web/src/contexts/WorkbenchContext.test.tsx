@@ -3,18 +3,25 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchProvider, useWorkbench } from "./WorkbenchContext";
 
-const { connectMock, disconnectMock, isDesktopMock, fetchDesktopBootstrapMock } = vi.hoisted(() => ({
+const {
+  connectMock,
+  disconnectMock,
+  createWsClientMock,
+  isDesktopMock,
+  fetchDesktopBootstrapMock,
+} = vi.hoisted(() => ({
   connectMock: vi.fn(),
   disconnectMock: vi.fn(),
+  createWsClientMock: vi.fn(),
   isDesktopMock: vi.fn(() => false),
   fetchDesktopBootstrapMock: vi.fn(),
 }));
 
 vi.mock("@/lib/wsClient", () => ({
-  createWsClient: () => ({
+  createWsClient: createWsClientMock.mockImplementation(() => ({
     connect: connectMock,
     disconnect: disconnectMock,
-  }),
+  })),
 }));
 
 vi.mock("@/lib/desktopBridge", () => ({
@@ -53,6 +60,10 @@ function renderProvider() {
 describe("WorkbenchProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    createWsClientMock.mockImplementation(() => ({
+      connect: connectMock,
+      disconnect: disconnectMock,
+    }));
     localStorage.clear();
     window.history.replaceState({}, "", "/");
     vi.stubGlobal("fetch", vi.fn());
@@ -221,5 +232,63 @@ describe("WorkbenchProvider", () => {
     const headers = fetchMock.mock.calls[2]?.[1]?.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer manual-secret");
     expect(screen.getByTestId("projects").textContent).toBe("Delta");
+  });
+
+  it("桌面模式会使用 bootstrap 下发的 api/ws 基地址", async () => {
+    const fetchMock = vi.mocked(fetch);
+    isDesktopMock.mockReturnValue(true);
+    fetchDesktopBootstrapMock.mockResolvedValue({
+      token: "desktop-secret",
+      apiBaseUrl: "http://127.0.0.1:19191/api",
+      wsBaseUrl: "http://127.0.0.1:19191/api",
+    });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse([{ id: 5, name: "Desktop" }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: 5, name: "Desktop" }]));
+
+    renderProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("auth-status").textContent).toBe("ready");
+    });
+
+    expect(fetchDesktopBootstrapMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const requestedUrls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(requestedUrls.some((url) => url.includes("/auth/status"))).toBe(false);
+    expect(requestedUrls.some((url) => url.startsWith("http://127.0.0.1:19191/api/projects"))).toBe(true);
+    expect(createWsClientMock).toHaveBeenLastCalledWith({
+      baseUrl: "http://127.0.0.1:19191/api",
+      getToken: expect.any(Function),
+    });
+  });
+
+  it("桌面模式在无鉴权配置下允许空 token 并直接进入 ready", async () => {
+    const fetchMock = vi.mocked(fetch);
+    isDesktopMock.mockReturnValue(true);
+    fetchDesktopBootstrapMock.mockResolvedValue({
+      token: "",
+      apiBaseUrl: "http://127.0.0.1:19191/api",
+      wsBaseUrl: "http://127.0.0.1:19191/api",
+    });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse([{ id: 6, name: "Desktop Open" }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: 6, name: "Desktop Open" }]));
+
+    renderProvider();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("auth-status").textContent).toBe("ready");
+    });
+
+    expect(screen.getByTestId("projects").textContent).toBe("Desktop Open");
+    expect(screen.getByTestId("auth-error").textContent).toBe("");
+    expect(localStorage.getItem("ai-workflow-api-token")).toBeNull();
+    const headers = fetchMock.mock.calls
+      .map((call) => call[1]?.headers as Headers | undefined)
+      .filter((value): value is Headers => value instanceof Headers);
+    expect(headers.length).toBeGreaterThanOrEqual(1);
+    headers.forEach((header) => {
+      expect(header.get("Authorization")).toBeNull();
+    });
   });
 });

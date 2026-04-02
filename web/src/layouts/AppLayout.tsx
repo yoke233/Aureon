@@ -26,7 +26,7 @@ export function AppLayout() {
         <AppSidebar drawerOpen={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
         {/* Page content */}
-        <main className="flex-1 overflow-auto bg-background">
+        <main className="min-w-0 flex-1 overflow-auto bg-background">
           <Outlet />
         </main>
       </div>
@@ -36,7 +36,7 @@ export function AppLayout() {
   return (
     <div className="flex h-screen overflow-hidden">
       <AppSidebar />
-      <main className="flex-1 overflow-auto bg-background">
+      <main className="min-w-0 flex-1 overflow-auto bg-background">
         <Outlet />
       </main>
     </div>

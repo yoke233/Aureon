@@ -109,8 +109,8 @@ interface ProviderProps {
 
 export function WorkbenchProvider({ children }: ProviderProps) {
   const tokenRef = useRef<string | null>(null);
-  const apiBaseUrl = DEFAULT_API_BASE_URL;
-  const wsBaseUrl = DEFAULT_WS_BASE_URL;
+  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
+  const [wsBaseUrl, setWsBaseUrl] = useState(DEFAULT_WS_BASE_URL);
   const [loginAttempt, setLoginAttempt] = useState(0);
 
   const apiClient = useMemo(
@@ -177,10 +177,8 @@ export function WorkbenchProvider({ children }: ProviderProps) {
     const bootstrap = async (): Promise<void> => {
       let token = resolvedToken.token;
       let tokenSource = resolvedToken.source;
-      const effectiveApiBaseUrl = apiBaseUrl;
-      const bootstrapTransport = createHttpTransport({
-        baseUrl: effectiveApiBaseUrl,
-      });
+      let effectiveApiBaseUrl = apiBaseUrl;
+      let effectiveWsBaseUrl = wsBaseUrl;
 
       if (runningInDesktop) {
         try {
@@ -188,9 +186,17 @@ export function WorkbenchProvider({ children }: ProviderProps) {
           if (cancelled) {
             return;
           }
-          token = desktop.token;
+          token = desktop.token?.trim() || null;
           tokenSource = "storage";
-          persistStoredApiToken(desktop.token);
+          effectiveApiBaseUrl = desktop.apiBaseUrl?.trim() || effectiveApiBaseUrl;
+          effectiveWsBaseUrl = desktop.wsBaseUrl?.trim() || effectiveWsBaseUrl;
+          if (token) {
+            persistStoredApiToken(token);
+          } else {
+            clearStoredApiToken();
+          }
+          setApiBaseUrl((current: string) => current === effectiveApiBaseUrl ? current : effectiveApiBaseUrl);
+          setWsBaseUrl((current: string) => current === effectiveWsBaseUrl ? current : effectiveWsBaseUrl);
         } catch (error) {
           if (!cancelled) {
             setAuthStatus("error");
@@ -198,7 +204,41 @@ export function WorkbenchProvider({ children }: ProviderProps) {
           }
           return;
         }
+
+        tokenRef.current = token;
+        setAuthStatus("checking");
+        setAuthError(null);
+
+        const desktopApiClient = createApiClient({
+          baseUrl: effectiveApiBaseUrl,
+          getToken: () => tokenRef.current,
+        });
+
+        try {
+          const listed = await desktopApiClient.listProjects({ limit: 200, offset: 0 });
+          if (cancelled) {
+            return;
+          }
+          applyProjects(Array.isArray(listed) ? listed : []);
+          setAuthStatus("ready");
+        } catch (error) {
+          if (!cancelled) {
+            tokenRef.current = null;
+            setProjects([]);
+            setAuthStatus("error");
+            setAuthError(`桌面版启动失败：${getErrorMessage(error)}`);
+          }
+        }
+        return;
       }
+
+      const bootstrapTransport = createHttpTransport({
+        baseUrl: effectiveApiBaseUrl,
+      });
+      const bootstrapApiClient = createApiClient({
+        baseUrl: effectiveApiBaseUrl,
+        getToken: () => tokenRef.current,
+      });
 
       // Check if server requires authentication at all.
       let authRequired = true;
@@ -226,7 +266,7 @@ export function WorkbenchProvider({ children }: ProviderProps) {
         setAuthStatus("checking");
         setAuthError(null);
         try {
-          const listed = await apiClient.listProjects({ limit: 200, offset: 0 });
+          const listed = await bootstrapApiClient.listProjects({ limit: 200, offset: 0 });
           if (cancelled) {
             return;
           }
@@ -255,7 +295,7 @@ export function WorkbenchProvider({ children }: ProviderProps) {
       setAuthError(null);
 
       try {
-        const listed = await apiClient.listProjects({ limit: 200, offset: 0 });
+        const listed = await bootstrapApiClient.listProjects({ limit: 200, offset: 0 });
         if (cancelled) {
           return;
         }
@@ -278,7 +318,7 @@ export function WorkbenchProvider({ children }: ProviderProps) {
     return () => {
       cancelled = true;
     };
-  }, [apiBaseUrl, apiClient, applyProjects, loginAttempt]);
+  }, [apiBaseUrl, wsBaseUrl, applyProjects, loginAttempt]);
 
   useEffect(() => {
     if (authStatus !== "ready") {

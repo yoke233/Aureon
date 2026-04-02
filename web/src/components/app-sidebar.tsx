@@ -54,7 +54,7 @@ export function AppSidebar({ drawerOpen, onClose }: AppSidebarProps = {}) {
   const sidebarContent = (
     <aside
       className={cn(
-        "flex h-screen flex-col border-r bg-background",
+        "flex h-screen shrink-0 flex-col border-r bg-background",
         isDrawer ? "w-72 shadow-xl" : cn("transition-[width] duration-200", effectiveCollapsed ? "w-14" : "w-56"),
       )}
     >

@@ -1,3 +1,24 @@
+export namespace desktopapp {
+	
+	export class Bootstrap {
+	    token: string;
+	    apiBaseUrl: string;
+	    wsBaseUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Bootstrap(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.token = source["token"];
+	        this.apiBaseUrl = source["apiBaseUrl"];
+	        this.wsBaseUrl = source["wsBaseUrl"];
+	    }
+	}
+
+}
+
 export namespace http {
 	
 	export class Response {
@@ -123,23 +144,6 @@ export namespace http {
 		    }
 		    return a;
 		}
-	}
-
-}
-
-export namespace main {
-	
-	export class DesktopBootstrap {
-	    token: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new DesktopBootstrap(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.token = source["token"];
-	    }
 	}
 
 }

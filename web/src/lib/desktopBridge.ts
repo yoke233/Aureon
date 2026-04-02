@@ -1,5 +1,7 @@
 export interface DesktopBootstrap {
-  token: string;
+  token?: string;
+  apiBaseUrl?: string;
+  wsBaseUrl?: string;
 }
 
 export const isDesktop = (): boolean => {
@@ -10,7 +12,12 @@ export const isDesktop = (): boolean => {
     go?: unknown;
     runtime?: unknown;
   };
-  return Boolean(w.go || w.runtime);
+  if (w.go || w.runtime) {
+    return true;
+  }
+  const hostname = window.location?.hostname?.toLowerCase() ?? "";
+  const protocol = window.location?.protocol?.toLowerCase() ?? "";
+  return hostname === "wails.localhost" || protocol === "wails:";
 };
 
 /** @deprecated Use isDesktop() instead. */
@@ -48,8 +55,8 @@ export const fetchDesktopBootstrap = async (options?: {
         throw new Error("Wails bindings not ready");
       }
       const result = await fn();
-      if (!result || typeof result.token !== "string" || result.token.trim().length === 0) {
-        throw new Error("GetBootstrap returned empty token");
+      if (!result || typeof result !== "object") {
+        throw new Error("GetBootstrap returned invalid payload");
       }
       return result;
     } catch (err) {

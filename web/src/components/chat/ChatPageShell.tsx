@@ -22,9 +22,9 @@ export function ChatPageShell({
   hiddenFileInput,
 }: ChatPageShellProps) {
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full min-w-0 overflow-hidden">
       {sidebar}
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         {mobileHeader}
         {header}
         {errorBanner}

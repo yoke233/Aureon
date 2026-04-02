@@ -3,6 +3,7 @@ package skills
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"github.com/yoke233/zhanggui/internal/core"
 	"github.com/yoke233/zhanggui/internal/platform/appdata"
 )
+
+var linkSkillDir = linkDir
 
 // EnsureSkillsLinked links each skill directory from skillsRoot into targetSkillsDir.
 func EnsureSkillsLinked(skillsRoot, targetSkillsDir string, skillNames []string) error {
@@ -56,7 +59,7 @@ func EnsureSkillsLinked(skillsRoot, targetSkillsDir string, skillNames []string)
 			return fmt.Errorf("lstat target skill %q: %w", name, statErr)
 		}
 
-		if err := linkDir(dst, src); err != nil {
+		if err := materializeSkillDir(dst, src); err != nil {
 			// If another goroutine/process created it concurrently, treat as success.
 			if _, statErr := os.Lstat(dst); statErr == nil {
 				continue
@@ -182,6 +185,24 @@ func resolveTargetSkillsDir(profile *core.AgentProfile) (string, error) {
 	return filepath.Join(home, "skills"), nil
 }
 
+func materializeSkillDir(dst, src string) error {
+	if err := linkSkillDir(dst, src); err == nil {
+		return nil
+	} else {
+		// Windows 上偶发 cmd/mklink 初始化失败时，退化为复制目录，
+		// 保证 sandbox 仍能拿到完整 skill 内容。
+		if copyErr := copyDir(src, dst); copyErr == nil {
+			slog.Warn("skills: link dir failed, copied directory instead",
+				"src", src,
+				"dst", dst,
+				"error", err)
+			return nil
+		} else {
+			return fmt.Errorf("link dir: %w; copy dir fallback: %v", err, copyErr)
+		}
+	}
+}
+
 func linkDir(dst, src string) error {
 	// Prefer native symlink.
 	if err := os.Symlink(src, dst); err == nil {
@@ -192,14 +213,31 @@ func linkDir(dst, src string) error {
 
 	// Windows fallback: junction usually works without elevated privileges.
 	// mklink /J <link> <target>
-	cmd := exec.Command("cmd", "/c", "mklink", "/J", dst, src)
+	cmd := exec.Command(resolveWindowsCmd(), "/c", "mklink", "/J", dst, src)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
 			msg = err.Error()
 		}
-		return fmt.Errorf("mklink /J failed: %s", msg)
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			cwd = "<unknown>"
+		}
+		return fmt.Errorf("mklink /J failed: %s (cwd=%s src=%s dst=%s)", msg, cwd, src, dst)
 	}
 	return nil
+}
+
+func resolveWindowsCmd() string {
+	if comspec := strings.TrimSpace(os.Getenv("ComSpec")); comspec != "" {
+		return comspec
+	}
+	if systemRoot := strings.TrimSpace(os.Getenv("SystemRoot")); systemRoot != "" {
+		return filepath.Join(systemRoot, "System32", "cmd.exe")
+	}
+	if windir := strings.TrimSpace(os.Getenv("windir")); windir != "" {
+		return filepath.Join(windir, "System32", "cmd.exe")
+	}
+	return "cmd"
 }

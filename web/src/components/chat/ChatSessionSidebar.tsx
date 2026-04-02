@@ -152,7 +152,7 @@ export const ChatSessionSidebar = memo(function ChatSessionSidebar(props: ChatSe
   if (isDrawer && !props.drawerOpen) return null;
 
   const content = (
-    <div className={cn("flex w-72 flex-col border-r bg-background", isDrawer && "h-screen shadow-xl")}>
+    <div className={cn("flex w-72 shrink-0 flex-col border-r bg-background", isDrawer && "h-screen shadow-xl")}>
       <div className="border-b p-3">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">{t("chat.sessionList")}</h2>

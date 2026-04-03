@@ -2,13 +2,24 @@
 
 > 状态：部分实现
 >
-> 最后按代码核对：2026-03-14
+> 最后按代码核对：2026-04-03
 >
 > 当前实现状态：`thread_work_item_links` 表、Thread 侧关联 API 和按 WorkItem 反查 Thread 能力已存在；当前反查入口已经是 `/work-items/{id}/threads`。Store 层已提供按 Thread / WorkItem 清理关联的方法，但 handler 对父对象删除尚未形成统一清理协议；同时当前 GORM model 也没有把外键 / CASCADE 作为稳定契约显式声明。
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文只描述
+> `Thread <-> WorkItem` 关联 capability，不单独定义新的主业务对象层级。
 
 ## 概述
 
-Thread（多人讨论容器）与 WorkItem（Issue，执行主线）之间通过显式链接表 `thread_work_item_links` 建立双向关联。
+Thread（多人讨论容器）与 WorkItem（当前执行主轴；底层仍保留 `issues`
+历史命名）之间通过显式链接表 `thread_work_item_links` 建立双向关联。
+
+## 与 canonical map 的关系
+
+- `Thread` 与 `WorkItem` 都属于一级公开业务语义
+- `thread_work_item_links` 是两者之间的关系层 capability
+- link 本身不是新的默认产品主对象，也不应独立升格为顶层叙事
 
 ## 关联表结构
 
@@ -62,7 +73,7 @@ CREATE TABLE thread_work_item_links (
 | `POST` | `/threads/{threadID}/links/work-items` | 创建 thread-workitem 关联 |
 | `GET` | `/threads/{threadID}/work-items` | 查询 thread 关联的 work items |
 | `DELETE` | `/threads/{threadID}/links/work-items/{workItemID}` | 删除指定关联 |
-| `GET` | `/work-items/{issueID}/threads` | 查询 work item 关联的 threads |
+| `GET` | `/work-items/{workItemID}/threads` | 查询 work item 关联的 threads |
 
 ## 约束
 

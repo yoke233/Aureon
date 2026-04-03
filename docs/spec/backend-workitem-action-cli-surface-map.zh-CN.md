@@ -3,8 +3,18 @@
 > 状态：部分实现
 >
 > 最后按代码核对：2026-04-03
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文只整理后端控制面入口
+> 与分层边界，不单独定义根 README Core Concepts。
 
 本文整理当前 `ai-workflow` 后端的控制面入口与分层边界，用于支撑后续将系统内部控制节点逐步统一到 Cobra CLI。
+
+## 0. 与 canonical map 的关系
+
+- `WorkItem` 属于一级公开业务语义
+- `Runtime`、`Profile` 属于独立 Ops/Admin 轴
+- 本文中的 CLI / HTTP / MCP / skill 入口，是控制面与实现面分层，不等于新的业务主对象清单
 
 ## 1. 当前控制面概览
 

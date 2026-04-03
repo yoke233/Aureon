@@ -5,6 +5,8 @@
 > 最后按代码核对：2026-04-03
 >
 > 适用范围：本文只描述当前仓库中已经落地的后端实现，不描述未来规划。
+>
+> Public surface / canonical 语义分层以 `semantic-surface-canonical-map.zh-CN.md` 为准；本文侧重“当前代码如何组织和运行”。
 
 ## 一句话结论
 
@@ -195,6 +197,12 @@ Thread 当前已拥有独立 REST、WebSocket、存储与运行时链路。
 
 当前 thread 讨论后的结构化计划，不再落到独立的 `ThreadTask DAG`。
 
+补充边界：
+
+- 从 workflow 角度看，`Proposal / Initiative` 是当前后端的公开审批链对象
+- 从 canonical 分层看，它们属于 `public capability, not primary narrative`
+- 也就是：HTTP / 深链 / 专题文档可以公开存在，但默认产品主叙事仍收口在 `WorkItem / Thread / Deliverable / Project / Chat`
+
 现行主链是：
 
 - `Thread` 负责讨论与收敛
@@ -268,6 +276,12 @@ HTTP 总注册位于 `internal/adapters/http/handler.go`。
 
 因此任何把当前系统描述成“只有 workitem/action/run 单线工作流”的文档
 都已经落后于代码。
+
+但同时要注意：
+
+- `proposals / initiatives` 已经是 public routes
+- 这不等于它们应该自动进入 README 主概念表或顶层产品导航
+- 这类“公开 capability 但非一级主叙事”的分层，统一以 `semantic-surface-canonical-map.zh-CN.md` 为准
 
 ## ACP 与 builtin executor
 

@@ -6,6 +6,8 @@
 >
 > 适用范围：本文描述当前 `web/` 前端已经落地的页面面、
 > 契约面与事件消费面，不描述未来设计。
+>
+> Public surface / canonical 语义分层以 `semantic-surface-canonical-map.zh-CN.md` 为准；本文侧重“当前前端实际公开了哪些页面和交互”。
 
 ## 一句话结论
 
@@ -15,7 +17,11 @@
 - 监控域
 - 运行时域
 
-其中 `ChatSession`、`Thread`、`WorkItem` 是三条并行主线。
+其中：
+
+- `WorkItem`、`Thread`、`Chat`、`Project` 构成当前默认业务入口
+- `/monitoring/*` 与 `/runtime/*` 属于独立的 Ops/Admin 轴
+- `Requirement`、`Initiative` 等仍可通过深链进入，但当前不属于顶层导航主词
 
 ## 技术栈与运行壳
 
@@ -83,6 +89,12 @@
 旧入口如 `/agents`、`/skills`、`/templates`、`/sandbox`
 当前也是 redirect。
 
+补充边界：
+
+- `Profile` 当前不作为全局顶层导航独立出现
+- 它归属于 Runtime > Agents 子域
+- `Initiative` 与 `Requirement` 当前也是可直达的能力/深链，不等于顶层产品主对象
+
 ## 三条主交互线
 
 ### ChatSession
@@ -118,6 +130,11 @@
 - 附件上传/下载
 - workspace / project / attachment 文件搜索
 - proposal / initiative 展示与审批操作
+
+补充理解：
+
+- `Proposal / Initiative` 在当前前端中属于公开可访问的高级协作能力
+- 但它们不应被理解成与 `WorkItem / Thread / Project / Chat` 同级的默认首页主对象
 
 ### WorkItem
 
@@ -161,6 +178,11 @@
 - Skills：技能 CRUD 与 GitHub import
 - Templates：DAG 模板管理与实例化
 - Sandbox：沙箱支持配置
+
+这意味着：
+
+- `Profile` 当前是公开配置对象
+- 但它归属于 Runtime/Agents 控制面，而不是一级业务对象
 
 ## 当前 REST 契约事实
 

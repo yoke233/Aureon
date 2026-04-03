@@ -5,6 +5,11 @@
 > 最后按代码核对：2026-03-29
 >
 > 当前实现状态：本文描述的是当前已落地的 briefing 组装主链。对外 Public REST 已使用 `/work-items/*`；应用层主执行器已是 `WorkItemEngine`，核心对象也已切到 `WorkItem` / `Action` / `Run`，但持久化表名与部分兼容 helper 仍保留 `issues` / `steps` / `executions` 旧命名。
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文只描述
+> `WorkItem -> Action -> Run -> Deliverable` 执行链上的上下文构建，
+> 不单独定义公开语义层级。
 
 ## 概述
 

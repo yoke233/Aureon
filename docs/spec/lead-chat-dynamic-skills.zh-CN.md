@@ -5,6 +5,10 @@
 > 最后按代码核对：2026-03-14
 >
 > 重要说明：当前仓库已经有通用 skill 系统，但并未落地本文这套 `sys-*` Lead 动态技能体系。
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`。本文是 `Chat`/Lead 能力侧的未来草案，
+> 不代表新的现行一级产品对象。
 
 ## 当前已实现范围
 
@@ -475,4 +479,3 @@ skills = ["sys-workitem-manage", "sys-action-manage", "sys-progress-monitor", "s
 5. **错误反馈** — 脚本失败时如何让 Agent 理解原因并提供有用的回复
 6. **Skill 版本管理** — 系统 skills 随代码发布还是独立管理？
 7. **方案 B 的 `load_skill` 动作** — 是否需要扩展 ACP 协议？还是通过现有 terminal action 调用
-

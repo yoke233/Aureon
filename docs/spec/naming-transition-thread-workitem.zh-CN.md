@@ -4,11 +4,22 @@
 >
 > 状态：现行
 >
-> 最后按代码核对：2026-03-29
+> 最后按代码核对：2026-04-03
 >
 > 当前实现状态：本文中的命名治理规则已基本生效。前端主入口与后端 Public REST 已经切到 `workitem/action/run` 主命名；旧 `/issues/*`、`/flows/*` 已退出当前工作台；剩余兼容层主要存在于持久化表名（`issues` / `steps` / `executions`）和少量历史 helper / request struct。
 >
 > 重要说明：本文现在更适合作为“现行收口规则 + 剩余兼容层说明”阅读，而不是“未来迁移计划”。
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`；本文只处理命名收口规则，
+> 不单独定义一级/二级公开业务语义。
+
+## 与 canonical map 的关系
+
+- `WorkItem`、`Thread`、`Chat`、`Deliverable` 的公开分层以 canonical map 为准
+- 本文只约束 `WorkItem / Action / Run / Flow / ChatSession / Thread` 的命名边界
+- `Thread` 与 `Chat` 在这里会被提及，但不代表本文在重新定义顶层产品对象清单
+- `Deliverable` 是当前 public canonical 结果对象名；`Artifact` 仍可作为内部实现或兼容命名存在
 
 ## 决策摘要
 
@@ -61,8 +72,8 @@
 | `Issue` | `WorkItem` | Work Item | 对外统一用 WorkItem；`Issue` 只剩持久化/历史残留 |
 | `Step` | `Action` | Action | 对外统一用 Action；`Step` 只剩持久化/历史残留 |
 | `Execution` | `Run` | Run | 对外统一用 Run；`Execution` 只剩持久化/历史残留 |
-| `Artifact` | `Artifact` | Deliverable / Artifact | UI 文案可逐步转 Deliverable；API/模型短期不强制改名 |
-| `ChatSession` | `ChatSession` | Chat | **不映射为 Thread**；保持 1:1 direct chat 概念 |
+| `Artifact` | `Artifact` | Deliverable / Artifact | public canonical 结果对象名以 `Deliverable` 为准；API/模型短期不强制改名 |
+| `ChatSession` | `ChatSession` | Chat | `Chat` 是当前对外主词；`ChatSession` 不映射为 `Thread`，继续保留 1:1 direct chat 实现语义 |
 | `Thread`（新增） | `Thread` | Thread | 独立领域实体，多 AI + 多 human 共享讨论 |
 
 ## ChatSession 保持 direct chat 概念，不映射为 Thread
@@ -71,6 +82,11 @@
 
 - `ChatSession`：1 AI + 1 human 的 direct chat，保留现有 `/chat` API 与 `chat.send` WebSocket 协议
 - `Thread`：多 AI + 多 human 的共享讨论容器，新增 `/threads` API 与 `thread.send` WebSocket 协议
+
+对应 canonical map 的公开主词应理解为：
+
+- `Chat`：公开业务入口
+- `ChatSession`：当前 direct chat 的实现对象/协议对象
 
 两者不共享主键、时间线或 runtime session。
 

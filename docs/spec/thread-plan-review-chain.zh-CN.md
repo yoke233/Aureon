@@ -2,9 +2,11 @@
 
 > 状态：现行
 >
-> 最后按代码核对：2026-03-21
+> 最后按代码核对：2026-04-03
 >
 > 适用范围：`Thread` / `Proposal` / `Initiative` / `WorkItem` / `Gate`
+>
+> Public surface / canonical 语义分层以 `semantic-surface-canonical-map.zh-CN.md` 为准；本文只说明当前 thread 讨论后的审批链如何工作。
 
 ## 1. 结论
 
@@ -18,6 +20,12 @@
 
 - `thread` 会议结束后不会自动完成审核。
 - 当前实现是先把会议结果沉淀为 `proposal`，再通过显式 API 进入审批链。
+
+补充边界：
+
+- `Proposal / Initiative` 当前已经是公开 workflow capability
+- 但它们在 canonical 分层上不属于默认一级产品主叙事
+- 也就是：能公开访问，不等于必须成为首页或顶层导航主词
 
 ## 2. 当前主链
 
@@ -122,6 +130,12 @@
 - 有。
 - 但审核不在 thread meeting 内自动完成。
 - 审核主要落在 `proposal` 和 `initiative` 两层。
+
+如果进一步问“它们是不是一级产品对象”，当前答案是：
+
+- 不是默认一级产品对象
+- 但它们是现行公开审批能力的一部分
+- 两个判断不冲突
 
 ## 7. 已移除的旧 ThreadTask DAG 链路
 

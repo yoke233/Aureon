@@ -1,7 +1,11 @@
 # AI Company Domain Model（最小落地版）
 
 > 状态：草案
-> 最后按代码核对：2026-03-29
+> 最后按代码核对：2026-04-03
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`。本文是未来演进草案；
+> 若与现行 public surface 叙述冲突，以 canonical map 与现行规格为准。
 
 > 目标：从当前仓库已经稳定运行的 `project / work item / action / run / deliverable / chat session / thread` 主线出发，逐步扩展为可覆盖产品、运营、财务、剪辑、销售、管理等场景的通用 AI Company 系统。
 
@@ -10,6 +14,12 @@
 - 本文主要是领域建模与演进方向讨论，不是现行 API 契约文档。
 - 当前代码已经有一部分 Thread 能力和 Thread <-> WorkItem 关联能力，但远未达到本文后半段定义的完整四层模型。
 - 当前前后端对外主入口都已经使用 `/work-items`；但持久化表名与部分兼容代码仍保留 `issues` 旧命名，不要把文中的通用 `work_items` 主表/API 设计直接等同于现状。
+
+## 与 canonical map 的关系
+
+- 当前默认公开主叙事仍以 `WorkItem / Thread / Deliverable / Project / Chat` 为准
+- 本文里出现的扩展对象和未来分层，只代表演进讨论，不代表已经升格为现行一级公开业务语义
+- `Proposal / Initiative` 即使在未来链路里承担重要角色，当前也仍按 `public capability, not primary narrative` 理解
 
 ## 当前实现对照
 
@@ -22,7 +32,7 @@
 
 在谈通用模型之前，必须先承认当前仓库已经稳定的核心不是抽象的 `work_item`，而是下面这几条主线：
 
-### 1. Project 是组织容器，不是业务对象
+### 1. Project 在本文草案里更偏组织容器，而不是执行真相源
 
 当前 `Project` 的定位很清楚：
 
@@ -36,6 +46,8 @@
 - `general` 项目
 
 所以“通用 AI Company”并不是从零开始，当前主线已经有一个跨工程/非工程的组织容器。
+这只是本文草案对 `Project` 角色的建模视角，不改变 canonical map 中
+`Project` 作为一级公开业务语义的现状归类。
 
 ### 2. WorkItem 是当前最稳定的工作对象
 

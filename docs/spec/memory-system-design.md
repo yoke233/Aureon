@@ -2,6 +2,11 @@
 
 > 状态：部分实现
 > 更新时间：2026-03-13
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文描述的是
+> `WorkItem / Action / Thread` 执行期的 memory / briefing 能力演进，
+> 不单独定义新的公开业务对象。
 
 > 基于 `spec-context-memory.md` 的愿景，制定可落地的实现路径。
 > 核心原则：先补齐本地管道，再接外部服务；被动注入优先于主动查询。

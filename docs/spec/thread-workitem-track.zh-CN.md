@@ -18,6 +18,10 @@
 > - `thread-workitem-linking.zh-CN.md`
 > - `thread-summary-workitem-mvp.zh-CN.md`
 > - `thread-collaboration-to-dag-plan.zh-CN.md`
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`；本文中的 `WorkItemTrack`
+> 不属于现行公开主语义。
 
 ## 1. 目标
 

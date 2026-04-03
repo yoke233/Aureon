@@ -5,6 +5,10 @@
 > 最后按代码核对：2026-03-14
 >
 > 对应实现：`internal/platform/appcmd/mcp_serve.go`、`internal/adapters/http/step_signal.go`（文件名历史残留，语义已是 action signal）、`internal/application/flow/signal_e2e_test.go`
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文描述的是
+> `Action` 执行链上的人类介入 capability，不单独定义新的公开主对象。
 
 ## 当前实现状态
 

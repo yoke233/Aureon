@@ -5,6 +5,10 @@
 > 最后按代码核对：2026-03-14
 >
 > 当前实现状态：当前主链仍以 `BriefingSnapshot` 为 prompt 主体，但运行期临时技能注入已经部分落地。当前实际生成的是 `action-context` 技能目录；内部仍保留 `ACPExecutorConfig.StepContextBuilder` 这个历史字段名，后续可继续清理。
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文描述的是
+> `Action` 执行期的上下文加载增强能力，不单独定义新的公开主对象。
 
 ## 概述
 

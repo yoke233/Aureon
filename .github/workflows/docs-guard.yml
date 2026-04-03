@@ -1,0 +1,45 @@
+name: Docs Guard
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "README.zh-CN.md"
+      - "docs/spec/**"
+      - "scripts/test/docs-semantic-guard.ps1"
+      - "scripts/test/runner.ps1"
+      - "scripts/test/common.ps1"
+      - ".github/workflows/docs-guard.yml"
+      - ".github/pull_request_template.md"
+  push:
+    branches:
+      - main
+    paths:
+      - "README.md"
+      - "README.zh-CN.md"
+      - "docs/spec/**"
+      - "scripts/test/docs-semantic-guard.ps1"
+      - "scripts/test/runner.ps1"
+      - "scripts/test/common.ps1"
+      - ".github/workflows/docs-guard.yml"
+      - ".github/pull_request_template.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-guard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semantic-surface:
+    name: Semantic Surface Guard
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run spec canonical map guard
+        shell: pwsh
+        run: pwsh -NoProfile -File .\scripts\test\docs-semantic-guard.ps1

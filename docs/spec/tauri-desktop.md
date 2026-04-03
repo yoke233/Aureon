@@ -2,6 +2,10 @@
 
 > 状态：现行
 > 最后按代码核对：2026-03-29
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文描述的是桌面壳与运行时承载方式，
+> 不单独定义新的业务主对象。
 
 > 文件名沿用 `tauri-desktop.md` 仅为历史兼容；当前仓库实际桌面壳实现已经是 Wails，而不是 `src-tauri/*` 方案。
 

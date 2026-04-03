@@ -2,7 +2,7 @@
 
 > 状态：部分实现
 >
-> 最后按代码核对：2026-03-29
+> 最后按代码核对：2026-04-03
 >
 > 对应实现：
 > - `internal/runtime/agent/thread_session_pool.go`
@@ -12,6 +12,11 @@
 >
 > 补充边界说明：`thread.send` 当前仍属于 best-effort routing，
 > 不是可靠消息投递协议；可靠 delivery 不在本文范围内。
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文只描述
+> `Thread` 协作域与 `Runtime/Profile` 控制面的交界实现，
+> 不单独定义新的一级产品对象。
 
 ## 一句话结论
 
@@ -23,6 +28,13 @@ Thread agent runtime 已经是当前系统的现行能力：
 - Thread 与 ChatSession 共用底层 ACP 基础设施，但 session 彼此独立
 
 它当前处于“现行主线 + 少量边界未收口”的状态，因此标记为“部分实现”。
+
+## 与 canonical map 的关系
+
+- `Thread` 属于一级公开业务语义
+- `Runtime`、`Profile` 属于独立 Ops/Admin 轴
+- 本文描述的是两者交界处的 runtime capability
+- `ThreadMember`、`ThreadSessionPool`、agent session、状态机都属于实现/协议层对象，不构成新的默认产品主叙事
 
 ## 当前模型
 
@@ -221,6 +233,9 @@ paused  -> left
 - token usage 持久化与 context budget 检查
 
 也就是说，agent runtime 已经与消息模型和事件流整合，不是独立孤岛。
+
+这些端点与能力说明的是 `Thread` 下的高级协作/runtime capability，
+不意味着 `agent session` 或 `session pool` 被提升为独立公开主对象。
 
 ## 与 ChatSession 的关系
 

@@ -7,6 +7,10 @@
 > 上位规划：`thread-collaboration-to-dag-plan.zh-CN.md`
 >
 > 目标：在不引入新协作主模型的前提下，打通 `Thread -> Summary -> WorkItem` 最小闭环
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`；本文是 `Thread -> WorkItem`
+> 协作收敛的草案，不代表新的现行一级产品对象。
 
 ## 1. 目标
 

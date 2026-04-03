@@ -5,6 +5,9 @@
 > 最后按代码核对：2026-03-13
 >
 > 说明：当前系统主路径不是本文的 `complete_step` 单工具方案，而是 `StepSignal + step_complete / step_need_help / gate_approve / gate_reject` 组合；主工作对象对外路由也已切到 `/api/work-items/*`。
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`；本文仅保留为历史设计记录。
 
 ## 背景
 

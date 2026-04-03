@@ -122,6 +122,9 @@ pwsh -NoProfile -File .\scripts\dev\build-ai-flow.ps1
 
 ## 核心概念
 
+public surface / canonical 语义分层的唯一权威定义见
+`docs/spec/semantic-surface-canonical-map.zh-CN.md`。
+
 | 概念 | 说明 |
 |------|------|
 | **Work Item（工作项）** | 工作的基本单元，包含标题、优先级、标签和依赖关系。状态：`open` → `accepted` → `queued` → `running` → `done`。 |

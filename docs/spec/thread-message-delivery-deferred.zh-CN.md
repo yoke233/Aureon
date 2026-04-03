@@ -5,6 +5,10 @@
 > 创建日期：2026-03-14
 >
 > 关联规格：`thread-agent-runtime.zh-CN.md`
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文只记录
+> `Thread` 消息投递边界，不单独定义新的业务对象。
 
 ## 1. 结论
 

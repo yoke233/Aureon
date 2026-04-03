@@ -5,6 +5,10 @@
 > 最后按代码核对：2026-03-29
 >
 > 重要说明：当前主线实现不是本文描述的 OpenViking 集成方案，而是本地 Briefing + Step Context。本文应被视为 OpenViking 方向的设计草案。
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`；本文是 memory 体系草案，
+> 不代表新的现行公开业务对象。
 
 ## 与当前实现的关系
 

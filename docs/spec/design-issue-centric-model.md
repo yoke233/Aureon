@@ -3,6 +3,9 @@
 > 状态：历史
 > Updated: 2026-03-14
 > Current implementation status: this document preserves the design rationale from the `Issue` era. The current public surface has already moved to `/work-items`, and the core model has already moved to `WorkItem` / `Action` / `Run`; what still remains are persistence/table names such as `issues` / `steps` / `executions` and some backward-compatible helpers.
+>
+> Public surface / canonical semantic tiers are now defined by
+> `semantic-surface-canonical-map.zh-CN.md`; treat this file as historical rationale only.
 
 > Design rationale for the unified Issue model that replaces the former Flow + Issue pair.
 

@@ -9,6 +9,10 @@
 > 当前实现状态：本文保留原迁移设计与落地偏差，用于解释“当时计划如何迁移，以及后来代码实际如何继续演进”。当前 public surface 已比本文原始迁移目标更进一步：前端与后端对外主入口都已经切到 `/work-items`；现行命名治理请以 `README.md` 与 `naming-transition-thread-workitem.zh-CN.md` 为准。
 >
 > 重要说明：本文最初用于描述一次迁移目标。当前仓库只完成了其中一部分，不能把全文视为“全部已落地现状”。
+>
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`；当前 `Thread / WorkItem`
+> 关系能力请优先阅读 `thread-workitem-linking.zh-CN.md`。
 
 ## 变更总览
 

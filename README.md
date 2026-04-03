@@ -122,6 +122,9 @@ Profiles under `[runtime.agents.profiles]` define run personas — role, allowed
 
 ## Core Concepts
 
+Public surface / canonical 语义分层的唯一权威定义见
+`docs/spec/semantic-surface-canonical-map.zh-CN.md`。
+
 | Concept | Description |
 |---------|-------------|
 | **Work Item** | A unit of work with title, priority, labels, and dependencies. Lifecycle: `open` → `accepted` → `queued` → `running` → `done`. |

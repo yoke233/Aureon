@@ -9,6 +9,7 @@ param(
         "frontend-unit",
         "frontend-build",
         "frontend-lint",
+        "docs-semantic-guard",
         "frontend-ci",
         "suite-p3",
         "suite-smoke"
@@ -126,6 +127,65 @@ switch ($Task) {
             npm --prefix web run lint
         }
     }
+    "docs-semantic-guard" {
+        Write-Host "RepoRoot: $repoRoot"
+
+        Invoke-Step -Name "Spec canonical map guard" -Command {
+            $canonicalRelativePath = "docs/spec/semantic-surface-canonical-map.zh-CN.md"
+            $canonicalReferenceToken = "semantic-surface-canonical-map.zh-CN.md"
+            $canonicalAbsolutePath = Join-Path $repoRoot $canonicalRelativePath
+            $requiredReferenceFiles = @(
+                "README.md",
+                "README.zh-CN.md",
+                "docs/spec/README.md"
+            )
+
+            if (-not (Test-Path -LiteralPath $canonicalAbsolutePath)) {
+                throw "Canonical map file missing: $canonicalRelativePath"
+            }
+
+            $violations = New-Object System.Collections.Generic.List[string]
+
+            foreach ($relativePath in $requiredReferenceFiles) {
+                $absolutePath = Join-Path $repoRoot $relativePath
+                if (-not (Test-Path -LiteralPath $absolutePath)) {
+                    $violations.Add("Missing required reference file: $relativePath")
+                    continue
+                }
+
+                $content = Get-Content -LiteralPath $absolutePath -Raw
+                if ($content -notmatch [regex]::Escape($canonicalReferenceToken)) {
+                    $violations.Add("Missing canonical map reference in $relativePath")
+                }
+            }
+
+            $specFiles = Get-ChildItem -LiteralPath (Join-Path $repoRoot "docs/spec") -File -Filter *.md
+            foreach ($file in $specFiles) {
+                $normalizedRelativePath = $file.FullName.Substring($repoRoot.Length + 1) -replace "\\", "/"
+                if ($normalizedRelativePath -eq $canonicalRelativePath) {
+                    continue
+                }
+
+                $content = Get-Content -LiteralPath $file.FullName
+                $hasStatus = $content | Select-String -Pattern '^> 状态：' -Quiet
+                if (-not $hasStatus) {
+                    continue
+                }
+
+                $raw = [string]::Join([Environment]::NewLine, $content)
+                if ($raw -notmatch [regex]::Escape($canonicalReferenceToken)) {
+                    $violations.Add("Missing canonical map reference in status-tagged spec: $normalizedRelativePath")
+                }
+            }
+
+            if ($violations.Count -gt 0) {
+                $violations | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+                throw "Spec canonical map guard failed."
+            }
+
+            Write-Host "Spec canonical map guard passed."
+        }
+    }
     "frontend-ci" {
         Write-Host "RepoRoot: $repoRoot"
 
@@ -195,6 +255,10 @@ switch ($Task) {
 
                 Write-Host "Terminology gate passed."
             }
+        }
+
+        Invoke-Step -Name "Spec canonical map guard" -Command {
+            Invoke-RunnerTask -Name "docs-semantic-guard"
         }
 
         Invoke-Step -Name "Test naming gate" -Command {

@@ -22,6 +22,7 @@ The thin wrapper scripts now delegate to `runner.ps1`, which centralizes the sha
 - `backend-e2e.ps1`: run backend `TestE2E_*` suites.
 - `backend-real.ps1`: run backend `TestReal_*` suites with `-tags real`.
 - `frontend-lint.ps1`: run frontend ESLint checks.
+- `docs-semantic-guard.ps1`: verify that README/spec docs point to the canonical semantic surface map.
 - `frontend-unit.ps1`: run frontend unit tests.
 - `frontend-build.ps1`: run frontend production build.
 - `frontend-ci.ps1`: run the recommended frontend baseline in local Windows environments (`lint -> unit -> build`), with optional `-WithE2E`.
@@ -37,6 +38,7 @@ The thin wrapper scripts now delegate to `runner.ps1`, which centralizes the sha
 ## Suite Scripts
 
 - `suite-smoke.ps1`: terminology gate, test naming gate, and backend build smoke.
+- `suite-smoke.ps1` now also includes the spec canonical-map guard.
 - `suite-p3.ps1`: backend unit/integration/e2e + frontend unit/build + smoke baseline.
 - `workitem-e2e-github.ps1`: full WorkItem E2E smoke against a local GitHub repo (server → project → work item → exec+gate actions → ACP agent → done).
 - `workitem-e2e-codeup.ps1`: full WorkItem E2E smoke against a Codeup repo (auto-clones if needed, same flow as above).
@@ -52,6 +54,7 @@ pwsh -NoProfile -File .\scripts\test\backend-unit.ps1
 pwsh -NoProfile -File .\scripts\test\backend-integration.ps1
 pwsh -NoProfile -File .\scripts\test\backend-e2e.ps1
 pwsh -NoProfile -File .\scripts\test\backend-real.ps1
+pwsh -NoProfile -File .\scripts\test\docs-semantic-guard.ps1
 ```
 
 Run backend integration with ACP client cases enabled:

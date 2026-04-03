@@ -7,6 +7,10 @@
 > 对应实现：`internal/application/flow/gate.go`、`internal/application/flow/gate_merge.go`
 >
 > 关联文档：[gate-human-intervention.zh-CN.md](gate-human-intervention.zh-CN.md)（信号模型、评估链）
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文描述的是
+> gate 执行链上的失败处理机制，不单独定义新的公开主对象。
 
 ## 概述
 

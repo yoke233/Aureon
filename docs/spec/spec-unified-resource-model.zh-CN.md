@@ -2,7 +2,7 @@
 
 > 状态：部分实现
 >
-> 最后按代码核对：2026-03-17
+> 最后按代码核对：2026-04-03
 >
 > 对应实现：
 > - `internal/core/unified_resource.go`
@@ -10,6 +10,10 @@
 > - `internal/adapters/store/sqlite/unified_resource_migration.go`
 > - `internal/adapters/http/action_resource.go`
 > - `internal/adapters/http/handler.go`
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文描述的是底层资源能力模型，
+> 不单独定义一级公开业务语义。
 
 ## 一句话结论
 
@@ -24,6 +28,13 @@
 - HTTP API 与前端类型
 
 但它仍是“部分实现”，因为旧模型仍在仓库中共存，且并非所有旧接口都已彻底删除。
+
+## 与 canonical map 的关系
+
+- `Project`、`WorkItem`、`Thread`、`Deliverable` 属于对外业务语义
+- `ResourceSpace`、`Resource`、`ActionIODecl` 属于支撑这些业务对象的底层资源 capability
+- 资源端点已经公开存在，但这不意味着它们应进入根 README Core Concepts 或全局顶层导航
+- `Resource` 可承载 WorkItem 文件、消息附件、Run 产出等事实，但不替代 `Deliverable` 这类业务主词
 
 ## 当前为什么需要这套模型
 
@@ -214,6 +225,7 @@ Action
 ```
 
 这条主线已经真实存在于代码中。
+它说明资源模型横跨多个主对象，但资源模型本身不是新的业务主轴。
 
 ## 与旧模型的关系
 

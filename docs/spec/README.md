@@ -1,5 +1,7 @@
 # docs/spec 状态索引
 
+> 状态：现行
+>
 > 最后按代码核对：2026-04-03
 
 本目录同时包含 4 类文档：
@@ -11,6 +13,7 @@
 
 ## 当前代码基线
 
+- 语义/public surface 的唯一权威定义见 `semantic-surface-canonical-map.zh-CN.md`
 - 当前系统已经形成稳定的多入口运行体与控制面：`ai-flow server`、`executor`、`quality-gate`、`mcp-serve`、`orchestrate`、`runtime`、`profile`、`version`
 - 后端真实分层以 `internal/core`、`internal/application`、`internal/adapters`、`internal/platform`、`internal/runtime`、`internal/threadctx` 为主；`internal/audit`、`internal/usecase` 为辅助包
 - 主工作对象的对外 Public REST 已切到 `/api/work-items/*`
@@ -96,4 +99,4 @@
 
 - 文档顶部必须写明 `状态` 与 `最后按代码核对`
 - 任何“未来方案”都不能写成当前时态
-- 当 public surface 已经变化时，优先更新 `README` 中的基线说明，再回补各专题文档
+- 当 public surface 已经变化时，先更新 `semantic-surface-canonical-map.zh-CN.md`，再回补 `README`、本索引页与专题文档引用

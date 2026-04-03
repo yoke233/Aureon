@@ -6,6 +6,10 @@
 >
 > 适用范围：`Thread` / `WorkItem` / `DAG` / `ThreadAgentSession`
 >
+> Public surface / canonical 语义分层的唯一权威定义见
+> `semantic-surface-canonical-map.zh-CN.md`；本文是未来协作规划，
+> 不代表新的现行公开主对象清单。
+>
 > 相关现状：
 > - `Thread` 已独立建模并拥有 REST / WebSocket 协议
 > - `ThreadAgentSession` 已支持多 agent 加入同一 Thread

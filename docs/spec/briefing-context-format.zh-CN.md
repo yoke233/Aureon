@@ -5,6 +5,10 @@
 > 最后按代码核对：2026-03-13
 >
 > 对应实现：`internal/application/flow/briefing_builder.go`、`internal/application/flow/pipeline.go`
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文只描述
+> `Action` briefing 的格式契约，不单独定义公开业务语义。
 
 ## 1. 概述
 

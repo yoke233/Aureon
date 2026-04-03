@@ -5,6 +5,10 @@
 > 日期：2026-03-14
 >
 > 关联问题：event_log / action_signals / usage_records / 磁盘审计文件 四源分散，审计和统计需跨表 JOIN
+>
+> Public surface / canonical 语义分层以
+> `semantic-surface-canonical-map.zh-CN.md` 为准；本文讨论的是
+> `Monitoring / Runtime` 相关的底层审计与统计汇总设计，不单独定义新的业务主对象。
 
 ## 1. 问题
 

@@ -22,7 +22,7 @@ The thin wrapper scripts now delegate to `runner.ps1`, which centralizes the sha
 - `backend-e2e.ps1`: run backend `TestE2E_*` suites.
 - `backend-real.ps1`: run backend `TestReal_*` suites with `-tags real`.
 - `frontend-lint.ps1`: run frontend ESLint checks.
-- `docs-semantic-guard.ps1`: verify that README/spec docs point to the canonical semantic surface map.
+- `docs-semantic-guard.ps1`: verify that README/spec docs point to the canonical semantic surface map, and in CI can also check whether public surface code changes were synced back to the canonical docs.
 - `frontend-unit.ps1`: run frontend unit tests.
 - `frontend-build.ps1`: run frontend production build.
 - `frontend-ci.ps1`: run the recommended frontend baseline in local Windows environments (`lint -> unit -> build`), with optional `-WithE2E`.
@@ -55,6 +55,13 @@ pwsh -NoProfile -File .\scripts\test\backend-integration.ps1
 pwsh -NoProfile -File .\scripts\test\backend-e2e.ps1
 pwsh -NoProfile -File .\scripts\test\backend-real.ps1
 pwsh -NoProfile -File .\scripts\test\docs-semantic-guard.ps1
+```
+
+Run the semantic guard against an explicit changed-files manifest:
+
+```powershell
+pwsh -NoProfile -File .\scripts\test\docs-semantic-guard.ps1 `
+  -ChangedFilesPath .\changed-files.txt
 ```
 
 Run backend integration with ACP client cases enabled:

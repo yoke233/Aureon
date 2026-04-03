@@ -1,4 +1,14 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$ChangedFilesPath
+)
 
-& (Join-Path $PSScriptRoot "runner.ps1") -Task "docs-semantic-guard"
+$params = @{
+    Task = "docs-semantic-guard"
+}
+
+if ($ChangedFilesPath) {
+    $params.ChangedFilesPath = $ChangedFilesPath
+}
+
+& (Join-Path $PSScriptRoot "runner.ps1") @params

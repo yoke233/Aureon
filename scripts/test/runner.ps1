@@ -15,6 +15,7 @@ param(
         "suite-smoke"
     )]
     [string]$Task,
+    [string]$ChangedFilesPath,
     [switch]$IncludeACPClientIntegration,
     [switch]$WithE2E,
     [switch]$SkipTerminologyGate,
@@ -32,6 +33,7 @@ function Invoke-RunnerTask {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Name,
+        [string]$ChangedFilesPath,
         [switch]$IncludeACPClientIntegration,
         [switch]$WithE2E,
         [switch]$SkipTerminologyGate,
@@ -40,6 +42,9 @@ function Invoke-RunnerTask {
 
     $params = @{
         Task = $Name
+    }
+    if ($ChangedFilesPath) {
+        $params.ChangedFilesPath = $ChangedFilesPath
     }
     if ($IncludeACPClientIntegration) {
         $params.IncludeACPClientIntegration = $true
@@ -134,6 +139,22 @@ switch ($Task) {
             $canonicalRelativePath = "docs/spec/semantic-surface-canonical-map.zh-CN.md"
             $canonicalReferenceToken = "semantic-surface-canonical-map.zh-CN.md"
             $canonicalAbsolutePath = Join-Path $repoRoot $canonicalRelativePath
+            $summaryReferenceFiles = @(
+                "README.md",
+                "README.zh-CN.md",
+                "docs/spec/README.md"
+            )
+            $publicSurfaceFiles = @(
+                "web/src/App.tsx",
+                "web/src/components/app-sidebar.tsx",
+                "web/src/pages/AgentsPage.tsx",
+                "cmd/ai-flow/root.go",
+                "internal/adapters/http/chat.go",
+                "internal/adapters/http/handler.go",
+                "internal/adapters/http/proposal.go",
+                "internal/adapters/http/initiative.go",
+                "internal/adapters/http/agents.go"
+            )
             $requiredReferenceFiles = @(
                 "README.md",
                 "README.zh-CN.md",
@@ -175,6 +196,51 @@ switch ($Task) {
                 $raw = [string]::Join([Environment]::NewLine, $content)
                 if ($raw -notmatch [regex]::Escape($canonicalReferenceToken)) {
                     $violations.Add("Missing canonical map reference in status-tagged spec: $normalizedRelativePath")
+                }
+            }
+
+            if ($ChangedFilesPath) {
+                $changedFilesAbsolutePath = if ([System.IO.Path]::IsPathRooted($ChangedFilesPath)) {
+                    $ChangedFilesPath
+                } else {
+                    Join-Path $repoRoot $ChangedFilesPath
+                }
+
+                if (-not (Test-Path -LiteralPath $changedFilesAbsolutePath)) {
+                    $violations.Add("Changed files manifest not found: $ChangedFilesPath")
+                } else {
+                    $changedFiles = Get-Content -LiteralPath $changedFilesAbsolutePath |
+                        ForEach-Object { ($_ -replace "\\", "/").Trim() } |
+                        Where-Object { $_ }
+
+                    $changedPublicSurfaceFiles = @(
+                        $changedFiles |
+                            Where-Object { $publicSurfaceFiles -contains $_ } |
+                            Sort-Object -Unique
+                    )
+
+                    if ($changedPublicSurfaceFiles.Count -gt 0) {
+                        $touchedCanonical = $changedFiles -contains $canonicalRelativePath
+                        if (-not $touchedCanonical) {
+                            $violations.Add(
+                                "Public surface files changed without updating canonical map: " +
+                                ($changedPublicSurfaceFiles -join ", ")
+                            )
+                        }
+
+                        $changedSummaryFiles = @(
+                            $changedFiles |
+                                Where-Object { $summaryReferenceFiles -contains $_ } |
+                                Sort-Object -Unique
+                        )
+
+                        if ($changedSummaryFiles.Count -eq 0) {
+                            $violations.Add(
+                                "Public surface files changed without updating summary docs (README / README.zh-CN / docs/spec/README.md): " +
+                                ($changedPublicSurfaceFiles -join ", ")
+                            )
+                        }
+                    }
                 }
             }
 
@@ -258,7 +324,7 @@ switch ($Task) {
         }
 
         Invoke-Step -Name "Spec canonical map guard" -Command {
-            Invoke-RunnerTask -Name "docs-semantic-guard"
+            Invoke-RunnerTask -Name "docs-semantic-guard" -ChangedFilesPath $ChangedFilesPath
         }
 
         Invoke-Step -Name "Test naming gate" -Command {

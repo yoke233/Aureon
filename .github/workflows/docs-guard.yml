@@ -6,6 +6,15 @@ on:
       - "README.md"
       - "README.zh-CN.md"
       - "docs/spec/**"
+      - "web/src/App.tsx"
+      - "web/src/components/app-sidebar.tsx"
+      - "web/src/pages/AgentsPage.tsx"
+      - "cmd/ai-flow/root.go"
+      - "internal/adapters/http/chat.go"
+      - "internal/adapters/http/handler.go"
+      - "internal/adapters/http/proposal.go"
+      - "internal/adapters/http/initiative.go"
+      - "internal/adapters/http/agents.go"
       - "scripts/test/docs-semantic-guard.ps1"
       - "scripts/test/runner.ps1"
       - "scripts/test/common.ps1"
@@ -18,6 +27,15 @@ on:
       - "README.md"
       - "README.zh-CN.md"
       - "docs/spec/**"
+      - "web/src/App.tsx"
+      - "web/src/components/app-sidebar.tsx"
+      - "web/src/pages/AgentsPage.tsx"
+      - "cmd/ai-flow/root.go"
+      - "internal/adapters/http/chat.go"
+      - "internal/adapters/http/handler.go"
+      - "internal/adapters/http/proposal.go"
+      - "internal/adapters/http/initiative.go"
+      - "internal/adapters/http/agents.go"
       - "scripts/test/docs-semantic-guard.ps1"
       - "scripts/test/runner.ps1"
       - "scripts/test/common.ps1"
@@ -39,7 +57,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect changed files
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            $baseRef = "origin/${{ github.base_ref }}"
+            git fetch --no-tags origin "${{ github.base_ref }}" --depth=1
+            git diff --name-only "$baseRef...HEAD" | Set-Content -Path changed-files.txt
+          } else {
+            $before = "${{ github.event.before }}"
+            if ($before -and $before -ne "0000000000000000000000000000000000000000") {
+              git diff --name-only "$before" "${{ github.sha }}" | Set-Content -Path changed-files.txt
+            } else {
+              git diff-tree --no-commit-id --name-only -r "${{ github.sha }}" | Set-Content -Path changed-files.txt
+            }
+          }
+          Get-Content -Path changed-files.txt
 
       - name: Run spec canonical map guard
         shell: pwsh
-        run: pwsh -NoProfile -File .\scripts\test\docs-semantic-guard.ps1
+        run: pwsh -NoProfile -File .\scripts\test\docs-semantic-guard.ps1 -ChangedFilesPath .\changed-files.txt
